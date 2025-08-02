@@ -1,0 +1,96 @@
+# Environment variables and secrets
+.env
+*.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/*.log
+logs/*.csv
+*.log
+
+# Bankroll and trading data
+bankroll.json
+trade_log.csv
+
+# Screenshots
+*.png
+*.jpg
+*.jpeg
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Browser automation
+robin_cookies_selenium.json
+temp_chrome_profile/
+chrome_profile/
+
+# Test files (but keep official test suite)
+test_browser*.py
+rob_login.py
+backtest_report_*.txt
+positions.csv
+
+# Chrome/Selenium
+chromedriver
+chromedriver.exe
+selenium-debug.log
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
