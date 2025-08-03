@@ -1,6 +1,63 @@
 """
-Slack notification utility for robinhood-ha-breakout.
-Sends real-time updates about trade decisions, market analysis, and system status.
+Slack Integration Module
+
+Provides comprehensive Slack notification capabilities for the Robinhood HA Breakout
+trading system. Enables real-time mobile alerts for trade signals, system status,
+and trading outcomes with rich formatting and emoji support.
+
+Key Features:
+- Real-time trade signal notifications
+- Rich message formatting with blocks and attachments
+- System status and heartbeat messages
+- Error and warning alerts
+- Trading outcome summaries
+- Mobile-friendly notifications
+
+Notification Types:
+- Trade Signals: Immediate alerts when LLM detects opportunities
+- System Status: Startup, shutdown, and health check messages
+- Heartbeat: Periodic "no trade" status during quiet periods
+- Trade Outcomes: Results after manual confirmation
+- Errors: System errors and recovery notifications
+- Portfolio Updates: P&L and bankroll changes
+
+Message Formatting:
+- Color-coded messages (green=profit, red=loss, blue=info)
+- Emoji indicators for quick visual recognition
+- Structured blocks for complex information
+- Fallback text for accessibility
+- Timestamp and context information
+
+Safety Features:
+- Graceful degradation if Slack is unavailable
+- Timeout protection for webhook calls
+- Error logging without system interruption
+- Optional notifications (system works without Slack)
+
+Configuration:
+- SLACK_WEBHOOK_URL: Incoming webhook for notifications
+- SLACK_BOT_TOKEN: Bot token for two-way communication (optional)
+- SLACK_CHANNEL_ID: Target channel for bot messages (optional)
+
+Usage:
+    # Initialize notifier
+    notifier = SlackNotifier(webhook_url=os.getenv('SLACK_WEBHOOK_URL'))
+    
+    # Send trade signal
+    notifier.send_trade_signal({
+        'decision': 'BUY_CALL',
+        'symbol': 'SPY',
+        'strike': 635.0,
+        'confidence': 0.85,
+        'reason': 'Strong bullish breakout pattern'
+    })
+    
+    # Send heartbeat during quiet periods
+    notifier.send_heartbeat('Market scanning - no signals detected')
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import os

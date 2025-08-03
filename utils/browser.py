@@ -1,5 +1,50 @@
 """
-Selenium browser automation utilities for Robinhood navigation.
+Robinhood Browser Automation Module
+
+Provides sophisticated browser automation for Robinhood options trading with anti-detection
+measures and robust error handling. This module handles all browser interactions including
+login, navigation, option selection, and trade setup.
+
+Key Features:
+- Undetected Chrome browser with stealth mode
+- Robust login with MFA support
+- Automatic cookie management and session persistence
+- ATM option finding and selection
+- Trade setup automation (stops at Review screen)
+- Idle session management and recovery
+- Comprehensive error handling and logging
+
+Safety Measures:
+- Never auto-submits trades
+- Always stops at Robinhood Review screen
+- Requires manual user confirmation
+- Session recovery for interrupted workflows
+- Extensive logging for debugging
+
+Anti-Detection Features:
+- Undetected ChromeDriver to bypass bot detection
+- Human-like typing patterns
+- Random delays and mouse movements
+- Stealth mode configuration
+- Session cookie reuse
+
+Usage:
+    # Context manager (recommended)
+    with RobinhoodBot() as bot:
+        bot.login(username, password)
+        bot.navigate_to_options('SPY')
+        option_data = bot.find_atm_option(current_price, 'CALL')
+        bot.click_option_and_buy(option_data, quantity=1)
+    
+    # Manual management
+    bot = RobinhoodBot(headless=False)
+    bot.start_browser()
+    # ... trading operations ...
+    bot.close()
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import time
@@ -28,10 +73,68 @@ logger = logging.getLogger(__name__)
 
 
 class RobinhoodBot:
-    """Automated browser bot for Robinhood options trading."""
+    """
+    Sophisticated browser automation bot for Robinhood options trading.
+    
+    This class provides comprehensive browser automation capabilities for interacting
+    with Robinhood's web interface. It handles login, navigation, option selection,
+    and trade setup while implementing anti-detection measures and robust error handling.
+    
+    Key Capabilities:
+    - Secure login with MFA support
+    - Session cookie management and persistence
+    - ATM option discovery and selection
+    - Trade setup automation (stops at Review screen)
+    - Idle session recovery and management
+    - Human-like interaction patterns
+    
+    Anti-Detection Features:
+    - Undetected ChromeDriver to bypass bot detection
+    - Stealth mode configuration
+    - Human-like typing with random delays
+    - Session cookie reuse to avoid repeated logins
+    - Random mouse movements and realistic timing
+    
+    Safety Guarantees:
+    - NEVER auto-submits trades
+    - Always stops at Robinhood Review screen
+    - Requires explicit manual confirmation
+    - Comprehensive logging for audit trails
+    - Graceful error handling and recovery
+    
+    Attributes:
+        driver (WebDriver): Selenium WebDriver instance
+        headless (bool): Whether to run browser in headless mode
+        implicit_wait (int): Default wait time for element discovery
+        page_load_timeout (int): Maximum time to wait for page loads
+        wait (WebDriverWait): Explicit wait instance for complex conditions
+        idle_since (datetime): Timestamp of last activity for idle management
+        last_symbol (str): Last traded symbol for session optimization
+    
+    Example:
+        >>> with RobinhoodBot(headless=False) as bot:
+        ...     bot.login('username', 'password')
+        ...     bot.navigate_to_options('SPY')
+        ...     option = bot.find_atm_option(635.0, 'CALL')
+        ...     bot.click_option_and_buy(option, quantity=1)
+        ...     # User manually reviews and confirms on Robinhood
+    """
     
     def __init__(self, headless: bool = False, implicit_wait: int = 10, 
                  page_load_timeout: int = 30):
+        """
+        Initialize the RobinhoodBot with browser configuration.
+        
+        Args:
+            headless (bool): Run browser in headless mode (default: False)
+                           Note: Headless mode may trigger bot detection
+            implicit_wait (int): Default wait time for elements (default: 10 seconds)
+            page_load_timeout (int): Max page load wait time (default: 30 seconds)
+        
+        Note:
+            Browser is not started until start_browser() is called or when
+            used as a context manager.
+        """
         self.driver = None
         self.headless = headless
         self.implicit_wait = implicit_wait

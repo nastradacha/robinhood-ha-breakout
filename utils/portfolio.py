@@ -1,11 +1,82 @@
 """
-Portfolio management utilities for tracking open positions and realized P/L.
+Portfolio Management Module
 
-This module handles:
-- Persistent position tracking in positions.csv
-- Open/close logic based on existing positions
-- Realized P/L calculation and logging
-- Position cleanup after trades close
+Provides comprehensive position tracking and P&L management for the Robinhood HA
+Breakout trading system. Handles open position monitoring, trade action determination,
+realized P&L calculations, and persistent position storage.
+
+Key Features:
+- Persistent position tracking with CSV storage
+- Automatic open/close trade action determination
+- Realized P&L calculation and logging
+- Position lifecycle management
+- Trade history and performance tracking
+- Cross-session position continuity
+
+Position Management:
+- Track open options positions with full details
+- Automatic position matching for closing trades
+- Entry and exit premium tracking
+- Contract quantity and strike price monitoring
+- Expiration date and side (CALL/PUT) tracking
+
+Trade Logic:
+- Determine if new trade opens or closes position
+- Match existing positions by symbol and side
+- Calculate realized P&L on position closure
+- Update position files automatically
+- Log completed trades with full details
+
+P&L Calculations:
+- Realized profit/loss on closed positions
+- Premium-based P&L calculations
+- Performance metrics and statistics
+- Win/loss ratio tracking
+- Average profit/loss analysis
+
+Persistence:
+- CSV file storage for position data
+- Automatic file creation and header management
+- Cross-session position continuity
+- Trade log integration
+- Backup and recovery capabilities
+
+Intraday Trading Support:
+- Same-day position opening and closing
+- Multiple positions per symbol support
+- Real-time position status updates
+- End-of-day position cleanup
+- Risk monitoring and alerts
+
+Usage:
+    # Initialize portfolio manager
+    portfolio = PortfolioManager(positions_file='positions.csv')
+    
+    # Determine trade action
+    action, existing_pos = portfolio.determine_trade_action('SPY', 'CALL')
+    
+    if action == 'OPEN':
+        # Opening new position
+        position = Position(
+            entry_time=datetime.now().isoformat(),
+            symbol='SPY',
+            expiry='2024-01-19',
+            strike=635.0,
+            side='CALL',
+            contracts=1,
+            entry_premium=2.50
+        )
+        portfolio.add_position(position)
+    
+    elif action == 'CLOSE':
+        # Closing existing position
+        realized_pnl = portfolio.calculate_realized_pnl(existing_pos, exit_premium=2.88)
+        portfolio.remove_position(existing_pos)
+        portfolio.log_realized_trade(existing_pos, 2.88, realized_pnl)
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import csv

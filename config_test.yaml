@@ -1,0 +1,42 @@
+# Test Configuration for Demo - More Aggressive Settings
+
+# Trading Parameters
+CONTRACT_QTY: 1
+LOOKBACK_BARS: 20
+MODEL: "gpt-4o-mini"
+
+# Bankroll Management
+START_CAPITAL: 500.0
+RISK_FRACTION: 0.20
+SIZE_RULE: "dynamic-qty"
+BANKROLL_FILE: "bankroll.json"
+POSITIONS_FILE: "positions.csv"
+
+# Market Data
+SYMBOL: "SPY"
+TIMEFRAME: "5m"
+DATA_SOURCE: "yfinance"
+
+# Browser Settings
+HEADLESS: false
+IMPLICIT_WAIT: 10
+PAGE_LOAD_TIMEOUT: 30
+
+# Risk Management - RELAXED FOR TESTING
+MAX_PREMIUM_PCT: 0.50
+MIN_CONFIDENCE: 0.01         # Very low threshold for testing
+IV_THRESHOLD: 5.0            # Very low threshold for testing
+MIN_CANDLE_BODY_PCT: 0.001   # Very low threshold for testing
+
+# Intraday Trading Settings
+PROFIT_TARGET_PCT: 0.15
+STOP_LOSS_PCT: 0.25
+EOD_CLOSE_TIME: "15:45"
+MONITOR_INTERVAL: 2
+MIN_PROFIT_THRESHOLD: 0.05
+
+# Logging
+LOG_LEVEL: "INFO"
+LOG_FILE: "logs/app.log"
+TRADE_LOG_FILE: "logs/trade_log.csv"
+MAX_LOG_SIZE_MB: 5

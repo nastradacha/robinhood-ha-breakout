@@ -1,5 +1,55 @@
 """
-LLM integration utilities for trade decision making and bankroll management.
+LLM Integration Module
+
+Provides sophisticated AI-powered trade decision making using Large Language Models.
+Supports both OpenAI (GPT-4o-mini) and DeepSeek APIs with function calling capabilities
+for structured trade analysis and bankroll management.
+
+Key Features:
+- Multi-provider LLM support (OpenAI GPT-4o-mini, DeepSeek)
+- Function calling for structured trade decisions
+- Robust error handling with exponential backoff retry
+- Conservative trade decision making with confidence scoring
+- Bankroll management suggestions based on P&L
+- Market analysis interpretation and pattern recognition
+
+Trade Decision Process:
+1. Analyze market data (Heikin-Ashi patterns, volume, momentum)
+2. Consider recent win/loss history for confidence calibration
+3. Apply conservative risk management principles
+4. Generate structured trade decision with reasoning
+5. Provide confidence score (0.0-1.0) for decision quality
+
+Supported Models:
+- gpt-4o-mini: OpenAI's efficient model for trading decisions
+- deepseek-chat: DeepSeek's competitive alternative
+- Automatic fallback between providers if one fails
+
+Safety Features:
+- Conservative bias: prefers NO_TRADE over risky positions
+- Confidence thresholds: requires high confidence for trades
+- Win/loss history integration: adjusts confidence based on recent performance
+- Comprehensive error handling and logging
+- Rate limiting and retry mechanisms
+
+Function Calling Schema:
+- make_trade_decision(): Returns BUY_CALL, BUY_PUT, or NO_TRADE
+- suggest_bankroll_update(): Recommends bankroll adjustments
+- suggest_similar_trade(): Identifies follow-up opportunities
+
+Usage:
+    # Initialize LLM client
+    llm = LLMClient(model='gpt-4o-mini')
+    
+    # Make trade decision
+    decision = llm.make_trade_decision(market_data, win_history)
+    if decision.decision != 'NO_TRADE' and decision.confidence > 0.7:
+        # Proceed with trade setup
+        pass
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import json

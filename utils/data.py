@@ -1,5 +1,48 @@
 """
-Data processing utilities for Heikin-Ashi candles and support/resistance analysis.
+Market Data Analysis Module
+
+Provides comprehensive market data processing and technical analysis capabilities
+for the Robinhood HA Breakout trading system. This module handles data fetching,
+Heikin-Ashi candle calculations, breakout pattern analysis, and LLM payload preparation.
+
+Key Features:
+- Market data fetching from Yahoo Finance
+- Heikin-Ashi candle calculations for trend smoothing
+- Support/resistance level identification
+- Breakout pattern analysis using multiple indicators
+- True Range calculations for volatility analysis
+- LLM payload preparation with token optimization
+
+Technical Indicators:
+- Heikin-Ashi candles for trend clarity
+- Support and resistance levels using pivot points
+- True Range for volatility measurement
+- Volume analysis for confirmation
+- Price momentum and trend direction
+
+Data Sources:
+- Primary: Yahoo Finance (yfinance)
+- Fallback: Alpaca Markets API (if configured)
+- Real-time: 5-minute intervals for intraday trading
+- Historical: 5-day lookback for pattern analysis
+
+Breakout Analysis:
+- Trend direction identification
+- Candle body percentage analysis
+- Volume confirmation signals
+- Support/resistance breakouts
+- Momentum strength calculation
+
+Usage:
+    # Fetch and analyze market data
+    data = fetch_market_data('SPY', period='5d', interval='5m')
+    ha_data = calculate_heikin_ashi(data)
+    analysis = analyze_breakout_pattern(ha_data, lookback=20)
+    llm_payload = prepare_llm_payload(analysis)
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import pandas as pd

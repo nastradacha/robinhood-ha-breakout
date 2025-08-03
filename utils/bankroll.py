@@ -1,5 +1,66 @@
 """
-Bankroll management utilities for tracking trading capital and risk management.
+Bankroll Management Module
+
+Provides comprehensive bankroll tracking and risk management capabilities for the
+Robinhood HA Breakout trading system. Handles capital allocation, position sizing,
+P&L tracking, and performance analytics with persistent storage.
+
+Key Features:
+- Persistent bankroll tracking with JSON storage
+- Risk-based position sizing (percentage of bankroll)
+- Win/loss ratio and performance analytics
+- Trade history and P&L calculations
+- Maximum drawdown protection
+- Conservative capital preservation
+
+Risk Management:
+- Risk fraction limits (default: 20% of bankroll per trade)
+- Maximum position size validation
+- Drawdown monitoring and alerts
+- Capital preservation during losing streaks
+- Performance-based confidence adjustments
+
+Tracking Capabilities:
+- Current bankroll and available capital
+- Total trades and win/loss ratios
+- Realized and unrealized P&L
+- Maximum drawdown from peak
+- Average win/loss amounts
+- Recent performance history
+
+Persistence:
+- JSON file storage for bankroll state
+- Automatic backup and recovery
+- Trade history logging
+- Performance metrics retention
+- Cross-session continuity
+
+Safety Features:
+- Conservative position sizing
+- Automatic risk reduction after losses
+- Capital preservation priority
+- Comprehensive validation and error handling
+- Audit trail for all transactions
+
+Usage:
+    # Initialize bankroll manager
+    bankroll = BankrollManager(start_capital=500.0)
+    
+    # Calculate position size
+    max_risk = bankroll.calculate_max_risk_amount(risk_fraction=0.20)
+    
+    # Record trade outcome
+    bankroll.record_trade(
+        symbol='SPY',
+        quantity=1,
+        entry_price=2.50,
+        exit_price=2.88,
+        trade_type='CALL'
+    )
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import json

@@ -2,8 +2,39 @@
 """
 Robinhood HA Breakout - Main Trading Script
 
-Automates SPY options trading based on Heikin-Ashi breakout patterns.
-NEVER auto-submits orders - always halts at Review screen for manual confirmation.
+A sophisticated automated trading system for SPY options using Heikin-Ashi breakout patterns.
+Designed for conservative intraday trading with manual confirmation and risk management.
+
+Key Features:
+- Automated market analysis using Heikin-Ashi candles
+- LLM-powered trade decision making (GPT-4o-mini or DeepSeek)
+- Browser automation for Robinhood options trading
+- Manual confirmation required - NEVER auto-submits orders
+- Slack notifications for mobile alerts
+- Comprehensive position and bankroll tracking
+- Conservative risk management (15% profit target, 25% stop loss)
+- Intraday focus (closes positions by 3:45 PM ET)
+
+Usage:
+    # One-shot mode (single analysis)
+    python main.py
+    
+    # Continuous loop mode (morning scanner)
+    python main.py --loop --interval 5 --end-at 11:00
+    
+    # Position monitoring mode
+    python main.py --monitor-positions --interval 2 --end-at 15:45
+
+Safety:
+- All trades require manual review and confirmation
+- System stops at Robinhood Review screen
+- User must manually click Submit or Cancel
+- Interactive prompts record actual fill prices
+- No automated order execution whatsoever
+
+Author: Robinhood HA Breakout System
+Version: 2.0.0
+License: MIT
 """
 
 import argparse
@@ -37,7 +68,22 @@ load_dotenv()
 
 # Configure logging
 def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log"):
-    """Setup logging configuration."""
+    """
+    Setup comprehensive logging configuration for the trading system.
+    
+    Creates both file and console logging handlers with detailed formatting.
+    Automatically creates the logs directory if it doesn't exist.
+    
+    Args:
+        log_level (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_file (str): Path to the log file (default: "logs/app.log")
+    
+    Returns:
+        None
+    
+    Note:
+        All trading activities, errors, and system events are logged for audit trails.
+    """
     Path(log_file).parent.mkdir(exist_ok=True)
     
     logging.basicConfig(
@@ -50,7 +96,29 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log"):
     )
 
 def load_config(config_path: str = "config.yaml") -> Dict:
-    """Load configuration from YAML file."""
+    """
+    Load and validate trading system configuration from YAML file.
+    
+    Loads all trading parameters including bankroll management, risk settings,
+    market data sources, browser options, and intraday trading parameters.
+    
+    Args:
+        config_path (str): Path to the YAML configuration file (default: "config.yaml")
+    
+    Returns:
+        Dict: Configuration dictionary containing all trading parameters
+    
+    Raises:
+        SystemExit: If configuration file cannot be loaded or is invalid
+    
+    Configuration Sections:
+        - Trading Parameters: CONTRACT_QTY, LOOKBACK_BARS, MODEL
+        - Bankroll Management: START_CAPITAL, RISK_FRACTION, SIZE_RULE
+        - Market Data: SYMBOL, TIMEFRAME, DATA_SOURCE
+        - Browser Settings: HEADLESS, IMPLICIT_WAIT, PAGE_LOAD_TIMEOUT
+        - Risk Management: MAX_PREMIUM_PCT, MIN_CONFIDENCE, IV_THRESHOLD
+        - Intraday Trading: PROFIT_TARGET_PCT, STOP_LOSS_PCT, EOD_CLOSE_TIME
+    """
     try:
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -60,7 +128,34 @@ def load_config(config_path: str = "config.yaml") -> Dict:
         sys.exit(1)
 
 def validate_environment() -> Dict[str, str]:
-    """Validate required environment variables."""
+    """
+    Validate all required environment variables for secure trading operations.
+    
+    Checks for essential credentials and API keys needed for the trading system:
+    - Robinhood login credentials (RH_USER, RH_PASS)
+    - At least one LLM API key (OPENAI_API_KEY or DEEPSEEK_API_KEY)
+    - Optional: Slack webhook URL and Alpaca API keys
+    
+    Returns:
+        Dict[str, str]: Dictionary of validated environment variables
+    
+    Raises:
+        SystemExit: If any required environment variables are missing
+    
+    Security Note:
+        Never log or print actual credential values. Only validate presence.
+        All credentials should be stored in .env file and never committed to git.
+    
+    Required Variables:
+        - RH_USER: Robinhood username/email
+        - RH_PASS: Robinhood password
+        - OPENAI_API_KEY or DEEPSEEK_API_KEY: LLM API access
+    
+    Optional Variables:
+        - SLACK_WEBHOOK_URL: For trade notifications
+        - SLACK_BOT_TOKEN: For two-way Slack communication
+        - ALPACA_API_KEY: Alternative market data source
+    """
     required_vars = {
         'RH_USER': os.getenv('RH_USER'),
         'RH_PASS': os.getenv('RH_PASS')
@@ -151,7 +246,51 @@ def parse_end_time(end_time_str: str) -> Optional[datetime]:
 
 def run_once(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_manager, 
              llm_client, slack_notifier, bot=None) -> Dict:
-    """Execute one trading cycle. Returns trade result data."""
+    """
+    Execute one complete trading cycle from market analysis to trade execution.
+    
+    This is the core trading function that performs the complete workflow:
+    1. Fetch current market data for SPY
+    2. Calculate Heikin-Ashi candles for trend analysis
+    3. Analyze breakout patterns using technical indicators
+    4. Get LLM trade decision based on market conditions
+    5. If trade signal detected, initiate browser automation
+    6. Navigate to Robinhood and find ATM options
+    7. Stop at Review screen for manual confirmation
+    8. Record trade outcome and update tracking
+    
+    Args:
+        config (Dict): Trading configuration parameters
+        args: Command line arguments
+        env_vars (Dict): Environment variables (credentials)
+        bankroll_manager: Bankroll management instance
+        portfolio_manager: Portfolio tracking instance
+        llm_client: LLM client for trade decisions
+        slack_notifier: Slack notification instance
+        bot (RobinhoodBot, optional): Existing browser instance to reuse
+    
+    Returns:
+        Dict: Trade result data containing:
+            - decision: Trade decision (BUY_CALL, BUY_PUT, NO_TRADE)
+            - confidence: LLM confidence score (0.0-1.0)
+            - reason: Explanation for the decision
+            - current_price: Current SPY price
+            - strike: Selected option strike (if applicable)
+            - premium: Option premium (if applicable)
+            - status: Execution status (SUBMITTED, CANCELLED, NO_TRADE)
+    
+    Safety:
+        - Never auto-submits trades
+        - Always stops at Robinhood Review screen
+        - Requires manual user confirmation
+        - Records actual fill prices from user input
+    
+    Risk Management:
+        - Validates bankroll before trading
+        - Checks position limits
+        - Applies risk fraction limits
+        - Logs all activities for audit
+    """
     logger = logging.getLogger(__name__)
     
     # Get current bankroll
