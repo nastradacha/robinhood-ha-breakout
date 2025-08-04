@@ -384,7 +384,7 @@ def main_loop(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_ma
                 if decision.decision == "NO_TRADE":
                     # Send lightweight heartbeat to Slack
                     if slack_notifier:
-                        heartbeat_msg = f"⏳ {cycle_start.strftime('%H:%M')} · No breakout (body {analysis['candle_body_pct']:.2f}%)"
+                        heartbeat_msg = f"[{cycle_start.strftime('%H:%M')}] No breakout detected (candle body {analysis['candle_body_pct']:.2f}%)"
                         slack_notifier.send_heartbeat(heartbeat_msg)
                     
                     # Log the no-trade decision
