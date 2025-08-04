@@ -35,6 +35,30 @@ EOD_CLOSE_TIME: "15:45"      # Close all positions by 3:45 PM ET
 MONITOR_INTERVAL: 2          # Check positions every 2 minutes
 MIN_PROFIT_THRESHOLD: 0.05   # Minimum 5% profit to consider selling
 
+# Advanced Exit Strategies (Priority 2)
+exit_strategies:
+  # Trailing Stop Configuration
+  trailing_stop_enabled: true
+  trailing_stop_activation_pct: 10.0    # Start trailing after 10% profit
+  trailing_stop_distance_pct: 5.0       # Trail 5% behind peak profit
+  
+  # Time-Based Exit Configuration
+  time_based_exit_enabled: true
+  market_close_time: "15:45"             # Close all positions by 3:45 PM ET
+  warning_minutes_before_close: 15      # Alert 15 minutes before close
+  
+  # Profit Target Laddering
+  profit_targets: [15.0, 25.0, 35.0]   # Alert at these profit levels (%)
+  
+  # Stop Loss Configuration
+  stop_loss_pct: 25.0                   # Traditional stop loss at 25% loss
+  
+  # Exit Strategy Priorities (order matters)
+  # 1. Trailing stop (dynamic profit protection)
+  # 2. Time-based exit (avoid overnight risk)
+  # 3. Traditional stop loss (capital protection)
+  # 4. Profit targets (informational alerts)
+
 
 
 

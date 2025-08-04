@@ -49,14 +49,19 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from typing import Dict, List, Tuple, Optional
+from datetime import datetime, timedelta
 import logging
-
+from .alpaca_client import AlpacaClient
 logger = logging.getLogger(__name__)
 
 
 def fetch_market_data(symbol: str = "SPY", period: str = "5d", interval: str = "5m") -> pd.DataFrame:
     """
-    Fetch market data using yfinance.
+    Fetch market data using Alpaca (real-time) with Yahoo Finance fallback.
+    
+    This addresses the critical data quality issue where Yahoo Finance's
+    15-20 minute delays caused missed trading opportunities. Now uses
+    professional-grade real-time data from Alpaca.
     
     Args:
         symbol: Stock symbol (default: SPY)
@@ -66,6 +71,27 @@ def fetch_market_data(symbol: str = "SPY", period: str = "5d", interval: str = "
     Returns:
         DataFrame with OHLCV data
     """
+    # Try Alpaca first (real-time data)
+    alpaca = AlpacaClient()
+    if alpaca.enabled:
+        try:
+            data = alpaca.get_market_data(symbol, period)
+            if data is not None and not data.empty:
+                # Ensure we have the required columns
+                required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+                if all(col in data.columns for col in required_cols):
+                    logger.info(f"[ALPACA] Fetched {len(data)} bars for {symbol} (real-time)")
+                    return data
+                else:
+                    logger.warning(f"[ALPACA] Missing required columns, falling back to Yahoo Finance")
+            else:
+                logger.warning(f"[ALPACA] No data returned for {symbol}, falling back to Yahoo Finance")
+        except Exception as e:
+            logger.warning(f"[ALPACA] Error fetching data for {symbol}: {e}, falling back to Yahoo Finance")
+    else:
+        logger.info(f"[ALPACA] Not configured, using Yahoo Finance for {symbol}")
+    
+    # Fallback to Yahoo Finance (delayed data)
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period, interval=interval)
@@ -78,11 +104,49 @@ def fetch_market_data(symbol: str = "SPY", period: str = "5d", interval: str = "
         if not all(col in data.columns for col in required_cols):
             raise ValueError(f"Missing required columns in data for {symbol}")
         
-        logger.info(f"Fetched {len(data)} bars for {symbol}")
+        logger.info(f"[YAHOO] Fetched {len(data)} bars for {symbol} (delayed)")
         return data
     
     except Exception as e:
-        logger.error(f"Error fetching data for {symbol}: {e}")
+        logger.error(f"Error fetching data for {symbol} from both sources: {e}")
+        raise
+
+
+def get_current_price(symbol: str = "SPY") -> float:
+    """
+    Get real-time current price using Alpaca with Yahoo Finance fallback.
+    
+    This provides the most current price for LLM analysis and decision making,
+    addressing the data quality issue that caused missed opportunities.
+    
+    Args:
+        symbol: Stock symbol (default: SPY)
+        
+    Returns:
+        Current stock price as float
+    """
+    # Try Alpaca first (real-time)
+    alpaca = AlpacaClient()
+    if alpaca.enabled:
+        current_price = alpaca.get_current_price(symbol)
+        if current_price:
+            logger.debug(f"[ALPACA] {symbol} current price: ${current_price:.2f} (real-time)")
+            return current_price
+        else:
+            logger.warning(f"[ALPACA] Could not get current price for {symbol}, falling back to Yahoo")
+    
+    # Fallback to Yahoo Finance (delayed)
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1d")
+        if not data.empty:
+            current_price = float(data['Close'].iloc[-1])
+            logger.debug(f"[YAHOO] {symbol} current price: ${current_price:.2f} (delayed)")
+            return current_price
+        else:
+            raise ValueError(f"No current price data for {symbol}")
+    except Exception as e:
+        logger.error(f"Error getting current price for {symbol}: {e}")
         raise
 
 
@@ -262,6 +326,18 @@ def analyze_breakout_pattern(df: pd.DataFrame, lookback: int = 20) -> Dict:
     else:
         trend_direction = "NEUTRAL"
     
+    # Calculate breakout strength (combination of body size, volume, and proximity to resistance)
+    volume_current = current_candle.get('Volume', 0)
+    volume_avg = recent_data['Volume'].tail(10).mean() if len(recent_data) >= 10 else volume_current
+    volume_ratio = (volume_current / volume_avg) if volume_avg > 0 else 1.0
+    
+    # Breakout strength: higher body %, higher volume ratio, closer to resistance = stronger
+    breakout_strength = (
+        (body_pct / 2.0) +  # Body percentage component (max ~2-3 points)
+        (volume_ratio * 2.0) +  # Volume component (can be 2-4+ points)
+        (5.0 - min(room_to_resistance, 5.0))  # Proximity to resistance (0-5 points)
+    )
+    
     analysis = {
         'current_price': round(current_price, 2),
         'candle_body_pct': round(body_pct, 3),
@@ -274,7 +350,9 @@ def analyze_breakout_pattern(df: pd.DataFrame, lookback: int = 20) -> Dict:
         'room_to_support_pct': round(room_to_support, 3),
         'support_levels': [round(s, 2) for s in sr_levels['support']],
         'resistance_levels': [round(r, 2) for r in sr_levels['resistance']],
-        'volume': int(current_candle.get('Volume', 0)),
+        'volume': int(volume_current),
+        'volume_ratio': round(volume_ratio, 2),
+        'breakout_strength': round(breakout_strength, 2),
         'timestamp': current_candle.name.isoformat() if hasattr(current_candle.name, 'isoformat') else str(current_candle.name)
     }
     

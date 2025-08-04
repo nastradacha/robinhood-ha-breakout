@@ -20,19 +20,28 @@ Each step has specific "workers" (software components) that handle different par
 
 ## 🏢 System Components (The "Departments")
 
-### 1. 📈 **Data Department** (`utils/data.py`)
-**What it does**: Collects and prepares market information
+### 1. 📈 **Data Department** (`utils/data.py` + `utils/alpaca_client.py`)
+**What it does**: Collects and prepares market information with professional-grade data quality
 
-**Think of it as**: Your research team that gathers all the facts
-- Downloads SPY stock price data from Yahoo Finance
+**Think of it as**: Your research team with access to Wall Street-quality data feeds
+- **Primary**: Real-time data from Alpaca Markets (professional-grade)
+- **Fallback**: Yahoo Finance data (15-20 minute delays)
 - Converts regular price charts to smoother "Heikin-Ashi" charts
 - Finds important price levels (support and resistance)
 - Packages everything into a neat report for the AI
 
 **Key Functions**:
-- `fetch_market_data()`: Downloads the latest stock prices
+- `fetch_market_data()`: Downloads real-time stock prices (Alpaca → Yahoo fallback)
+- `get_current_price()`: Gets real-time current price for analysis
 - `calculate_heikin_ashi()`: Makes charts easier to read
 - `analyze_breakout_pattern()`: Identifies trading opportunities
+
+**Alpaca Integration** (`utils/alpaca_client.py`):
+- `AlpacaClient()`: Professional market data client
+- `get_current_price()`: Real-time stock quotes
+- `get_market_data()`: Historical bars with minimal delay
+- `get_option_estimate()`: Enhanced option price estimation
+- `is_market_open()`: Real-time market status
 
 ### 2. 🧠 **AI Department** (`utils/llm.py`)
 **What it does**: Makes trading decisions using artificial intelligence
@@ -102,6 +111,58 @@ Each step has specific "workers" (software components) that handle different par
 - Decides whether new trades should open or close positions
 - Calculates profits and losses when you close trades
 
+### 7. 🎯 **Position Monitoring Department** (`monitor_alpaca.py`)
+**What it does**: Real-time position tracking with automated profit/loss alerts
+
+**Think of it as**: Your dedicated position watchdog with professional-grade data
+- **Real-time P&L tracking** using Alpaca professional market data
+- **Multi-level profit alerts** at 5%, 10%, 15%, 20%, 25%, 30% gains
+- **Stop-loss protection** alerts at 25% loss threshold
+- **End-of-day warnings** to close positions by 3:45 PM ET
+- **Mobile Slack notifications** for all alerts
+- **1-minute monitoring intervals** for maximum responsiveness
+
+**Key Functions**:
+- `EnhancedPositionMonitor()`: Main monitoring class with Alpaca integration
+- `get_current_price()`: Real-time stock price (Alpaca → Yahoo fallback)
+- `estimate_option_price()`: Professional option price estimation
+- `check_position_alerts()`: Multi-level profit/loss alert logic
+- `send_profit_alert()`: Mobile notifications for profit targets
+- `send_stop_loss_alert()`: Mobile notifications for stop losses
+- `send_end_of_day_warning()`: Risk management alerts
+
+**Usage**:
+```bash
+# Enhanced monitoring with real-time data
+python monitor_alpaca.py
+
+# Integrated monitoring mode
+python main.py --monitor-positions
+```
+
+### 8. 📈 **Analytics Department** (`trading_dashboard.py`, `trade_history.py`)
+**What it does**: Comprehensive trading performance analysis and reporting
+
+**Think of it as**: Your personal trading analyst and accountant
+- **Complete financial overview** (bankroll, P&L, win rate)
+- **Trade history analysis** with detailed statistics
+- **Risk metrics** and performance tracking
+- **Manual vs automated trade comparison**
+- **Tax reporting** and audit trail
+
+**Key Scripts**:
+- `trading_dashboard.py`: Comprehensive financial dashboard
+- `trade_history.py`: Detailed trade analysis and statistics
+
+**Usage**:
+```bash
+# View comprehensive trading dashboard
+python trading_dashboard.py
+
+# Analyze trade history and performance
+python trade_history.py
+```
+
 ---
 
 ## 🔄 How Everything Works Together
@@ -146,21 +207,27 @@ graph TD
 ```
 robinhood-ha-breakout/
 ├── 📋 main.py                    # The "CEO" - coordinates everything
+├── 🎯 monitor_alpaca.py          # Enhanced position monitoring with Alpaca
+├── 📊 trading_dashboard.py       # Comprehensive financial dashboard
+├── 📈 trade_history.py           # Trade analysis and statistics
+├── 🧪 test_alpaca.py            # Alpaca integration testing
 ├── ⚙️ config.yaml               # Settings and preferences
-├── 🔐 .env                      # Your passwords and API keys
+├── 🔐 .env                      # Your passwords and API keys (includes Alpaca keys)
 ├── 📊 trade_log.csv             # History of all trades
 ├── 💰 bankroll.json             # Your current money situation
+├── 📋 positions.csv             # Current open positions
 ├── 
 ├── utils/                       # The "departments"
-│   ├── 📈 data.py              # Data Department
+│   ├── 📈 data.py              # Data Department (with Alpaca integration)
+│   ├── 🔌 alpaca_client.py     # Alpaca API client for real-time data
 │   ├── 🧠 llm.py               # AI Department  
 │   ├── 💰 bankroll.py          # Finance Department
 │   ├── 🌐 browser.py           # Automation Department
-│   ├── 📱 slack.py             # Communications Department
+│   ├── 📱 slack.py             # Communications Department (enhanced alerts)
 │   └── 📊 portfolio.py         # Portfolio Department
 ├── 
 ├── tests/                       # Quality control
-├── logs/                        # System records
+├── logs/                        # System records and monitoring logs
 └── 📚 docs/                     # Documentation
 ```
 
@@ -191,10 +258,18 @@ robinhood-ha-breakout/
 
 ## 🔄 Data Flow (How Information Moves)
 
-### Market Data Pipeline
+### Enhanced Market Data Pipeline (with Alpaca)
 
 ```
-Yahoo Finance → Raw Price Data → Heikin-Ashi Conversion → Pattern Analysis → AI Input
+Alpaca (Real-time) → Professional Market Data → Heikin-Ashi Conversion → Pattern Analysis → AI Input
+        ↓ (fallback)
+Yahoo Finance (Delayed) → Backup Data Source
+```
+
+### Position Monitoring Pipeline
+
+```
+Alpaca Real-time Prices → Option Price Estimation → P&L Calculation → Alert Logic → Slack Notifications
 ```
 
 ### Decision Pipeline

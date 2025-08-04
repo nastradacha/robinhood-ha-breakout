@@ -55,7 +55,8 @@ from utils.data import (
     fetch_market_data, 
     calculate_heikin_ashi, 
     analyze_breakout_pattern,
-    prepare_llm_payload
+    prepare_llm_payload,
+    get_current_price
 )
 from utils.llm import LLMClient, TradeDecision
 from utils.bankroll import BankrollManager
@@ -90,10 +91,18 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log"):
         level=getattr(logging, log_level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_file),
+            logging.FileHandler(log_file, encoding='utf-8'),
             logging.StreamHandler(sys.stdout)
         ]
     )
+    
+    # Fix Windows console encoding issues
+    if sys.platform == 'win32':
+        try:
+            # Try to set console to UTF-8 mode
+            os.system('chcp 65001 > nul 2>&1')
+        except:
+            pass
 
 def load_config(config_path: str = "config.yaml") -> Dict:
     """
@@ -297,26 +306,48 @@ def run_once(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_man
     current_bankroll = bankroll_manager.get_current_bankroll()
     logger.info(f"[BANKROLL] Current bankroll: ${current_bankroll:.2f}")
     
-    # Step 1: Fetch market data
-    logger.info("[DATA] Fetching market data...")
+    # Step 1: Fetch market data with Alpaca primary, Yahoo fallback
+    logger.info("[DATA] Fetching market data with Alpaca real-time data...")
     market_data = fetch_market_data(
         symbol=config['SYMBOL'],
         period="5d",
         interval="5m"
     )
     
+    # Step 1.5: Get real-time current price for accurate analysis
+    logger.info("[PRICE] Fetching real-time current price...")
+    current_price = get_current_price(config['SYMBOL'])
+    if current_price:
+        logger.info(f"[ALPACA] Real-time price: ${current_price:.2f}")
+        # Update the most recent price in market data for accuracy
+        if not market_data.empty:
+            market_data.iloc[-1, market_data.columns.get_loc('Close')] = current_price
+            logger.debug("[DATA] Updated latest close price with real-time data")
+    else:
+        logger.warning("[DATA] Could not fetch real-time price, using historical data")
+        current_price = market_data['Close'].iloc[-1] if not market_data.empty else None
+    
     # Step 2: Calculate Heikin-Ashi candles
     logger.info("[CANDLES] Calculating Heikin-Ashi candles...")
     ha_data = calculate_heikin_ashi(market_data)
     
-    # Step 3: Analyze breakout patterns
+    # Step 3: Analyze breakout patterns with real-time price
     logger.info("[ANALYSIS] Analyzing breakout patterns...")
     analysis = analyze_breakout_pattern(ha_data, config['LOOKBACK_BARS'])
     
+    # Override analysis current_price with real-time data if available
+    if current_price:
+        analysis['current_price'] = current_price
+        analysis['data_source'] = 'alpaca_realtime'
+        logger.info(f"[ANALYSIS] Using real-time price ${current_price:.2f} for analysis")
+    
     # Step 4: Prepare LLM payload
     llm_payload = prepare_llm_payload(analysis)
+    
+    # Enhanced market logging with data source information
+    data_source = analysis.get('data_source', 'yahoo_historical')
     logger.info(f"[MARKET] Market analysis: {analysis['trend_direction']} trend, "
-               f"price ${analysis['current_price']}, "
+               f"price ${analysis['current_price']:.2f} ({data_source}), "
                f"body {analysis['candle_body_pct']:.2f}%")
     
     # Step 5: Get LLM decision
@@ -464,7 +495,7 @@ def main_loop(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_ma
                                                 trade_type=decision.decision,
                                                 strike=str(atm_option['strike']),
                                                 expiry="Today",  # Adjust as needed
-                                                position_size=position_size,
+                                                position_size=str(position_size),
                                                 action='OPEN',
                                                 confidence=decision.confidence,
                                                 reason=decision.reason or '',
@@ -658,6 +689,8 @@ def main():
                        help='Minutes between scans in loop mode (default: 5)')
     parser.add_argument('--end-at', type=str,
                        help='End time in HH:MM format (24-hour, local time)')
+    parser.add_argument('--monitor-positions', action='store_true',
+                       help='Monitor existing positions for profit/loss targets')
     
     args = parser.parse_args()
     
@@ -708,7 +741,12 @@ def main():
         initialize_trade_log(config['TRADE_LOG_FILE'])
         
         # Choose execution mode
-        if args.loop:
+        if args.monitor_positions:
+            # Run position monitoring mode
+            logger.info("[MODE] Running in position monitoring mode")
+            monitor_positions_mode(config, args, env_vars, bankroll_manager, portfolio_manager,
+                                 llm_client, slack_notifier, end_time)
+        elif args.loop:
             # Run in continuous loop mode
             logger.info("[MODE] Running in continuous loop mode")
             main_loop(config, args, env_vars, bankroll_manager, portfolio_manager,

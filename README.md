@@ -192,6 +192,60 @@ python main.py --loop --interval 5 --end-at 12:00 --slack-notify
 - Keeps the browser open between checks (more efficient)
 - Automatically restarts the browser if it's been idle for 4+ hours
 
+### 📊 Position Monitoring Mode (NEW!)
+
+**Automated real-time position tracking with profit/loss alerts:**
+
+```bash
+# Enhanced monitoring with Alpaca real-time data
+python monitor_alpaca.py
+
+# Integrated monitoring mode
+python main.py --monitor-positions
+
+# Custom monitoring intervals
+python main.py --monitor-positions --interval 1  # Every 1 minute
+```
+
+**What position monitoring does:**
+- ✅ **Real-time P&L tracking** using Alpaca professional market data
+- ✅ **Multi-level profit alerts** at 5%, 10%, 15%, 20%, 25%, 30% gains
+- ✅ **Stop-loss protection** alerts at 25% loss threshold
+- ✅ **End-of-day warnings** to close positions by 3:45 PM ET
+- ✅ **Mobile Slack notifications** for all alerts
+- ✅ **1-minute monitoring intervals** for maximum responsiveness
+- ✅ **Automatic fallback** to Yahoo Finance if Alpaca unavailable
+
+**Complete monitoring workflow:**
+
+1. **Start your trading session:**
+   ```bash
+   python main.py --loop --interval 5 --end-at 15:45 --slack-notify
+   ```
+
+2. **When you get a position, start monitoring:**
+   ```bash
+   python monitor_alpaca.py  # In a separate terminal
+   ```
+
+3. **Get mobile alerts for:**
+   - 🎯 **Profit targets hit** (5%, 10%, 15%, 20%+)
+   - 🛑 **Stop loss triggered** (25% loss protection)
+   - ⏰ **End-of-day warnings** (close by 3:45 PM ET)
+
+**Example monitoring output:**
+```
+[MONITOR] SPY $628.0 CALL: $1.83 (+28.9%)
+[ALERT] Profit target 25% hit for SPY $628.0 CALL
+[SLACK] Mobile notification sent
+```
+
+**Data quality advantage:**
+- Uses **Alpaca real-time data** (same quality as professional traders)
+- No more **15-20 minute delays** that cause missed opportunities
+- **Professional option price estimation** using current volatility
+- **Same data quality** that enabled your +28.9% manual profit
+
 ---
 
 ## 📱 Slack Notifications (Optional)

@@ -127,6 +127,142 @@ class SlackNotifier:
         
         return self._send_message(payload)
     
+    def send_profit_alert(self, symbol: str, strike: float, option_type: str, 
+                         pnl_pct: float, profit_level: int) -> bool:
+        """Send profit target alert for position monitoring.
+        
+        Args:
+            symbol: Stock symbol (e.g., 'SPY')
+            strike: Option strike price
+            option_type: 'CALL' or 'PUT'
+            pnl_pct: Current P&L percentage
+            profit_level: Profit level reached (5%, 10%, etc.)
+            
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.enabled:
+            return False
+        
+        payload = {
+            "attachments": [{
+                "color": "#36a64f",  # Green for profit
+                "title": f"[PROFIT] TARGET HIT! (+{profit_level}%)",
+                "text": f"Position: {symbol} ${strike} {option_type}",
+                "fields": [
+                    {
+                        "title": "P&L",
+                        "value": f"{pnl_pct:+.1f}%",
+                        "short": True
+                    },
+                    {
+                        "title": "Target",
+                        "value": f"{profit_level}%",
+                        "short": True
+                    },
+                    {
+                        "title": "Time",
+                        "value": datetime.now().strftime("%H:%M:%S ET"),
+                        "short": True
+                    },
+                    {
+                        "title": "Action",
+                        "value": "Consider taking profits!",
+                        "short": False
+                    }
+                ]
+            }]
+        }
+        
+        return self._send_message(payload)
+    
+    def send_stop_loss_alert(self, symbol: str, strike: float, option_type: str, 
+                           loss_pct: float) -> bool:
+        """Send stop loss alert for position monitoring.
+        
+        Args:
+            symbol: Stock symbol (e.g., 'SPY')
+            strike: Option strike price
+            option_type: 'CALL' or 'PUT'
+            loss_pct: Current loss percentage (positive number)
+            
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.enabled:
+            return False
+        
+        payload = {
+            "attachments": [{
+                "color": "#ff0000",  # Red for loss
+                "title": f"[STOP LOSS] TRIGGERED! (-{loss_pct:.1f}%)",
+                "text": f"Position: {symbol} ${strike} {option_type}",
+                "fields": [
+                    {
+                        "title": "Loss",
+                        "value": f"-{loss_pct:.1f}%",
+                        "short": True
+                    },
+                    {
+                        "title": "Threshold",
+                        "value": "25%",
+                        "short": True
+                    },
+                    {
+                        "title": "Time",
+                        "value": datetime.now().strftime("%H:%M:%S ET"),
+                        "short": True
+                    },
+                    {
+                        "title": "Action",
+                        "value": "CONSIDER CLOSING POSITION!",
+                        "short": False
+                    }
+                ]
+            }]
+        }
+        
+        return self._send_message(payload)
+    
+    def send_end_of_day_warning(self, minutes_to_close: int) -> bool:
+        """Send end-of-day warning to close positions.
+        
+        Args:
+            minutes_to_close: Minutes until market close
+            
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.enabled:
+            return False
+        
+        payload = {
+            "attachments": [{
+                "color": "#ff9500",  # Orange for warning
+                "title": "[EOD] END OF DAY WARNING!",
+                "text": f"Market closes in {minutes_to_close} minutes.",
+                "fields": [
+                    {
+                        "title": "Time to Close",
+                        "value": f"{minutes_to_close} minutes",
+                        "short": True
+                    },
+                    {
+                        "title": "Target Close Time",
+                        "value": "3:45 PM ET",
+                        "short": True
+                    },
+                    {
+                        "title": "Action",
+                        "value": "Consider closing all positions to avoid overnight risk!",
+                        "short": False
+                    }
+                ]
+            }]
+        }
+        
+        return self._send_message(payload)
+
     def send_startup_notification(self, dry_run: bool = False) -> bool:
         """Send notification when system starts."""
         mode = "DRY RUN" if dry_run else "LIVE TRADING"
