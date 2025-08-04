@@ -473,6 +473,43 @@ def main_loop(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_ma
                                             )
                                         
                                         logger.info(f"[SUCCESS] {decision.decision} order ready for review")
+                                        
+                                        # CRITICAL: Add trade confirmation workflow
+                                        from utils.trade_confirmation import TradeConfirmationManager
+                                        confirmer = TradeConfirmationManager(
+                                            portfolio_manager=portfolio_manager,
+                                            bankroll_manager=bankroll_manager,
+                                            slack_notifier=slack_notifier
+                                        )
+                                        
+                                        # Prepare trade details for confirmation
+                                        trade_details = {
+                                            'symbol': config['SYMBOL'],
+                                            'strike': atm_option['strike'],
+                                            'side': decision.decision.replace('BUY_', ''),
+                                            'quantity': quantity,
+                                            'estimated_premium': estimated_premium,
+                                            'direction': decision.decision,
+                                            'confidence': decision.confidence,
+                                            'reason': decision.reason or ''
+                                        }
+                                        
+                                        # Get user decision (Submit/Cancel)
+                                        logger.info(f"[CONFIRMATION] Waiting for user decision...")
+                                        user_decision, actual_premium = confirmer.get_user_decision(
+                                            trade_details=trade_details,
+                                            method='prompt'  # Use interactive prompt
+                                        )
+                                        
+                                        # Record the trade outcome
+                                        confirmer.record_trade_outcome(
+                                            trade_details=trade_details,
+                                            decision=user_decision,
+                                            actual_premium=actual_premium
+                                        )
+                                        
+                                        logger.info(f"[OUTCOME] Trade {user_decision}: {decision.decision} ${atm_option['strike']}")
+                                        
                                         bot_idle_since = cycle_start
                                     else:
                                         logger.error("[ERROR] Failed to prepare order")

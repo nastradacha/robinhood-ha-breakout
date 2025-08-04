@@ -151,7 +151,7 @@ class TradeConfirmationManager:
                     except ValueError:
                         print("Please enter a valid price (e.g., 1.25)")
                 
-                print(f"✅ Trade SUBMITTED at ${actual_premium:.2f}")
+                print(f"[OK] Trade SUBMITTED at ${actual_premium:.2f}")
                 return "SUBMITTED", actual_premium
                 
             elif decision in ['c', 'cancel', 'cancelled']:
@@ -233,11 +233,11 @@ class TradeConfirmationManager:
                 'status': 'SUBMITTED'
             })
             
-            logger.info(f"✅ Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
+            logger.info(f"[OK] Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
             
             # Send Slack confirmation
             if self.slack_notifier:
-                self.slack_notifier.send_heartbeat(f"✅ Trade Confirmed: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
+                self.slack_notifier.send_heartbeat(f"[OK] Trade Confirmed: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
         
         elif decision == "CANCELLED":
             # Record cancelled trade for statistics
@@ -306,7 +306,7 @@ class TradeConfirmationManager:
         # Send confirmation back to Slack
         if self.slack_notifier:
             if decision == "SUBMITTED":
-                confirm_msg = f"✅ Confirmed via Slack: {self.pending_trade.get('direction')} ${self.pending_trade.get('strike')} @ ${actual_premium:.2f}"
+                confirm_msg = f"[OK] Confirmed via Slack: {self.pending_trade.get('direction')} ${self.pending_trade.get('strike')} @ ${actual_premium:.2f}"
             else:
                 confirm_msg = f"❌ Confirmed via Slack: Trade cancelled"
             self.slack_notifier.send_heartbeat(confirm_msg)

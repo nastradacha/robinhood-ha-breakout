@@ -205,7 +205,7 @@ class RobinhoodBot:
                 self.driver.set_page_load_timeout(self.page_load_timeout)
                 self.wait = WebDriverWait(self.driver, 10)
                 
-                logger.info(f"✅ Chrome started successfully with {strategy['name']}")
+                logger.info(f"[OK] Chrome started successfully with {strategy['name']}")
                 break
                 
             except Exception as e:
@@ -606,7 +606,7 @@ class RobinhoodBot:
             logger.error(f"Could not re-locate ATM strike {best_strike} after scrolling")
             return None
         
-        logger.info(f"→ ATM strike chosen: ${best_strike} (Δ={best_diff:.2f})")
+        logger.info(f"[ATM] Strike chosen: ${best_strike} (Delta={best_diff:.2f})")
 
         # Build a robust selector list so the buy-click flow works
         row_id = best_row.get_attribute("data-testid") or ""
@@ -669,7 +669,7 @@ class RobinhoodBot:
                 return False
 
             buy_button = buttons[0]
-            logger.info(f"[OK] Found {side_key.upper()} button → {buy_button.text.strip()}")
+            logger.info(f"[OK] Found {side_key.upper()} button: {buy_button.text.strip()}")
             self.driver.execute_script("arguments[0].click();", buy_button)
             time.sleep(3)
             
