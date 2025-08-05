@@ -62,6 +62,8 @@ from utils.llm import LLMClient, TradeDecision
 from utils.bankroll import BankrollManager
 from utils.browser import RobinhoodBot
 from utils.slack import SlackNotifier
+from utils.enhanced_slack import EnhancedSlackIntegration
+from utils.multi_symbol_scanner import MultiSymbolScanner
 from utils.portfolio import PortfolioManager, Position
 
 # Load environment variables
@@ -206,27 +208,23 @@ def initialize_trade_log(log_file: str):
         logging.info(f"Initialized trade log: {log_file}")
 
 def log_trade_decision(log_file: str, trade_data: Dict):
-    """Log trade decision to CSV file."""
+    """Log trade decision to CSV file with correct 12-field format."""
     with open(log_file, 'a', newline='') as f:
         writer = csv.writer(f)
+        # Write 12 fields to match CSV header: timestamp,symbol,option_type,strike,expiry,action,quantity,price,total_cost,reason,pnl,pnl_pct
         writer.writerow([
             trade_data.get('timestamp', ''),
             trade_data.get('symbol', ''),
-            trade_data.get('decision', ''),
-            trade_data.get('confidence', ''),
-            trade_data.get('reason', ''),
-            trade_data.get('current_price', ''),
+            trade_data.get('option_type', trade_data.get('decision', '')),  # Map decision to option_type
             trade_data.get('strike', ''),
             trade_data.get('expiry', ''),
-            trade_data.get('direction', ''),
+            trade_data.get('action', trade_data.get('direction', '')),  # Map direction to action
             trade_data.get('quantity', ''),
-            trade_data.get('premium', ''),
+            trade_data.get('price', trade_data.get('premium', '')),  # Map premium to price
             trade_data.get('total_cost', ''),
-            trade_data.get('llm_tokens', ''),
-            trade_data.get('bankroll_before', ''),
-            trade_data.get('bankroll_after', ''),
-            trade_data.get('realized_pnl', ''),
-            trade_data.get('status', '')
+            trade_data.get('reason', ''),
+            trade_data.get('pnl', trade_data.get('realized_pnl', '')),  # Map realized_pnl to pnl
+            trade_data.get('pnl_pct', '')  # pnl_pct field
         ])
 
 def parse_end_time(end_time_str: str) -> Optional[datetime]:
@@ -671,6 +669,198 @@ def run_one_shot_mode(config: Dict, args, env_vars: Dict, bankroll_manager, port
     # all the browser automation and position management logic
 
 
+def run_multi_symbol_once(config: Dict, args, env_vars: Dict, bankroll_manager, 
+                          portfolio_manager, llm_client, slack_notifier):
+    """
+    Execute multi-symbol scanning once and handle the best opportunity.
+    
+    Args:
+        config: Trading configuration
+        args: Command line arguments
+        env_vars: Environment variables
+        bankroll_manager: Bankroll management instance
+        portfolio_manager: Portfolio tracking instance
+        llm_client: LLM client for trade decisions
+        slack_notifier: Slack notification instance
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Initialize multi-symbol scanner
+        scanner = MultiSymbolScanner(config, llm_client, slack_notifier)
+        
+        # Scan all symbols for opportunities
+        opportunities = scanner.scan_all_symbols()
+        
+        if not opportunities:
+            logger.info("[MULTI-SYMBOL] No trading opportunities found")
+            if slack_notifier:
+                slack_notifier.send_message("🔍 Multi-symbol scan complete - No opportunities found")
+            return
+        
+        # Process the top opportunity
+        top_opportunity = opportunities[0]
+        symbol = top_opportunity['symbol']
+        
+        logger.info(f"[MULTI-SYMBOL] Processing top opportunity: {symbol} - {top_opportunity['decision']}")
+        
+        # Execute trade for the selected symbol
+        if not args.dry_run:
+            # Create a modified config for this specific symbol
+            symbol_config = config.copy()
+            symbol_config['SYMBOL'] = symbol
+            
+            # Execute the trade using existing run_once logic
+            result = run_once(symbol_config, args, env_vars, bankroll_manager, 
+                            portfolio_manager, llm_client, slack_notifier)
+            
+            logger.info(f"[MULTI-SYMBOL] Trade execution result: {result.get('status', 'UNKNOWN')}")
+        else:
+            logger.info(f"[MULTI-SYMBOL] Dry run - Would trade {symbol} {top_opportunity['decision']}")
+            
+    except Exception as e:
+        logger.error(f"[MULTI-SYMBOL] Error in multi-symbol execution: {e}")
+        if slack_notifier:
+            slack_notifier.send_message(f"❌ Multi-symbol scan error: {str(e)}")
+
+def run_multi_symbol_loop(config: Dict, args, env_vars: Dict, bankroll_manager,
+                         portfolio_manager, llm_client, slack_notifier, end_time: Optional[datetime]):
+    """
+    Execute multi-symbol scanning in continuous loop mode.
+    
+    Args:
+        config: Trading configuration
+        args: Command line arguments
+        env_vars: Environment variables
+        bankroll_manager: Bankroll management instance
+        portfolio_manager: Portfolio tracking instance
+        llm_client: LLM client for trade decisions
+        slack_notifier: Slack notification instance
+        end_time: Optional end time for the loop
+    """
+    logger = logging.getLogger(__name__)
+    
+    # Initialize multi-symbol scanner
+    scanner = MultiSymbolScanner(config, llm_client, slack_notifier)
+    
+    # Send startup notification
+    symbols_str = ", ".join(config.get('SYMBOLS', ['SPY']))
+    if slack_notifier:
+        slack_notifier.send_message(
+            f"🚀 Multi-symbol scanner started\n"
+            f"📊 Symbols: {symbols_str}\n"
+            f"⏱️ Interval: {args.interval} minutes\n"
+            f"🎯 Max trades: {config.get('multi_symbol', {}).get('max_concurrent_trades', 1)}"
+        )
+    
+    scan_count = 0
+    bot = None
+    tz = ZoneInfo("America/New_York")
+    
+    try:
+        while True:
+            scan_count += 1
+            current_time = datetime.now(tz)  # Use timezone-aware datetime
+            
+            # Check if we should end
+            if end_time and current_time >= end_time:
+                logger.info(f"[MULTI-SYMBOL-LOOP] Reached end time {end_time.strftime('%H:%M')}")
+                break
+            
+            logger.info(f"[MULTI-SYMBOL-LOOP] Starting scan #{scan_count} at {current_time.strftime('%H:%M:%S')}")
+            
+            try:
+                # Scan all symbols
+                opportunities = scanner.scan_all_symbols()
+                
+                if opportunities:
+                    # Process opportunities
+                    for i, opp in enumerate(opportunities[:config.get('multi_symbol', {}).get('max_concurrent_trades', 1)]):
+                        symbol = opp['symbol']
+                        logger.info(f"[MULTI-SYMBOL-LOOP] Processing opportunity {i+1}: {symbol}")
+                        
+                        if not args.dry_run:
+                            # Create symbol-specific config
+                            symbol_config = config.copy()
+                            symbol_config['SYMBOL'] = symbol
+                            
+                            # Execute trade
+                            result = run_once(symbol_config, args, env_vars, bankroll_manager,
+                                            portfolio_manager, llm_client, slack_notifier, bot)
+                            
+                            # Update bot instance for reuse
+                            if result.get('bot'):
+                                bot = result['bot']
+                else:
+                    logger.info(f"[MULTI-SYMBOL-LOOP] No trading opportunities found across all symbols")
+                    
+                    # Send heartbeat for no opportunities (more frequent than hourly)
+                    if slack_notifier:
+                        # Send heartbeat every 3 scans (15 minutes with 5-min interval)
+                        if scan_count % 3 == 0:
+                            slack_notifier.send_heartbeat(
+                                f"💓 Multi-symbol scan #{scan_count} complete\n"
+                                f"🔍 Symbols: {symbols_str}\n"
+                                f"📊 No opportunities found\n"
+                                f"⏰ Next scan in {args.interval} minutes"
+                            )
+                        # Also log the no-trade decision
+                        trade_data = {
+                            'timestamp': current_time.isoformat(),
+                            'symbol': 'MULTI',
+                            'decision': 'NO_TRADE',
+                            'confidence': 0.0,
+                            'reason': f'No opportunities found across {len(config.get("SYMBOLS", ["SPY"]))} symbols',
+                            'current_price': 0.0,
+                            'strike': '',
+                            'direction': '',
+                            'quantity': '',
+                            'premium': '',
+                            'total_cost': '',
+                            'llm_tokens': 0
+                        }
+                        log_trade_decision(config['TRADE_LOG_FILE'], trade_data)
+                
+            except Exception as e:
+                logger.error(f"[MULTI-SYMBOL-LOOP] Error in scan #{scan_count}: {e}")
+                if slack_notifier:
+                    slack_notifier.send_message(f"⚠️ Scan #{scan_count} error: {str(e)}")
+            
+            # Wait for next interval
+            if end_time:
+                next_scan_time = current_time + timedelta(minutes=args.interval)
+                if next_scan_time >= end_time:
+                    logger.info(f"[MULTI-SYMBOL-LOOP] Next scan would exceed end time, stopping")
+                    break
+            
+            logger.info(f"[MULTI-SYMBOL-LOOP] Waiting {args.interval} minutes until next scan...")
+            time.sleep(args.interval * 60)
+            
+    except KeyboardInterrupt:
+        logger.info("[MULTI-SYMBOL-LOOP] Received interrupt signal, shutting down gracefully...")
+        if slack_notifier:
+            slack_notifier.send_message("🛑 Multi-symbol scanner stopped by user")
+    except Exception as e:
+        logger.error(f"[MULTI-SYMBOL-LOOP] Fatal error: {e}")
+        if slack_notifier:
+            slack_notifier.send_message(f"💥 Multi-symbol scanner crashed: {str(e)}")
+    finally:
+        # Clean up browser if exists
+        if bot:
+            try:
+                bot.close()
+                logger.info("[MULTI-SYMBOL-LOOP] Browser closed")
+            except Exception as e:
+                logger.warning(f"[MULTI-SYMBOL-LOOP] Error closing browser: {e}")
+        
+        logger.info(f"[MULTI-SYMBOL-LOOP] Completed {scan_count} scans")
+        if slack_notifier:
+            slack_notifier.send_message(
+                f"✅ Multi-symbol scanner finished\n"
+                f"📊 Total scans: {scan_count}\n"
+                f"🎯 Symbols: {symbols_str}"
+            )
+
 def main():
     """Main trading script execution."""
     parser = argparse.ArgumentParser(description='Robinhood HA Breakout Trading Assistant')
@@ -691,6 +881,12 @@ def main():
                        help='End time in HH:MM format (24-hour, local time)')
     parser.add_argument('--monitor-positions', action='store_true',
                        help='Monitor existing positions for profit/loss targets')
+    parser.add_argument('--symbols', nargs='+', 
+                       help='Symbols to scan (e.g., --symbols SPY QQQ IWM)')
+    parser.add_argument('--multi-symbol', action='store_true',
+                       help='Enable multi-symbol scanning mode')
+    parser.add_argument('--max-trades', type=int, default=1,
+                       help='Maximum concurrent trades across all symbols')
     
     args = parser.parse_args()
     
@@ -706,9 +902,22 @@ def main():
     # Load configuration
     config = load_config(args.config)
     
-    # Setup logging
+    # Setup logging early so we can use logger in CLI overrides
     setup_logging(args.log_level, config['LOG_FILE'])
     logger = logging.getLogger(__name__)
+    
+    # Handle multi-symbol CLI overrides
+    if args.symbols:
+        config['SYMBOLS'] = args.symbols
+        logger.info(f"CLI override: Using symbols {args.symbols}")
+    
+    if args.multi_symbol:
+        config['multi_symbol']['enabled'] = True
+        logger.info("CLI override: Multi-symbol mode enabled")
+    
+    if args.max_trades != 1:
+        config['multi_symbol']['max_concurrent_trades'] = args.max_trades
+        logger.info(f"CLI override: Max concurrent trades set to {args.max_trades}")
     
     logger.info("[START] Starting Robinhood HA Breakout Assistant")
     logger.info(f"Dry run mode: {args.dry_run}")
@@ -731,10 +940,11 @@ def main():
         
         llm_client = LLMClient(config['MODEL'])
         
-        # Initialize Slack notifier if requested
+        # Initialize enhanced Slack integration with charts
+        slack = EnhancedSlackIntegration()
         slack_notifier = None
         if args.slack_notify:
-            slack_notifier = SlackNotifier()
+            slack_notifier = slack
             slack_notifier.send_startup_notification(dry_run=args.dry_run)
         
         # Initialize trade log
@@ -746,8 +956,17 @@ def main():
             logger.info("[MODE] Running in position monitoring mode")
             monitor_positions_mode(config, args, env_vars, bankroll_manager, portfolio_manager,
                                  llm_client, slack_notifier, end_time)
+        elif config.get('multi_symbol', {}).get('enabled', False) or args.multi_symbol:
+            # Run multi-symbol scanning mode
+            logger.info("[MODE] Running in multi-symbol scanning mode")
+            if args.loop:
+                run_multi_symbol_loop(config, args, env_vars, bankroll_manager, portfolio_manager,
+                                     llm_client, slack_notifier, end_time)
+            else:
+                run_multi_symbol_once(config, args, env_vars, bankroll_manager, portfolio_manager,
+                                     llm_client, slack_notifier)
         elif args.loop:
-            # Run in continuous loop mode
+            # Run in continuous loop mode (single symbol)
             logger.info("[MODE] Running in continuous loop mode")
             main_loop(config, args, env_vars, bankroll_manager, portfolio_manager,
                      llm_client, slack_notifier, end_time)
@@ -1014,25 +1233,14 @@ def main():
                     # Take screenshot
                     screenshot_path = bot.take_screenshot("open_review_order.png")
                     
-                    # Send critical order ready alert to Slack with comprehensive details
-                    if slack_notifier:
-                        slack_notifier.send_order_ready_alert(
-                            trade_type=decision.decision,
-                            strike=f"${atm_option['strike']}",
-                            expiry="Today",  # Assuming same-day expiry for breakout trades
-                            position_size=premium * quantity,
-                            # Enhanced details for manual review
-                            action='OPEN',
-                            confidence=decision.confidence,
-                            reason=decision.reason or 'No specific reason provided',
-                            current_price=analysis['current_price'],
-                            premium=premium,
-                            quantity=quantity,
-                            total_cost=premium * quantity,
-                            bankroll=current_bankroll,
-                            trend=analysis.get('trend_direction', 'UNKNOWN'),
-                            candle_body_pct=analysis.get('candle_body_pct', 0.0)
-                        )
+                    # Send enhanced Slack notification with chart
+                    slack_notifier.send_breakout_alert_with_chart(
+                        symbol=config['SYMBOL'],
+                        decision=decision.decision,
+                        analysis=analysis,
+                        market_data=market_data,
+                        confidence=decision.confidence
+                    )
                     
                     print("\n" + "="*60)
                     print("[OPEN TRADE READY FOR REVIEW]")

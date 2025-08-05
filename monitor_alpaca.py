@@ -31,6 +31,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.alpaca_client import AlpacaClient
 from utils.slack import SlackNotifier
+from utils.enhanced_slack import EnhancedSlackIntegration
 from utils.exit_strategies import ExitStrategyManager, load_exit_config_from_file, ExitReason
 import yfinance as yf
 from dotenv import load_dotenv
@@ -60,7 +61,7 @@ class EnhancedPositionMonitor:
     def __init__(self):
         """Initialize monitor with Alpaca and fallback data sources."""
         self.alpaca = AlpacaClient()
-        self.slack = SlackNotifier()
+        self.slack = EnhancedSlackIntegration()
         
         # Initialize advanced exit strategies
         try:
@@ -289,8 +290,7 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
             """.strip()
             
             if self.slack.enabled:
-                self.slack.send_end_of_day_warning(symbol, strike, option_type, pnl_pct, 
-                                                 exit_decision.time_to_close_minutes or 0)
+                self.slack.send_position_alert_with_chart(position, current_price, pnl_pct, 'time_based_exit', exit_decision)
         
         elif exit_decision.reason == ExitReason.STOP_LOSS:
             message = f"""
@@ -337,7 +337,7 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
             """.strip()
             
             if self.slack.enabled:
-                self.slack.send_profit_alert(symbol, strike, option_type, pnl_pct, profit_level)
+                self.slack.send_position_alert_with_chart(position, current_price, pnl_pct, 'profit_target', exit_decision)
         
         # Log and print the alert
         logger.info(f"[EXIT-STRATEGY] {exit_decision.reason.value.upper()} for {symbol} ${strike} {option_type}")
@@ -354,8 +354,9 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 
                 if profit_level > last_profit_alert:
                     # New profit level reached!
-                    self.send_profit_alert(position, current_price, option_price, 
-                                         pnl, pnl_pct, profit_level)
+                    # Use enhanced Slack alert with chart
+                    if self.slack.enabled:
+                        self.slack.send_position_alert_with_chart(position, current_price, pnl_pct, 'profit_target')
                     
                     # Update alert tracking
                     self.last_alerts[position_key] = {
@@ -370,7 +371,9 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
             last_alert_type = self.last_alerts.get(position_key, {}).get('type', '')
             
             if last_alert_type != 'stop_loss':
-                self.send_stop_loss_alert(position, current_price, option_price, pnl, pnl_pct)
+                # Use enhanced Slack alert with chart
+                if self.slack.enabled:
+                    self.slack.send_position_alert_with_chart(position, current_price, pnl_pct, 'stop_loss')
                 
                 # Update alert tracking
                 self.last_alerts[position_key] = {

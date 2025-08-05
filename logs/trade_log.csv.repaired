@@ -1,0 +1,3 @@
+timestamp,symbol,option_type,strike,expiry,action,quantity,price,total_cost,reason,pnl,pnl_pct
+2025-08-04 09:42:19,SPY,CALL,628.0,2025-08-04,BUY,1,1.42,142.0,Breakout signal detected,0.0,0.0
+2025-08-04 10:12:19,SPY,CALL,628.0,2025-08-04,SELL,1,1.83,183.0,Profit target reached,41.0,28.87

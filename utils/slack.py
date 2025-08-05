@@ -363,6 +363,33 @@ class SlackNotifier:
         }
         emoji = emoji_map.get(decision, '❓')
         
+        # Ensure confidence is a float for formatting
+        if isinstance(confidence, str):
+            try:
+                confidence = float(confidence)
+            except (ValueError, TypeError):
+                confidence = 0.0
+        elif confidence is None:
+            confidence = 0.0
+        
+        # Ensure bankroll is a float for formatting
+        if isinstance(bankroll, str):
+            try:
+                bankroll = float(bankroll)
+            except (ValueError, TypeError):
+                bankroll = 0.0
+        elif bankroll is None:
+            bankroll = 0.0
+        
+        # Ensure position_size is a float for formatting
+        if isinstance(position_size, str):
+            try:
+                position_size = float(position_size)
+            except (ValueError, TypeError):
+                position_size = 0.0
+        elif position_size is None:
+            position_size = 0.0
+        
         fields = [
             {
                 "title": "Decision",

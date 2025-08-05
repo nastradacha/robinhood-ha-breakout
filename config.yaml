@@ -13,9 +13,17 @@ BANKROLL_FILE: "bankroll.json"
 POSITIONS_FILE: "positions.csv"  # Position tracking ledger
 
 # Market Data
-SYMBOL: "SPY"
+SYMBOLS: ["SPY", "QQQ", "IWM"]  # Multi-symbol support for diversified trading
+SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility
 TIMEFRAME: "5m"
 DATA_SOURCE: "yfinance"      # Options: "yfinance", "alpaca"
+
+# Multi-Symbol Configuration
+multi_symbol:
+  enabled: true                   # Enable multi-symbol scanning
+  max_concurrent_trades: 1        # Maximum trades across all symbols
+  symbol_allocation: "equal"      # Options: "equal", "weighted", "priority"
+  priority_order: ["SPY", "QQQ", "IWM"]  # Trading priority when multiple signals
 
 # Browser Settings
 HEADLESS: false

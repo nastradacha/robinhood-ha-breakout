@@ -1,0 +1,12 @@
+{
+  "timestamp": "20250804_141657",
+  "backup_date": "2025-08-04T14:16:57.211554",
+  "files": [
+    "logs/trade_log.csv",
+    "bankroll.json",
+    "positions.csv",
+    "logs/monitor_alpaca.log",
+    "logs/app.log"
+  ],
+  "backup_directory": "backups\\trading_data_20250804_141657"
+}
