@@ -1,10 +1,12 @@
 # 📈 Robinhood HA Breakout Trading Assistant
 
-**Your Personal AI-Powered Options Trading Assistant - Safe, Smart, and Always Under Your Control**
+**Your Personal AI-Powered Multi-Symbol Options Trading Assistant - Safe, Smart, and Always Under Your Control**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen.svg)](CHANGELOG.md)
+[![Multi-Symbol](https://img.shields.io/badge/multi--symbol-SPY%20%7C%20QQQ%20%7C%20IWM-orange.svg)](#-multi-symbol-trading-new)
+[![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20%7C%20Yahoo-blue.svg)](#-real-time-market-data)
 
 ---
 
@@ -12,13 +14,24 @@
 
 **Robinhood HA Breakout** is like having a professional trading assistant that:
 
-- 📊 **Watches the market** for you using advanced chart analysis
-- 🧠 **Makes smart decisions** using artificial intelligence
+- 📊 **Watches multiple markets** simultaneously (SPY, QQQ, IWM) using advanced chart analysis
+- 🧠 **Makes smart decisions** using artificial intelligence (OpenAI GPT-4o-mini or DeepSeek)
 - 🤖 **Handles the boring stuff** like clicking through Robinhood's interface
 - 🛡️ **Keeps you safe** by never placing trades without your final approval
 - 💰 **Manages your money** responsibly with built-in risk controls
+- 📱 **Sends Slack alerts** with charts and analysis for mobile trading decisions
+- 📈 **Uses real-time data** from Alpaca for professional-grade market information
+- 🔄 **Monitors positions** automatically with profit/loss alerts
 
 **Think of it as your trading co-pilot** - it does all the heavy lifting, but you're always in the driver's seat for the final decision.
+
+### 🆕 **Latest Features (v2.1.0)**
+- ✅ **Multi-Symbol Trading**: Scan SPY, QQQ, and IWM simultaneously
+- ✅ **Real-Time Market Data**: Alpaca integration for professional data feeds
+- ✅ **Enhanced Position Monitoring**: Automated P&L tracking with Slack alerts
+- ✅ **Advanced Exit Strategies**: Trailing stops and time-based exits
+- ✅ **Performance Analytics**: Comprehensive trading statistics and reports
+- ✅ **Slack Integration**: Rich charts and mobile-optimized notifications
 
 ---
 
@@ -141,28 +154,36 @@
 **Always test first!** This mode analyzes the market but doesn't open your browser:
 
 ```bash
+# Single symbol analysis
 python main.py --dry-run
+
+# Multi-symbol analysis (NEW!)
+python main.py --multi-symbol --symbols SPY QQQ IWM --dry-run
 ```
 
 **What you'll see:**
-- Market analysis results
-- AI's trading decision and reasoning
-- Risk calculations
-- No browser automation
+- Market analysis results for all symbols
+- AI's trading decisions and reasoning
+- Risk calculations and opportunity prioritization
+- No browser automation (safe to run anytime)
 
-### 🎯 One-Shot Trading Mode
+### 🚀 Live Trading Mode
 
 **For single trade sessions:**
 
 ```bash
+# Single symbol trading
 python main.py
+
+# Multi-symbol trading (scans all, trades best opportunity)
+python main.py --multi-symbol --symbols SPY QQQ IWM
 ```
 
 **What happens:**
-1. Analyzes current market conditions
-2. Gets AI recommendation
+1. Analyzes current market conditions across selected symbols
+2. AI prioritizes opportunities by confidence and technical strength
 3. Opens Chrome and logs into Robinhood
-4. Navigates to the options page
+4. Navigates to the options page for the best opportunity
 5. Fills out the trade details
 6. **Stops at the Review screen** - you decide whether to submit!
 
@@ -171,17 +192,20 @@ python main.py
 **For automated morning scanning:**
 
 ```bash
-# Basic loop - checks every 5 minutes
+# Basic single-symbol loop - checks SPY every 5 minutes
 python main.py --loop
 
+# Multi-symbol loop - scans SPY, QQQ, IWM every 5 minutes
+python main.py --multi-symbol --symbols SPY QQQ IWM --loop
+
 # Custom interval - checks every 3 minutes
-python main.py --loop --interval 3
+python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 3
 
-# Stop at specific time - ends at 12:00 PM
-python main.py --loop --interval 5 --end-at 12:00
+# Full production setup - multi-symbol with Slack alerts
+python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 5 --end-at 15:45 --slack-notify
 
-# With Slack notifications
-python main.py --loop --interval 5 --end-at 12:00 --slack-notify
+# Conservative single-symbol with notifications
+python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 ```
 
 **What happens in loop mode:**

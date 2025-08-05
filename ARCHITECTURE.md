@@ -1,6 +1,6 @@
 # 🏗️ Robinhood HA Breakout - System Architecture
 
-**Understanding How Your Trading Assistant Works**
+**Understanding How Your Multi-Symbol Trading Assistant Works**
 
 *A non-technical guide to the system's design and components*
 
@@ -8,11 +8,19 @@
 
 ## 🎯 Overview: The Big Picture
 
-Think of the Robinhood HA Breakout system like a **smart factory** that processes market information and produces trading recommendations. Here's how the "factory" works:
+Think of the Robinhood HA Breakout system like a **smart factory** that processes market information from multiple sources and produces prioritized trading recommendations. Here's how the "factory" works:
 
 ```
-📊 Market Data → 🧠 AI Analysis → 💰 Risk Check → 🌐 Browser Action → ✋ Your Decision
+📊 Multi-Symbol Data → 🧠 AI Analysis → 🎯 Opportunity Ranking → 💰 Risk Check → 🌐 Browser Action → ✋ Your Decision
+     (SPY, QQQ, IWM)      (Concurrent)        (Best First)         (Conservative)        (Manual Review)
 ```
+
+**New in v2.1.0**: The system now operates like a **multi-line production facility**:
+- **Concurrent scanning** of multiple symbols (SPY, QQQ, IWM)
+- **Real-time data feeds** from professional sources (Alpaca)
+- **Intelligent prioritization** of the best opportunities
+- **Enhanced monitoring** with automated position tracking
+- **Mobile-first alerts** via Slack with rich charts
 
 Each step has specific "workers" (software components) that handle different parts of the process, just like different departments in a company.
 
@@ -43,7 +51,22 @@ Each step has specific "workers" (software components) that handle different par
 - `get_option_estimate()`: Enhanced option price estimation
 - `is_market_open()`: Real-time market status
 
-### 2. 🧠 **AI Department** (`utils/llm.py`)
+### 2. 🎯 **Multi-Symbol Scanner** (`utils/multi_symbol_scanner.py`) **NEW!**
+**What it does**: Coordinates concurrent analysis of multiple symbols and prioritizes opportunities
+
+**Think of it as**: Your portfolio manager who watches multiple markets simultaneously
+- **Concurrent Scanning**: Uses ThreadPoolExecutor to analyze SPY, QQQ, IWM simultaneously
+- **Opportunity Prioritization**: Ranks trading signals by confidence and technical strength
+- **Conservative Execution**: Only trades the single best opportunity per cycle
+- **Risk Distribution**: Prevents over-leveraging across multiple positions
+
+**Key Functions**:
+- `scan_all_symbols()`: Coordinates multi-symbol analysis
+- `_prioritize_opportunities()`: Ranks opportunities by quality
+- `_calculate_priority_score()`: Scores based on confidence + technical factors
+- `_send_multi_symbol_alert()`: Enhanced Slack notifications with opportunity ranking
+
+### 3. 🧠 **AI Department** (`utils/llm.py`)
 **What it does**: Makes trading decisions using artificial intelligence
 
 **Think of it as**: Your expert analyst who never gets tired
@@ -89,19 +112,29 @@ Each step has specific "workers" (software components) that handle different par
 - `find_atm_option()`: Finds the right option to trade
 - `click_option_and_buy()`: Fills out the trade form
 
-### 5. 📱 **Communications Department** (`utils/slack.py`)
-**What it does**: Sends you notifications and updates
+### 5. 📱 **Communication Department** (`utils/slack.py` + Enhanced Integration) **UPGRADED!**
+**What it does**: Sends you rich, mobile-optimized notifications with charts and analysis
 
-**Think of it as**: Your personal news reporter
-- Sends alerts when trades are ready
-- Provides "heartbeat" messages in loop mode
-- Reports errors and system status
-- Keeps you informed without overwhelming you
+**Think of it as**: Your professional trading desk that sends you Wall Street-quality alerts
+- **Rich Slack Alerts**: Charts, technical analysis, and mobile-friendly formatting
+- **Multi-Symbol Notifications**: Consolidated alerts showing all opportunities found
+- **Position Monitoring**: Real-time P&L alerts with profit/loss thresholds
+- **Chart Generation**: Automatic chart creation for breakout analysis
+- **Heartbeat System**: Regular "still alive" messages during quiet periods
+
+**Enhanced Components**:
+- `utils/enhanced_slack.py`: Rich message formatting with charts
+- `utils/slack_charts.py`: Professional chart generation for mobile viewing
+- **Mobile-Optimized**: All alerts designed for phone/tablet viewing
+- **Chart Attachments**: Automatic breakout charts attached to trade alerts
 
 **Key Functions**:
-- `send_order_ready_alert()`: Notifies you of trading opportunities
-- `send_heartbeat()`: Sends regular status updates
-- `send_error_alert()`: Reports problems
+- `send_trade_decision()`: "Found a trade opportunity!" (with charts)
+- `send_multi_symbol_alert()`: "Scanned 3 symbols, found 2 opportunities"
+- `send_breakout_alert_with_chart()`: Trade alert + technical analysis chart
+- `send_heartbeat()`: "Still watching the market, no trades yet"
+- `send_position_alert()`: "Your SPY position is up 15% - consider selling!"
+- `send_error_alert()`: "Something went wrong, check the logs"
 
 ### 6. 📊 **Portfolio Department** (`utils/portfolio.py`)
 **What it does**: Tracks your open positions and manages closing trades
@@ -111,7 +144,59 @@ Each step has specific "workers" (software components) that handle different par
 - Decides whether new trades should open or close positions
 - Calculates profits and losses when you close trades
 
-### 7. 🎯 **Position Monitoring Department** (`monitor_alpaca.py`)
+### 7. 🔄 **Position Monitoring** (`monitor_alpaca.py`) **NEW!**
+**What it does**: Automated real-time position tracking with profit/loss alerts
+
+**Think of it as**: Your dedicated position manager watching your trades 24/7
+- **Real-time P&L tracking** using Alpaca professional market data
+- **Multi-level profit alerts** at 5%, 10%, 15%, 20%, 25%, 30% gains
+- **Stop-loss protection** alerts at 25% loss threshold
+- **End-of-day warnings** to close positions by 3:45 PM ET
+- **Mobile Slack notifications** for all alerts
+- **1-minute monitoring intervals** for maximum responsiveness
+- **Advanced Exit Strategies**: Trailing stops and time-based exits
+
+**Key Functions**:
+- `EnhancedPositionMonitor()`: Main monitoring class with Alpaca integration
+- `check_positions()`: Real-time P&L calculation and alert logic
+- `check_profit_targets()`: Multi-level profit threshold monitoring
+- `check_stop_loss()`: Automated loss protection alerts
+- `check_end_of_day_warning()`: Time-based exit warnings
+
+### 8. 📊 **Analytics Department** (`analytics_dashboard.py`) **NEW!**
+**What it does**: Comprehensive trading performance analysis and reporting
+
+**Think of it as**: Your personal trading performance analyst
+- **Win/Loss Analysis**: Detailed breakdown of trading success rates
+- **P&L Tracking**: Profit and loss analysis with trend identification
+- **Risk Metrics**: Drawdown analysis and Sharpe ratio calculations
+- **Export Capabilities**: HTML and CSV report generation
+- **Slack Integration**: Automated performance summaries
+- **Data Recovery**: Robust CSV parsing with corruption repair
+
+**Key Functions**:
+- `TradingAnalytics()`: Main analytics engine
+- `calculate_performance_metrics()`: Win rate, P&L, drawdown analysis
+- `generate_performance_report()`: Comprehensive HTML/CSV reports
+- `send_slack_summary()`: Automated performance notifications
+- `_repair_csv_file()`: Automatic trade log corruption repair
+
+### 9. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
+**What it does**: Advanced position exit logic with trailing stops and time-based exits
+
+**Think of it as**: Your risk management specialist
+- **Trailing Stop Logic**: Percentage-based profit protection
+- **Time-Based Exits**: Automatic close recommendations before market close
+- **Configurable Thresholds**: Customizable profit targets and stop losses
+- **Integration Ready**: Works with position monitoring and Slack alerts
+
+**Key Functions**:
+- `ExitStrategyManager()`: Main exit strategy coordinator
+- `check_exit_conditions()`: Evaluates all exit criteria
+- `_check_trailing_stop()`: Trailing stop loss logic
+- `_check_time_based_exit()`: End-of-day exit recommendations
+
+### 10. 📈 **Position Monitoring Department** (`monitor_alpaca.py`)
 **What it does**: Real-time position tracking with automated profit/loss alerts
 
 **Think of it as**: Your dedicated position watchdog with professional-grade data
