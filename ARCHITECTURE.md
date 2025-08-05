@@ -181,7 +181,32 @@ Each step has specific "workers" (software components) that handle different par
 - `send_slack_summary()`: Automated performance notifications
 - `_repair_csv_file()`: Automatic trade log corruption repair
 
-### 9. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
+### 9. 🧠 **Enhanced LLM Integration** (`utils/multi_symbol_scanner.py`) **NEW!**
+**What it does**: Bulletproof AI-powered trade decision making with advanced error recovery
+
+**Think of it as**: Your resilient AI trading advisor that never fails
+- **Robust Error Recovery**: Automatic retry logic with exponential backoff for API failures
+- **Rate Limit Protection**: Smart delays and progressive wait times to prevent API throttling
+- **Context Isolation**: Fresh AI analysis for each symbol to prevent cross-contamination
+- **Standardized Data Pipeline**: Consistent market data structure ensures reliable AI decisions
+- **Batch Analysis Framework**: Optional batching for multiple symbols to reduce API costs
+- **Graceful Degradation**: Falls back to safe NO_TRADE decisions on persistent failures
+
+**Key Functions**:
+- `_robust_llm_decision()`: Retry logic with exponential backoff and rate limit handling
+- `_prepare_market_data()`: Standardized data structure for consistent LLM payloads
+- `_should_use_batch_analysis()`: Intelligent batching decision for cost optimization
+- `_create_batch_analysis_prompt()`: Multi-symbol batch analysis prompt generation
+- `_individual_analysis()`: Fallback to individual symbol analysis for safety
+
+**Reliability Features**:
+- **2-4 second progressive delays** between retry attempts
+- **Up to 30-second waits** for rate limit recovery
+- **Fresh LLMClient instances** per symbol for context isolation
+- **10-candle context** (vs 5) for improved analysis quality
+- **Timestamp tracking** for data freshness validation
+
+### 10. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
 **What it does**: Advanced position exit logic with trailing stops and time-based exits
 
 **Think of it as**: Your risk management specialist

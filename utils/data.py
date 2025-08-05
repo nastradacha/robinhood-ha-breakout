@@ -319,23 +319,49 @@ def analyze_breakout_pattern(df: pd.DataFrame, lookback: int = 20) -> Dict:
     room_to_resistance = ((nearest_resistance - current_price) / current_price) * 100
     room_to_support = ((current_price - nearest_support) / current_price) * 100
     
-    # Trend analysis (simple moving average)
+    # Enhanced trend analysis with momentum detection
     if len(recent_data) >= 10:
         sma_10 = recent_data['HA_Close'].tail(10).mean()
         trend_direction = "BULLISH" if current_price > sma_10 else "BEARISH"
+        
+        # Momentum detection: check for consecutive candles in same direction
+        last_3_candles = recent_data.tail(3)
+        consecutive_bullish = all(last_3_candles['HA_Close'] > last_3_candles['HA_Open'])
+        consecutive_bearish = all(last_3_candles['HA_Close'] < last_3_candles['HA_Open'])
+        
+        # Price change momentum: check for significant moves over time periods
+        price_15min_ago = recent_data['HA_Close'].iloc[-4] if len(recent_data) >= 4 else current_price
+        price_change_15min = ((current_price - price_15min_ago) / price_15min_ago) * 100 if price_15min_ago > 0 else 0
+        
+        # Enhanced trend classification
+        if consecutive_bullish or price_change_15min > 0.3:
+            trend_direction = "STRONG_BULLISH"
+        elif consecutive_bearish or price_change_15min < -0.3:
+            trend_direction = "STRONG_BEARISH"
     else:
         trend_direction = "NEUTRAL"
+        consecutive_bullish = False
+        consecutive_bearish = False
+        price_change_15min = 0
     
     # Calculate breakout strength (combination of body size, volume, and proximity to resistance)
     volume_current = current_candle.get('Volume', 0)
     volume_avg = recent_data['Volume'].tail(10).mean() if len(recent_data) >= 10 else volume_current
     volume_ratio = (volume_current / volume_avg) if volume_avg > 0 else 1.0
     
-    # Breakout strength: higher body %, higher volume ratio, closer to resistance = stronger
+    # Enhanced breakout strength: includes momentum and price change factors
+    # Lower threshold for body percentage (from 0.1% to 0.05%)
+    momentum_bonus = 0
+    if consecutive_bullish or consecutive_bearish:
+        momentum_bonus += 3.0  # Bonus for 3+ consecutive candles
+    if abs(price_change_15min) > 0.3:
+        momentum_bonus += 2.0  # Bonus for significant price moves
+    
     breakout_strength = (
-        (body_pct / 2.0) +  # Body percentage component (max ~2-3 points)
+        (body_pct / 1.5) +  # Body percentage component (more sensitive)
         (volume_ratio * 2.0) +  # Volume component (can be 2-4+ points)
-        (5.0 - min(room_to_resistance, 5.0))  # Proximity to resistance (0-5 points)
+        (5.0 - min(room_to_resistance, 5.0)) +  # Proximity to resistance (0-5 points)
+        momentum_bonus  # Momentum and price change bonus (0-5 points)
     )
     
     analysis = {
@@ -353,6 +379,11 @@ def analyze_breakout_pattern(df: pd.DataFrame, lookback: int = 20) -> Dict:
         'volume': int(volume_current),
         'volume_ratio': round(volume_ratio, 2),
         'breakout_strength': round(breakout_strength, 2),
+        # New momentum and price change fields
+        'consecutive_bullish': consecutive_bullish,
+        'consecutive_bearish': consecutive_bearish,
+        'price_change_15min_pct': round(price_change_15min, 3),
+        'momentum_bonus': round(momentum_bonus, 2),
         'timestamp': current_candle.name.isoformat() if hasattr(current_candle.name, 'isoformat') else str(current_candle.name)
     }
     

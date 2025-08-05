@@ -20,10 +20,10 @@ Usage:
 import os
 import logging
 import time
+import csv
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import os
 import sys
 
 # Add project root to path
@@ -167,10 +167,11 @@ class EnhancedPositionMonitor:
             with open('positions.csv', 'r', newline='') as file:
                 reader = csv.DictReader(file)
                 for row in reader:
-                    # Convert numeric fields
-                    row['quantity'] = int(row['quantity'])
-                    row['entry_price'] = float(row['entry_price'])
+                    # Convert numeric fields and map CSV columns to expected fields
+                    row['quantity'] = int(row['contracts'])  # Map contracts -> quantity
+                    row['entry_price'] = float(row['entry_premium'])  # Map entry_premium -> entry_price
                     row['strike'] = float(row['strike'])
+                    row['option_type'] = row['side']  # Map side -> option_type
                     positions.append(row)
             
             logger.info(f"[MONITOR] Loaded {len(positions)} positions")
@@ -541,7 +542,17 @@ Avoid overnight risk!
             logger.error(f"[MONITOR] Monitoring error: {e}")
 
 def main():
-    """Main entry point."""
+    """Main entry point with configurable monitoring interval."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Enhanced Position Monitoring with Alpaca')
+    parser.add_argument('--interval', '-i', type=int, default=15, 
+                       help='Monitoring interval in seconds (default: 15s for active trading)')
+    parser.add_argument('--slack-notify', action='store_true', 
+                       help='Enable Slack notifications')
+    
+    args = parser.parse_args()
+    
     print("=== ENHANCED POSITION MONITORING WITH ALPACA ===")
     print()
     
@@ -557,10 +568,14 @@ def main():
         print("[INFO] Using Yahoo Finance (delayed data)")
     
     print(f"[OK] Slack alerts: {'Enabled' if monitor.slack.enabled else 'Disabled'}")
+    print(f"[OK] Monitoring interval: {args.interval} seconds")
     print()
     
+    # Convert seconds to minutes for the run method
+    interval_minutes = args.interval / 60.0
+    
     # Start monitoring
-    monitor.run(interval_minutes=1)  # 1-minute intervals for better responsiveness
+    monitor.run(interval_minutes=interval_minutes)
 
 if __name__ == "__main__":
     main()

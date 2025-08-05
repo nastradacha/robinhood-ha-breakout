@@ -29,6 +29,9 @@ import pandas as pd
 import numpy as np
 
 # Chart generation libraries
+# Set non-interactive backend to prevent threading issues
+import matplotlib
+matplotlib.use('Agg')  # Use Anti-Grain Geometry backend (no GUI)
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
@@ -198,14 +201,18 @@ class SlackChartGenerator:
     
     def _plot_technical_indicators(self, ax, data: pd.DataFrame):
         """Plot technical indicators overlay."""
+        has_indicators = False
+        
         # Simple Moving Average
         if len(data) >= 20:
             sma_20 = data['Close'].rolling(20).mean()
             ax.plot(range(len(sma_20)), sma_20, color='orange', 
                    linewidth=2, alpha=0.8, label='SMA(20)')
+            has_indicators = True
         
-        # Add legend
-        ax.legend(loc='upper left', fontsize=9)
+        # Add legend only if we have indicators
+        if has_indicators:
+            ax.legend(loc='upper left', fontsize=9)
     
     def _plot_current_signal(self, ax, analysis: Dict):
         """Highlight current trading signal."""

@@ -384,6 +384,119 @@ class EnhancedSlackIntegration:
         """Send generic message via Slack."""
         self.send_heartbeat(message)
     
+    def send_stop_loss_alert(self, symbol: str, strike: float, option_type: str, loss_pct: float):
+        """Send stop loss alert notification."""
+        message = f"🚨 **STOP LOSS ALERT**\n\n" \
+                 f"**Position:** {symbol} ${strike} {option_type}\n" \
+                 f"**Loss:** -{loss_pct:.1f}%\n" \
+                 f"**Time:** {datetime.now().strftime('%H:%M:%S')}\n\n" \
+                 f"⚠️ *Consider closing position to limit losses* ⚠️"
+        
+        self.send_heartbeat(message)
+    
+    def handle_confirmation_message(self, event: Dict) -> bool:
+        """
+        Handle Slack trade confirmation messages.
+        
+        Listens for canonical messages:
+        - 'submitted' → trade executed at quoted est_premium
+        - 'filled $X.YZ' → trade executed at given price
+        - 'cancelled' → trade cancelled
+        
+        Args:
+            event: Slack event data containing message text and channel
+            
+        Returns:
+            bool: True if message was handled, False otherwise
+        """
+        try:
+            # Get message text and normalize
+            text = event.get('text', '').lower().strip()
+            channel = event.get('channel')
+            user = event.get('user')
+            
+            if not text or not channel:
+                return False
+            
+            # Import here to avoid circular imports
+            from .trade_confirmation import TradeConfirmationManager
+            
+            # Check for confirmation messages
+            status = None
+            fill_price = None
+            
+            if text == 'submitted':
+                status = 'SUBMITTED'
+                fill_price = None  # Use estimated premium
+                
+            elif text.startswith('filled $') or text.startswith('filled'):
+                # Extract price from 'filled $1.27' or 'filled 1.27'
+                import re
+                price_match = re.search(r'filled\s*\$?([0-9]+\.?[0-9]*)', text)
+                if price_match:
+                    status = 'SUBMITTED'
+                    fill_price = float(price_match.group(1))
+                else:
+                    return False
+                    
+            elif text == 'cancelled':
+                status = 'CANCELLED'
+                fill_price = None
+                
+            else:
+                return False  # Not a confirmation message
+            
+            # Get pending trade from TradeConfirmationManager
+            # This assumes there's a way to access the current trade confirmation manager
+            # We'll need to store this globally or pass it in
+            if hasattr(self, '_trade_confirmation_manager') and self._trade_confirmation_manager:
+                # Record the trade outcome
+                self._trade_confirmation_manager.record_trade_outcome(status, fill_price)
+                
+                # Send confirmation reply
+                if status == 'SUBMITTED':
+                    if fill_price:
+                        reply = f"✅ Trade recorded (SUBMITTED @ ${fill_price:.2f})"
+                    else:
+                        reply = "✅ Trade recorded (SUBMITTED @ estimated price)"
+                else:
+                    reply = "❌ Trade recorded (CANCELLED)"
+                
+                # Send ephemeral reply to user
+                self._send_ephemeral_reply(channel, user, reply)
+                
+                logger.info(f"[SLACK-CONFIRM] Processed {text} -> {status} @ {fill_price}")
+                return True
+            else:
+                logger.warning("[SLACK-CONFIRM] No trade confirmation manager available")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[SLACK-CONFIRM] Error handling confirmation message: {e}")
+            return False
+    
+    def _send_ephemeral_reply(self, channel: str, user: str, message: str):
+        """Send ephemeral reply to user in channel."""
+        try:
+            if hasattr(self.basic_notifier, 'client') and self.basic_notifier.client:
+                self.basic_notifier.client.chat_postEphemeral(
+                    channel=channel,
+                    user=user,
+                    text=message
+                )
+            else:
+                # Fallback to regular message
+                self.send_heartbeat(f"@{user} {message}")
+        except Exception as e:
+            logger.error(f"[SLACK-CONFIRM] Failed to send ephemeral reply: {e}")
+            # Fallback to regular message
+            self.send_heartbeat(f"@{user} {message}")
+    
+    def set_trade_confirmation_manager(self, manager):
+        """Set the trade confirmation manager for Slack confirmations."""
+        self._trade_confirmation_manager = manager
+        logger.info("[SLACK-CONFIRM] Trade confirmation manager set")
+    
     def send_market_analysis(self, analysis: dict):
         """Send market analysis summary."""
         symbol = analysis.get('symbol', 'N/A')

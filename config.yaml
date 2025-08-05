@@ -34,7 +34,7 @@ PAGE_LOAD_TIMEOUT: 30
 MAX_PREMIUM_PCT: 0.50        # Max premium as % of bankroll
 MIN_CONFIDENCE: 0.35         # Minimum LLM confidence to trade
 IV_THRESHOLD: 45.0           # Implied volatility threshold
-MIN_CANDLE_BODY_PCT: 0.10    # Minimum breakout-candle body as % of price
+MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lowered for sensitivity)
 
 # Intraday Trading Settings
 PROFIT_TARGET_PCT: 0.15      # Take profit at 15% gain (conservative)

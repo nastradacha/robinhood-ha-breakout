@@ -83,6 +83,7 @@ class BankrollManager:
     
     def _ensure_bankroll_file(self):
         """Create bankroll file if it doesn't exist."""
+        # ✅ YAML seed used only when bankroll.json missing – verified 2025-08-05
         if not self.bankroll_file.exists():
             initial_data = {
                 "current_bankroll": self.start_capital,
@@ -307,6 +308,290 @@ class BankrollManager:
         
         return win_history
     
+    def get_enhanced_llm_context(self, last_n: int = 20) -> Dict:
+        """
+        Get enhanced context for LLM decision making with richer trade history.
+        
+        Hybrid Approach: Combines fast boolean win/loss history with detailed recent
+        trade patterns, performance metrics, and market condition context for better
+        LLM learning while maintaining backward compatibility.
+        
+        Args:
+            last_n: Number of recent trades to analyze (default 20 for LLM system)
+        
+        Returns:
+            Dict containing:
+            - win_history: List of boolean outcomes (backward compatible)
+            - recent_patterns: Detailed analysis of recent trades
+            - performance_metrics: Aggregated performance statistics
+            - symbol_performance: Per-symbol win rates and patterns
+            - confidence_modifiers: Suggested confidence adjustments
+        """
+        # Get basic win/loss history (maintains backward compatibility)
+        win_history = self.get_win_history(last_n)
+        
+        if not win_history:
+            return {
+                'win_history': [],
+                'recent_patterns': [],
+                'performance_metrics': {
+                    'win_rate': 0.0,
+                    'current_streak': 0,
+                    'avg_win_pct': 0.0,
+                    'avg_loss_pct': 0.0,
+                    'total_trades': 0
+                },
+                'symbol_performance': {},
+                'confidence_modifiers': {
+                    'streak_modifier': 0.0,
+                    'recent_performance_modifier': 0.0,
+                    'symbol_confidence': 1.0
+                }
+            }
+        
+        # Calculate performance metrics
+        wins = sum(win_history)
+        total = len(win_history)
+        win_rate = wins / total if total > 0 else 0.0
+        
+        # Calculate current streak
+        current_streak = self._calculate_current_streak(win_history)
+        
+        # Get recent trade patterns from trade log
+        recent_patterns = self._get_recent_trade_patterns(last_n=min(5, total))
+        
+        # Calculate symbol-specific performance
+        symbol_performance = self._get_symbol_performance()
+        
+        # Calculate confidence modifiers
+        confidence_modifiers = self._calculate_confidence_modifiers(
+            win_history, current_streak, recent_patterns
+        )
+        
+        return {
+            'win_history': win_history,  # Keep existing format for compatibility
+            'recent_patterns': recent_patterns,
+            'performance_metrics': {
+                'win_rate': win_rate,
+                'current_streak': current_streak,
+                'avg_win_pct': self._calculate_avg_win_pct(recent_patterns),
+                'avg_loss_pct': self._calculate_avg_loss_pct(recent_patterns),
+                'total_trades': total
+            },
+            'symbol_performance': symbol_performance,
+            'confidence_modifiers': confidence_modifiers
+        }
+    
+    def _calculate_current_streak(self, win_history: list) -> int:
+        """
+        Calculate current winning or losing streak.
+        
+        Args:
+            win_history: List of boolean trade outcomes
+            
+        Returns:
+            Positive number for winning streak, negative for losing streak
+        """
+        if not win_history:
+            return 0
+        
+        streak = 0
+        current_outcome = win_history[-1]
+        
+        # Count consecutive outcomes from the end
+        for outcome in reversed(win_history):
+            if outcome == current_outcome:
+                streak += 1
+            else:
+                break
+        
+        # Return positive for wins, negative for losses
+        return streak if current_outcome else -streak
+    
+    def _get_recent_trade_patterns(self, last_n: int = 5) -> list:
+        """
+        Extract recent trade patterns from trade log for LLM learning.
+        
+        Args:
+            last_n: Number of recent trades to analyze
+            
+        Returns:
+            List of trade pattern dictionaries
+        """
+        try:
+            import csv
+            from pathlib import Path
+            
+            trade_log_path = Path('logs/trade_log.csv')
+            if not trade_log_path.exists():
+                return []
+            
+            patterns = []
+            with open(trade_log_path, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                trades = list(reader)
+                
+                # Get last N completed trades (those with PnL data)
+                recent_trades = [t for t in trades if t.get('pnl') and t.get('pnl') != ''][-last_n:]
+                
+                for trade in recent_trades:
+                    try:
+                        pnl = float(trade.get('pnl', 0))
+                        pnl_pct = float(trade.get('pnl_pct', 0)) if trade.get('pnl_pct') else 0
+                        
+                        pattern = {
+                            'symbol': trade.get('symbol', 'UNKNOWN'),
+                            'option_type': trade.get('option_type', 'UNKNOWN'),
+                            'outcome': 'WIN' if pnl > 0 else 'LOSS',
+                            'pnl_pct': pnl_pct,
+                            'reason': trade.get('reason', ''),
+                            'market_condition': self._classify_market_condition(trade.get('reason', ''))
+                        }
+                        patterns.append(pattern)
+                    except (ValueError, TypeError):
+                        continue
+            
+            return patterns
+            
+        except Exception as e:
+            logger.warning(f"[BANKROLL] Error reading trade patterns: {e}")
+            return []
+    
+    def _get_symbol_performance(self) -> Dict:
+        """
+        Calculate per-symbol performance metrics.
+        
+        Returns:
+            Dict with symbol-specific win rates and trade counts
+        """
+        try:
+            import csv
+            from pathlib import Path
+            from collections import defaultdict
+            
+            trade_log_path = Path('logs/trade_log.csv')
+            if not trade_log_path.exists():
+                return {}
+            
+            symbol_stats = defaultdict(lambda: {'wins': 0, 'total': 0, 'total_pnl': 0.0})
+            
+            with open(trade_log_path, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for trade in reader:
+                    if trade.get('pnl') and trade.get('pnl') != '':
+                        try:
+                            symbol = trade.get('symbol', 'UNKNOWN')
+                            pnl = float(trade.get('pnl', 0))
+                            
+                            symbol_stats[symbol]['total'] += 1
+                            symbol_stats[symbol]['total_pnl'] += pnl
+                            if pnl > 0:
+                                symbol_stats[symbol]['wins'] += 1
+                        except (ValueError, TypeError):
+                            continue
+            
+            # Convert to final format
+            performance = {}
+            for symbol, stats in symbol_stats.items():
+                if stats['total'] > 0:
+                    performance[symbol] = {
+                        'win_rate': stats['wins'] / stats['total'],
+                        'total_trades': stats['total'],
+                        'avg_pnl': stats['total_pnl'] / stats['total']
+                    }
+            
+            return performance
+            
+        except Exception as e:
+            logger.warning(f"[BANKROLL] Error calculating symbol performance: {e}")
+            return {}
+    
+    def _calculate_confidence_modifiers(self, win_history: list, current_streak: int, recent_patterns: list) -> Dict:
+        """
+        Calculate confidence modifiers based on recent performance.
+        
+        Args:
+            win_history: Boolean list of trade outcomes
+            current_streak: Current winning/losing streak
+            recent_patterns: Recent trade pattern analysis
+            
+        Returns:
+            Dict with confidence modification suggestions
+        """
+        modifiers = {
+            'streak_modifier': 0.0,
+            'recent_performance_modifier': 0.0,
+            'symbol_confidence': 1.0
+        }
+        
+        # Streak-based modifier
+        if current_streak >= 3:
+            modifiers['streak_modifier'] = min(0.05, current_streak * 0.02)  # Max +5% boost
+        elif current_streak <= -3:
+            modifiers['streak_modifier'] = max(-0.10, current_streak * 0.02)  # Max -10% penalty
+        
+        # Recent performance modifier (last 5 trades)
+        if recent_patterns:
+            recent_wins = sum(1 for p in recent_patterns if p['outcome'] == 'WIN')
+            recent_win_rate = recent_wins / len(recent_patterns)
+            
+            if recent_win_rate >= 0.8:  # 80%+ recent win rate
+                modifiers['recent_performance_modifier'] = 0.05
+            elif recent_win_rate <= 0.2:  # 20% or less recent win rate
+                modifiers['recent_performance_modifier'] = -0.10
+        
+        return modifiers
+    
+    def _classify_market_condition(self, reason: str) -> str:
+        """
+        Classify market condition based on trade reason.
+        
+        Args:
+            reason: Trade decision reason from LLM
+            
+        Returns:
+            Market condition classification
+        """
+        reason_lower = reason.lower()
+        
+        # Check for breakout first (even if consolidation is mentioned)
+        if any(term in reason_lower for term in ['breakout', 'strong', 'momentum']):
+            return 'BULLISH_BREAKOUT'
+        elif any(term in reason_lower for term in ['reversal', 'oversold', 'bounce']):
+            return 'REVERSAL_SETUP'
+        elif any(term in reason_lower for term in ['consolidation', 'range', 'sideways']):
+            return 'CONSOLIDATION'
+        elif any(term in reason_lower for term in ['volatility', 'volatile', 'uncertainty', 'mixed']):
+            return 'HIGH_VOLATILITY'
+        else:
+            return 'NEUTRAL'
+    
+    def _calculate_avg_win_pct(self, recent_patterns: list) -> float:
+        """
+        Calculate average winning percentage from recent patterns.
+        
+        Args:
+            recent_patterns: List of recent trade patterns
+            
+        Returns:
+            Average winning percentage
+        """
+        wins = [p['pnl_pct'] for p in recent_patterns if p['outcome'] == 'WIN']
+        return sum(wins) / len(wins) if wins else 0.0
+    
+    def _calculate_avg_loss_pct(self, recent_patterns: list) -> float:
+        """
+        Calculate average losing percentage from recent patterns.
+        
+        Args:
+            recent_patterns: List of recent trade patterns
+            
+        Returns:
+            Average losing percentage (negative number)
+        """
+        losses = [p['pnl_pct'] for p in recent_patterns if p['outcome'] == 'LOSS']
+        return sum(losses) / len(losses) if losses else 0.0
+    
     def record_trade_outcome(self, is_win: bool) -> None:
         """
         Record the outcome of a trade (win/loss) for LLM confidence calibration.
@@ -416,5 +701,88 @@ class BankrollManager:
         
         self._save_bankroll(reset_data)
         logger.warning(f"Bankroll reset to ${new_start_capital}")
+    
+    def apply_fill(self, position_id: str, fill_price: float, contracts: int = 1) -> Dict:
+        """
+        Apply actual fill price to bankroll, replacing any previous estimate.
+        
+        Args:
+            position_id: Unique identifier for the position
+            fill_price: Actual fill price per contract
+            contracts: Number of contracts (default 1)
+            
+        Returns:
+            Updated bankroll data
+        """
+        try:
+            from datetime import datetime
+            import csv
+            import os
+            
+            # Calculate actual premium cost
+            actual_cost = fill_price * contracts * 100  # Options are per 100 shares
+            
+            # Load current bankroll
+            data = self._load_bankroll()
+            
+            # Find and update the position in trade history
+            position_found = False
+            old_cost = 0
+            
+            for trade in data.get('trade_history', []):
+                if trade.get('position_id') == position_id:
+                    old_cost = trade.get('total_cost', 0)
+                    trade['entry_premium'] = fill_price
+                    trade['total_cost'] = actual_cost
+                    trade['fill_updated'] = True
+                    trade['fill_timestamp'] = datetime.now().isoformat()
+                    position_found = True
+                    break
+            
+            if not position_found:
+                logger.warning(f"Position {position_id} not found in trade history")
+                return data
+            
+            # Calculate the difference and adjust bankroll
+            cost_difference = actual_cost - old_cost
+            new_bankroll = data['current_bankroll'] - cost_difference
+            
+            # Update bankroll
+            data['current_bankroll'] = new_bankroll
+            data['last_updated'] = datetime.now().isoformat()
+            
+            # Write undo record to bankroll_history.csv
+            history_file = 'bankroll_history.csv'
+            file_exists = os.path.exists(history_file)
+            
+            with open(history_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                
+                # Write header if file doesn't exist
+                if not file_exists:
+                    writer.writerow(['timestamp', 'position_id', 'delta', 'new_bankroll', 'action', 'fill_price'])
+                
+                # Write undo record
+                writer.writerow([
+                    datetime.now().isoformat(),
+                    position_id,
+                    -cost_difference,  # Negative because we're subtracting more cost
+                    new_bankroll,
+                    'fill_adjustment',
+                    fill_price
+                ])
+            
+            # Save updated bankroll
+            self._save_bankroll(data)
+            
+            logger.info(f"[BANKROLL] Applied fill ${fill_price:.2f} for {position_id}: "
+                       f"cost ${old_cost:.2f} -> ${actual_cost:.2f}, "
+                       f"bankroll ${data['current_bankroll'] + cost_difference:.2f} -> ${new_bankroll:.2f}")
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"[BANKROLL] Error applying fill for {position_id}: {e}")
+            raise
         
         return reset_data

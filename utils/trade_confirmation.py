@@ -136,22 +136,43 @@ class TradeConfirmationManager:
         print("-"*60)
         
         while True:
-            decision = input("Did you SUBMIT (s) or CANCEL (c) this trade? ").lower().strip()
+            print("\nOptions:")
+            print("  [S] Submit at expected price (${:.2f})".format(trade_details.get('premium', 0)))
+            print("  [C] Cancel trade")
+            print("  [P] Submit at different price (enter custom premium)")
+            print("  [0.XX] Enter premium directly (e.g., 0.75)")
+            
+            decision = input("\nYour choice: ").lower().strip()
+            
+            # Check if user entered a premium directly (e.g., "0.75", "1.25")
+            try:
+                if decision.replace('.', '').replace('-', '').isdigit() and float(decision) > 0:
+                    actual_premium = float(decision)
+                    print(f"[OK] Trade SUBMITTED at ${actual_premium:.2f}")
+                    return "SUBMITTED", actual_premium
+            except ValueError:
+                pass
             
             if decision in ['s', 'submit', 'submitted']:
-                # Get actual fill price
+                # Submit at expected price
+                actual_premium = trade_details.get('premium', 0)
+                print(f"[OK] Trade SUBMITTED at expected price ${actual_premium:.2f}")
+                return "SUBMITTED", actual_premium
+                
+            elif decision in ['p', 'price', 'custom']:
+                # Get custom fill price
                 while True:
                     try:
-                        actual_premium = input(f"What was the actual fill price? (default: ${trade_details.get('premium', 0):.2f}): ").strip()
-                        if not actual_premium:
-                            actual_premium = trade_details.get('premium', 0)
-                        else:
-                            actual_premium = float(actual_premium)
+                        custom_input = input(f"Enter actual fill price: $").strip()
+                        actual_premium = float(custom_input)
+                        if actual_premium <= 0:
+                            print("Price must be greater than 0")
+                            continue
                         break
                     except ValueError:
                         print("Please enter a valid price (e.g., 1.25)")
                 
-                print(f"[OK] Trade SUBMITTED at ${actual_premium:.2f}")
+                print(f"[OK] Trade SUBMITTED at custom price ${actual_premium:.2f}")
                 return "SUBMITTED", actual_premium
                 
             elif decision in ['c', 'cancel', 'cancelled']:
@@ -159,7 +180,7 @@ class TradeConfirmationManager:
                 return "CANCELLED", None
                 
             else:
-                print("Please enter 's' for submitted or 'c' for cancelled")
+                print("Invalid input. Please choose S, C, P, or enter a premium directly (e.g., 0.75)")
     
     def _detect_browser_decision(self, trade_details: Dict, timeout: int = 30) -> Tuple[str, Optional[float]]:
         """Try to detect if trade was submitted by monitoring browser."""
@@ -196,7 +217,7 @@ class TradeConfirmationManager:
         
         return decision, premium
     
-    def record_trade_outcome(self, trade_details: Dict, decision: str, actual_premium: Optional[float] = None):
+    def record_trade_outcome(self, trade_details: Dict, decision: str, actual_premium: Optional[float] = None, auto_start_monitor: bool = True):
         """
         Record the trade outcome in all tracking systems.
         
@@ -204,6 +225,7 @@ class TradeConfirmationManager:
             trade_details: Original trade details
             decision: 'SUBMITTED', 'CANCELLED', or 'UNKNOWN'
             actual_premium: Actual fill price if submitted
+            auto_start_monitor: Whether to auto-start position monitoring
         """
         timestamp = datetime.now().isoformat()
         
@@ -224,16 +246,39 @@ class TradeConfirmationManager:
             # Add to portfolio
             self.portfolio_manager.add_position(position)
             
-            # Update bankroll
+            # Update bankroll with actual fill price
+            if actual_premium is not None:
+                # Apply actual fill price to reconcile bankroll
+                position_id = f"{trade_details.get('symbol', 'SPY')}_{trade_details.get('strike', 0)}_{timestamp}"
+                self.bankroll_manager.apply_fill(
+                    position_id=position_id,
+                    fill_price=actual_premium,
+                    contracts=trade_details.get('quantity', 1)
+                )
+            
+            # Record trade in bankroll history
             total_cost = (actual_premium or trade_details.get('premium', 0)) * trade_details.get('quantity', 1) * 100
             self.bankroll_manager.record_trade({
                 **trade_details,
                 'actual_premium': actual_premium,
                 'total_cost': total_cost,
-                'status': 'SUBMITTED'
+                'status': 'SUBMITTED',
+                'position_id': f"{trade_details.get('symbol', 'SPY')}_{trade_details.get('strike', 0)}_{timestamp}"
             })
             
             logger.info(f"[OK] Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
+            
+            # Auto-start position monitoring if enabled
+            if auto_start_monitor:
+                try:
+                    from utils.monitor_launcher import ensure_monitor_running
+                    symbol = trade_details.get('symbol', 'SPY')
+                    if ensure_monitor_running(symbol):
+                        logger.info(f"[OK] Auto-started position monitor for {symbol}")
+                    else:
+                        logger.warning(f"[WARNING] Failed to auto-start monitor for {symbol}")
+                except Exception as e:
+                    logger.error(f"[ERROR] Monitor auto-start failed: {e}")
             
             # Send Slack confirmation
             if self.slack_notifier:

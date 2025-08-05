@@ -48,7 +48,7 @@ python main.py --multi-symbol --symbols SPY QQQ IWM --loop
 python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 3
 
 # Production setup with end time and Slack
-python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 5 --end-at 15:45 --slack-notify
+python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 2 --end-at 15:45 --slack-notify
 
 # Conservative single-symbol with notifications
 python main.py --loop --interval 5 --end-at 15:45 --slack-notify
@@ -79,6 +79,21 @@ python analytics_dashboard.py --export-html --export-csv
 
 # Send analytics summary to Slack
 python analytics_dashboard.py --slack-summary
+```
+
+### 🧠 **LLM Reliability & Testing**
+```bash
+# Test multi-symbol LLM fixes and reliability
+python test_multi_symbol_llm_fixes.py
+
+# Test individual components
+python -c "from utils.multi_symbol_scanner import MultiSymbolScanner; print('LLM scanner loaded successfully')"
+
+# Validate LLM configuration
+python -c "from utils.llm import LLMClient; client = LLMClient('gpt-4o-mini'); print('LLM client initialized')"
+
+# Test market data standardization
+python -c "from utils.multi_symbol_scanner import MultiSymbolScanner; import yaml; config = yaml.safe_load(open('config.yaml')); scanner = MultiSymbolScanner(config, None, None); print('Scanner initialized successfully')"
 ```
 
 ### 🔧 **Utilities & Maintenance**

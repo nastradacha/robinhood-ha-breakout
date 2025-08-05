@@ -5,6 +5,192 @@ All notable changes to the Robinhood HA Breakout project will be documented in t
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-08-05
+
+### 🚀 Major New Features
+
+#### Exit-Monitor Auto-Launch Integration
+- **NEW**: `utils/monitor_launcher.py` with automatic position monitoring
+- **NEW**: `ensure_monitor_running()` function with PID file management
+- **NEW**: Auto-spawn `monitor_alpaca.py` processes after trade submission
+- **NEW**: `--auto-start-monitor` CLI flag (default: True) for control
+- **NEW**: `--no-auto-start-monitor` flag to disable auto-monitoring
+- **NEW**: Graceful shutdown with automatic monitor cleanup on exit
+
+#### Enhanced Trade Confirmation Workflow
+- **IMPROVED**: `TradeConfirmationManager.record_trade_outcome()` with auto-monitor support
+- **IMPROVED**: Automatic position monitoring after SUBMITTED trades
+- **IMPROVED**: Multi-symbol support for independent monitor processes
+- **IMPROVED**: Robust error handling for monitor launch failures
+
+### 🔧 Technical Improvements
+
+#### Process Management
+- **NEW**: PID file tracking (`.monitor_<symbol>.pid`) for process lifecycle
+- **NEW**: Process health checks using `psutil` for reliability
+- **NEW**: Automatic cleanup of stale PID files and zombie processes
+- **NEW**: Force termination with SIGTERM/SIGKILL for unresponsive monitors
+
+#### CLI and User Experience
+- **NEW**: Enhanced command-line interface with monitor control flags
+- **NEW**: Manual monitor management via `monitor_launcher.py` CLI
+- **NEW**: Monitor status listing and cleanup commands
+- **IMPROVED**: Graceful KeyboardInterrupt handling with monitor cleanup
+
+### 🧪 Testing and Quality Assurance
+
+#### Comprehensive Unit Tests
+- **NEW**: `tests/test_monitor_launcher.py` with 14 test cases (100% pass rate)
+- **NEW**: `tests/test_auto_launch_path.py` with 7 test cases (100% pass rate)
+- **NEW**: Mock-based testing for subprocess and psutil operations
+- **NEW**: Edge case testing for corrupted PID files and process failures
+- **NEW**: Integration testing for auto-launch workflow paths
+
+#### Code Quality
+- **IMPROVED**: ≥85% unit test coverage maintained
+- **IMPROVED**: Robust error handling and logging throughout
+- **IMPROVED**: Type hints and comprehensive documentation
+- **IMPROVED**: Windows compatibility for process management
+
+### 📚 Documentation
+
+#### README Updates
+- **NEW**: "Exit-Monitor Auto-Launch" section with usage examples
+- **NEW**: CLI usage examples for auto-monitoring control
+- **NEW**: Benefits and workflow explanation
+- **NEW**: Manual monitor management documentation
+
+### 🔒 Security and Reliability
+
+#### Process Security
+- **NEW**: Detached process spawning with `start_new_session=True`
+- **NEW**: Proper signal handling for graceful termination
+- **NEW**: Resource cleanup on abnormal exit conditions
+- **NEW**: PID validation and process ownership checks
+
+### 🎯 User Benefits
+
+- **Never Miss Exits**: Automatic monitoring ensures profit/loss alerts
+- **Mobile-Friendly**: Slack alerts work seamlessly with auto-monitoring
+- **Resource Efficient**: Independent monitor processes with automatic cleanup
+- **Multi-Symbol**: Each symbol gets dedicated monitoring automatically
+- **Fail-Safe**: Robust error handling prevents workflow interruption
+
+### 🔄 Migration Guide
+
+#### For Existing Users
+1. **Auto-monitoring is enabled by default** - no action required
+2. **To disable**: Use `--no-auto-start-monitor` flag for testing
+3. **Manual control**: Use `python utils/monitor_launcher.py` commands
+4. **Clean shutdown**: Ctrl+C now automatically stops all monitors
+
+#### Breaking Changes
+- None - fully backwards compatible with existing workflows
+
+---
+
+## [0.3.0] - 2025-08-05
+
+### 🎉 Major New Features
+
+#### Slack-Based Trade Confirmation
+- **NEW**: Remote trade confirmation via Slack messages
+- **NEW**: Support for `submitted`, `filled $X.YZ`, and `cancelled` messages
+- **NEW**: Ephemeral bot responses with confirmation details
+- **NEW**: Mobile-friendly trading workflow
+- **NEW**: Case-insensitive message parsing with robust price extraction
+
+#### Bankroll Reconciliation with Real Fill Prices
+- **NEW**: `BankrollManager.apply_fill()` method for accurate cost tracking
+- **NEW**: Automatic bankroll adjustment based on actual premiums
+- **NEW**: Undo record tracking in `bankroll_history.csv`
+- **NEW**: Position-specific cost reconciliation
+- **NEW**: Audit trail for all bankroll adjustments
+
+#### Persistent Browser Session Management
+- **NEW**: Single `RobinhoodBot` instance across loop iterations
+- **NEW**: `ensure_session()` method with configurable idle timeout (15 min default)
+- **NEW**: Automatic session restart and recovery
+- **NEW**: Selenium exception handling with exponential back-off
+- **NEW**: Last action timestamp tracking for session management
+
+### 🔧 Technical Improvements
+
+#### Enhanced Slack Integration
+- **IMPROVED**: `EnhancedSlackIntegration` with confirmation message handler
+- **IMPROVED**: Trade confirmation manager integration
+- **IMPROVED**: Ephemeral message support with fallback to regular messages
+- **IMPROVED**: Comprehensive unit test coverage (≥85%)
+
+#### Browser Automation Enhancements
+- **IMPROVED**: Persistent browser session reduces login frequency
+- **IMPROVED**: Session responsiveness checks and automatic recovery
+- **IMPROVED**: Robust error handling for stale sessions and disconnections
+- **IMPROVED**: Memory and resource optimization for long-running sessions
+
+#### Trade Confirmation Workflow
+- **IMPROVED**: Integration with bankroll reconciliation
+- **IMPROVED**: Automatic `apply_fill()` calls on trade submission
+- **IMPROVED**: Position ID tracking for accurate cost updates
+- **IMPROVED**: Enhanced logging and audit trail
+
+### 🐛 Bug Fixes
+
+#### Session Management
+- **FIXED**: Browser session timeouts in loop mode
+- **FIXED**: Memory leaks from repeated browser instantiation
+- **FIXED**: Stale cookie handling and re-authentication
+- **FIXED**: WebDriver exception handling and recovery
+
+#### Bankroll Accuracy
+- **FIXED**: Estimated vs actual premium discrepancies
+- **FIXED**: Missing cost adjustments for custom fill prices
+- **FIXED**: Bankroll state inconsistencies after trades
+- **FIXED**: Position cost tracking accuracy
+
+### 📚 Documentation
+
+#### User Documentation
+- **NEW**: Slack trade confirmation setup guide
+- **NEW**: Message format examples and bot responses
+- **NEW**: Mobile trading workflow documentation
+- **NEW**: Session management and recovery procedures
+
+#### Developer Documentation
+- **NEW**: Unit test suite for Slack confirmation
+- **NEW**: API documentation for new methods
+- **NEW**: Architecture updates for persistent sessions
+- **NEW**: Error handling and recovery patterns
+
+### 🔒 Security & Reliability
+
+#### Enhanced Error Recovery
+- **IMPROVED**: Exponential back-off for consecutive failures
+- **IMPROVED**: Graceful degradation when services unavailable
+- **IMPROVED**: Comprehensive logging for debugging
+- **IMPROVED**: Session state validation and recovery
+
+#### Data Integrity
+- **IMPROVED**: Bankroll reconciliation prevents cost drift
+- **IMPROVED**: Audit trail for all financial transactions
+- **IMPROVED**: Position tracking accuracy
+- **IMPROVED**: Trade outcome recording reliability
+
+### ⚠️ Breaking Changes
+
+- **CHANGED**: `TradeConfirmationManager.record_trade_outcome()` now calls `apply_fill()` automatically
+- **CHANGED**: Browser session management moved from per-cycle to persistent model
+- **CHANGED**: Slack integration requires `SLACK_BOT_TOKEN` for confirmation features
+
+### 🔄 Migration Guide
+
+1. **Update Environment Variables**: Add `SLACK_BOT_TOKEN` to `.env` file
+2. **Update Dependencies**: Run `pip install -r requirements.txt`
+3. **Database Migration**: Existing `bankroll.json` files are compatible
+4. **Configuration**: No config changes required, all features backward compatible
+
+---
+
 ## [2.0.0] - 2025-01-02
 
 ### 🎉 Major New Features

@@ -200,14 +200,17 @@ class LLMClient:
     def _get_system_prompt(self) -> str:
         """Get the system prompt for trade decision making."""
         config = load_config()
-        body_cutoff = config.get('MIN_CANDLE_BODY_PCT', 0.30)
+        body_cutoff = config.get('MIN_CANDLE_BODY_PCT', 0.05)  # Lowered from 0.30% to 0.05%
         return f"""You are an options-trading assistant specializing in SPY breakout strategies using Heikin-Ashi candles analyzing 5-minute intervals.
 
 DECISION RULES:
 - Return JSON only via the choose_trade function
 - Calibrate confidence against a 20-trade memory: confidence = wins_last20 / 20 (cap 0.50 if no memory)
 - If today_true_range_pct < 40, subtract 0.15 from confidence
-- If breakout candle body < {body_cutoff}% of price, return NO_TRADE & confidence 0
+- If breakout candle body < {body_cutoff}% of price, return NO_TRADE & confidence 0 (UNLESS momentum signals override)
+- MOMENTUM OVERRIDE: If consecutive_bullish/bearish OR price_change_15min > 0.3%, ignore body threshold
+- For STRONG_BULLISH trend: prefer CALL signals
+- For STRONG_BEARISH trend: prefer PUT signals
 - Boost confidence by 0.10 only when room_to_next_pivot >= 0.5%
 - If 5-min IV > 45%, halve confidence
 - If confidence < 0.35, override decision to NO_TRADE
@@ -386,13 +389,14 @@ ANALYSIS FOCUS:
         
         return validated_data
     
-    def make_trade_decision(self, market_data: Dict, win_history: Optional[list] = None) -> TradeDecision:
+    def make_trade_decision(self, market_data: Dict, win_history: Optional[list] = None, enhanced_context: Optional[Dict] = None) -> TradeDecision:
         """
-        Make a trade decision based on market analysis.
+        Make a trade decision based on market analysis with enhanced learning context.
         
         Args:
             market_data: Market analysis dictionary from data.py
-            win_history: List of recent win/loss results for confidence calibration
+            win_history: List of recent win/loss results for confidence calibration (backward compatibility)
+            enhanced_context: Enhanced trade history context from hybrid approach (optional)
         
         Returns:
             TradeDecision object
@@ -400,27 +404,76 @@ ANALYSIS FOCUS:
         # Validate and fill missing market data fields
         validated_market_data = self._validate_and_fill_market_data(market_data)
         
-        # Prepare context about recent performance
-        win_rate_context = ""
-        if win_history:
+        # Prepare enhanced context about recent performance
+        performance_context = ""
+        
+        if enhanced_context:
+            # Use enhanced context for richer LLM learning
+            perf_metrics = enhanced_context.get('performance_metrics', {})
+            recent_patterns = enhanced_context.get('recent_patterns', [])
+            symbol_performance = enhanced_context.get('symbol_performance', {})
+            confidence_modifiers = enhanced_context.get('confidence_modifiers', {})
+            
+            # Build comprehensive performance context
+            win_rate = perf_metrics.get('win_rate', 0.0)
+            current_streak = perf_metrics.get('current_streak', 0)
+            avg_win_pct = perf_metrics.get('avg_win_pct', 0.0)
+            avg_loss_pct = perf_metrics.get('avg_loss_pct', 0.0)
+            total_trades = perf_metrics.get('total_trades', 0)
+            
+            performance_context = f"""TRADING PERFORMANCE CONTEXT:
+• Overall Performance: {win_rate:.1%} win rate over {total_trades} trades
+• Current Streak: {current_streak} {'wins' if current_streak > 0 else 'losses' if current_streak < 0 else 'neutral'}
+• Average Win: +{avg_win_pct:.1f}%, Average Loss: {avg_loss_pct:.1f}%
+"""
+            
+            # Add recent trade patterns
+            if recent_patterns:
+                performance_context += "\n• Recent Trade Patterns:\n"
+                for i, pattern in enumerate(recent_patterns[-3:], 1):  # Last 3 trades
+                    outcome_emoji = "✅" if pattern['outcome'] == 'WIN' else "❌"
+                    performance_context += f"  {i}. {pattern['symbol']} {pattern['option_type']}: {outcome_emoji} {pattern['pnl_pct']:+.1f}% ({pattern['market_condition']})\n"
+            
+            # Add symbol-specific performance
+            current_symbol = validated_market_data.get('symbol', 'UNKNOWN')
+            if current_symbol in symbol_performance:
+                sym_perf = symbol_performance[current_symbol]
+                performance_context += f"\n• {current_symbol} Performance: {sym_perf['win_rate']:.1%} win rate over {sym_perf['total_trades']} trades (avg: {sym_perf['avg_pnl']:+.1f}%)\n"
+            
+            # Add confidence modifiers
+            streak_mod = confidence_modifiers.get('streak_modifier', 0.0)
+            recent_mod = confidence_modifiers.get('recent_performance_modifier', 0.0)
+            if abs(streak_mod) > 0.01 or abs(recent_mod) > 0.01:
+                performance_context += f"\n• Suggested Confidence Adjustments: Streak {streak_mod:+.2f}, Recent Performance {recent_mod:+.2f}\n"
+            
+        elif win_history:
+            # Fallback to basic win history for backward compatibility
             recent_wins = sum(1 for result in win_history[-20:] if result)
             win_rate = recent_wins / min(len(win_history), 20)
-            win_rate_context = f"Recent win rate: {win_rate:.2f} over {min(len(win_history), 20)} trades. "
+            performance_context = f"Recent win rate: {win_rate:.2f} over {min(len(win_history), 20)} trades. "
         
         messages = [
             {"role": "system", "content": self._get_system_prompt()},
             {"role": "user", "content": f"""
-{win_rate_context}
+{performance_context}
 
 Market Analysis:
 {json.dumps(validated_market_data, indent=2)}
 
-Based on this Heikin-Ashi analysis, make your trading decision. Consider:
-1. Breakout strength (candle body %)
+Based on this Heikin-Ashi analysis and your trading performance history, make your trading decision. Consider:
+1. Breakout strength (candle body %) - now more sensitive with 0.05% threshold
 2. Volatility context (true range %)
 3. Room to move to next support/resistance
 4. Volume confirmation
-5. Overall trend direction
+5. Overall trend direction (including STRONG_BULLISH/STRONG_BEARISH signals)
+6. Momentum indicators (consecutive_bullish/bearish, price_change_15min_pct)
+7. Your historical performance patterns and success rates
+8. Recent trade outcomes and market conditions
+
+PAY SPECIAL ATTENTION TO:
+- consecutive_bullish/consecutive_bearish: 3+ candles in same direction = strong momentum
+- price_change_15min_pct: >0.3% move in 15 minutes = significant momentum
+- STRONG_BULLISH/STRONG_BEARISH trends override low body percentage thresholds
 
 Use the choose_trade function to respond."""}
         ]

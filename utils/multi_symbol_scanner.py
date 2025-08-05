@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
 from .data import fetch_market_data, calculate_heikin_ashi, analyze_breakout_pattern
-from .llm import LLMClient
+from .llm import LLMClient, TradeDecision
 from .enhanced_slack import EnhancedSlackIntegration
 
 logger = logging.getLogger(__name__)
@@ -137,25 +137,17 @@ class MultiSymbolScanner:
             lookback_bars = self.config.get('LOOKBACK_BARS', 20)
             breakout_analysis = analyze_breakout_pattern(ha_df, lookback_bars)
             
-            if not breakout_analysis.get('has_breakout', False):
-                logger.info(f"[MULTI-SYMBOL] {symbol}: No breakout pattern detected")
-                return []
+            # Always proceed to LLM analysis - let LLM decide based on all market conditions
+            # The old has_breakout check was incorrect and blocking all trades
             
             # Get current price
             current_price = float(df['Close'].iloc[-1])
             
-            # Prepare market data for LLM
-            market_data = {
-                'symbol': symbol,
-                'current_price': current_price,
-                'breakout_analysis': breakout_analysis,
-                'ha_df': ha_df.to_dict('records')[-5:] if len(ha_df) > 5 else ha_df.to_dict('records'),
-                'timeframe': self.config.get('TIMEFRAME', '5m'),
-                'lookback_bars': self.config.get('LOOKBACK_BARS', 20)
-            }
+            # Prepare standardized market data for LLM
+            market_data = self._prepare_market_data(symbol, df, ha_df, breakout_analysis)
             
-            # Get LLM trade decision
-            trade_decision_result = self.llm_client.make_trade_decision(market_data)
+            # Get LLM trade decision with retry logic
+            trade_decision_result = self._robust_llm_decision(market_data, symbol)
             trade_decision = {
                 'decision': trade_decision_result.decision,
                 'confidence': trade_decision_result.confidence,
@@ -165,6 +157,10 @@ class MultiSymbolScanner:
             # Check if LLM recommends a trade
             if trade_decision['decision'] == 'NO_TRADE':
                 logger.info(f"[MULTI-SYMBOL] {symbol}: LLM recommends NO_TRADE")
+                
+                # Log individual symbol decision for analytics
+                self._log_symbol_decision(symbol, 'NO_TRADE', trade_decision.get('confidence', 0.0), 
+                                        trade_decision.get('reason', 'LLM analysis completed'), current_price)
                 return []
             
             # Check confidence threshold
@@ -173,6 +169,10 @@ class MultiSymbolScanner:
             
             if confidence < min_confidence:
                 logger.info(f"[MULTI-SYMBOL] {symbol}: Confidence {confidence:.2f} below threshold {min_confidence}")
+                
+                # Log individual symbol decision for analytics
+                self._log_symbol_decision(symbol, 'NO_TRADE', confidence, 
+                                        f'Confidence {confidence:.2f} below threshold {min_confidence}', current_price)
                 return []
             
             # Create opportunity record
@@ -194,9 +194,145 @@ class MultiSymbolScanner:
             logger.error(f"[MULTI-SYMBOL] Error analyzing {symbol}: {e}")
             return []
     
+    def _prepare_market_data(self, symbol: str, df: pd.DataFrame, ha_df: pd.DataFrame, breakout_analysis: Dict) -> Dict:
+        """
+        Ensure consistent market data structure for both single and multi-symbol modes.
+        
+        Args:
+            symbol: Stock symbol
+            df: Original price data
+            ha_df: Heikin-Ashi data
+            breakout_analysis: Technical analysis results
+            
+        Returns:
+            Standardized market data dictionary
+        """
+        try:
+            current_price = float(df['Close'].iloc[-1])
+            
+            # Use more context (10 vs 5 candles) for better LLM analysis
+            ha_records = ha_df.to_dict('records')[-10:] if len(ha_df) > 10 else ha_df.to_dict('records')
+            
+            # Standardized structure that matches single-symbol mode
+            market_data = {
+                'symbol': symbol,  # Always include symbol for consistency
+                'current_price': current_price,
+                'breakout_analysis': breakout_analysis,
+                'ha_df': ha_records,
+                'timeframe': self.config.get('TIMEFRAME', '5m'),
+                'lookback_bars': self.config.get('LOOKBACK_BARS', 20),
+                'analysis_timestamp': datetime.now().isoformat(),  # Add timestamp for freshness
+                
+                # Additional fields for LLM validation compatibility
+                'today_true_range_pct': breakout_analysis.get('today_true_range_pct', 0.0),
+                'room_to_next_pivot': breakout_analysis.get('room_to_next_pivot', 0.0),
+                'iv_5m': breakout_analysis.get('iv_5m', 30.0),
+                'candle_body_pct': breakout_analysis.get('candle_body_pct', 0.0),
+                'trend_direction': breakout_analysis.get('trend_direction', 'NEUTRAL'),
+                'volume_confirmation': breakout_analysis.get('volume_confirmation', False),
+                'support_levels': breakout_analysis.get('support_levels', []),
+                'resistance_levels': breakout_analysis.get('resistance_levels', [])
+            }
+            
+            logger.debug(f"[MULTI-SYMBOL] {symbol}: Prepared standardized market data with {len(ha_records)} candles")
+            return market_data
+            
+        except Exception as e:
+            logger.error(f"[MULTI-SYMBOL] Error preparing market data for {symbol}: {e}")
+            # Return minimal safe structure
+            return {
+                'symbol': symbol,
+                'current_price': 0.0,
+                'breakout_analysis': {},
+                'ha_df': [],
+                'timeframe': '5m',
+                'lookback_bars': 20,
+                'analysis_timestamp': datetime.now().isoformat(),
+                'today_true_range_pct': 0.0,
+                'room_to_next_pivot': 0.0,
+                'iv_5m': 30.0,
+                'candle_body_pct': 0.0,
+                'trend_direction': 'NEUTRAL',
+                'volume_confirmation': False,
+                'support_levels': [],
+                'resistance_levels': []
+            }
+    
+    def _robust_llm_decision(self, market_data: Dict, symbol: str, retries: int = 2):
+        """
+        Make LLM decision with retry logic and rate limiting protection.
+        
+        Args:
+            market_data: Market analysis data
+            symbol: Stock symbol being analyzed
+            retries: Number of retry attempts
+            
+        Returns:
+            TradeDecision object
+        """
+        last_error = None
+        for attempt in range(retries + 1):
+            try:
+                # Add delay to prevent rate limiting (except first attempt)
+                if attempt > 0:
+                    delay = min(2 ** attempt, 5)  # Exponential backoff, max 5 seconds
+                    logger.info(f"[MULTI-SYMBOL] {symbol}: Retry attempt {attempt}, waiting {delay}s...")
+                    time.sleep(delay)
+                
+                # Create fresh LLM client instance for context isolation
+                # This prevents previous symbol analysis from influencing current decision
+                symbol_llm = LLMClient(self.config.get('MODEL', 'gpt-4o-mini'))
+                
+                # Get enhanced context for better LLM learning (if bankroll manager available)
+                enhanced_context = None
+                win_history = []
+                if hasattr(self, 'bankroll_manager') and self.bankroll_manager:
+                    try:
+                        enhanced_context = self.bankroll_manager.get_enhanced_llm_context()
+                        win_history = enhanced_context.get('win_history', [])
+                    except Exception as e:
+                        logger.warning(f"[MULTI-SYMBOL] Could not get enhanced context: {e}")
+                        # Fallback to basic win history
+                        win_history = self.bankroll_manager.get_win_history() if self.bankroll_manager else []
+                
+                result = symbol_llm.make_trade_decision(market_data, win_history, enhanced_context)
+                
+                # Add small delay after successful call to prevent rate limiting
+                time.sleep(0.5)  # 500ms delay between LLM calls
+                
+                logger.debug(f"[MULTI-SYMBOL] {symbol}: LLM decision successful on attempt {attempt + 1}")
+                return result
+                
+            except Exception as e:
+                last_error = e
+                error_msg = str(e).lower()
+                
+                # Check for rate limiting errors
+                if any(term in error_msg for term in ['rate limit', 'quota', 'too many requests']):
+                    if attempt < retries:
+                        wait_time = min(10 * (attempt + 1), 30)  # Progressive wait for rate limits
+                        logger.warning(f"[MULTI-SYMBOL] {symbol}: Rate limit hit, waiting {wait_time}s before retry")
+                        time.sleep(wait_time)
+                        continue
+                
+                # Log the error
+                if attempt < retries:
+                    logger.warning(f"[MULTI-SYMBOL] {symbol}: LLM attempt {attempt + 1} failed, retrying: {e}")
+                else:
+                    logger.error(f"[MULTI-SYMBOL] {symbol}: All LLM attempts failed: {e}")
+        
+        # All attempts failed, return safe default
+        logger.error(f"[MULTI-SYMBOL] {symbol}: Returning NO_TRADE due to LLM failures")
+        return TradeDecision(
+            decision="NO_TRADE",
+            confidence=0.0,
+            reason=f"LLM error after {retries + 1} attempts: {str(last_error) if last_error else 'Unknown error'}",
+            tokens_used=0
+        )
+    
     def _calculate_priority_score(self, symbol: str, confidence: float, breakout_analysis: Dict) -> float:
         """
-        Calculate priority score for ranking opportunities.
+        Calculate priority score for opportunity ranking.
         
         Args:
             symbol: Stock symbol
@@ -207,31 +343,130 @@ class MultiSymbolScanner:
             Priority score (higher = better)
         """
         try:
-            # Ensure confidence is a valid number
-            if not isinstance(confidence, (int, float)):
-                confidence = 0.0
+            # Base score from confidence
+            score = confidence * 100
             
-            score = float(confidence) * 100  # Base score from confidence
+            # Technical strength bonus
+            candle_body_pct = breakout_analysis.get('candle_body_pct', 0.0)
+            if isinstance(candle_body_pct, (int, float)):
+                score += candle_body_pct * 10  # Up to 10 points for strong candles
             
-            # Add symbol priority bonus
-            if symbol in self.priority_order:
-                priority_bonus = (len(self.priority_order) - self.priority_order.index(symbol)) * 5
-                score += priority_bonus
-            
-            # Add technical strength bonus
-            breakout_strength = breakout_analysis.get('breakout_strength', 0.0)
-            if isinstance(breakout_strength, (int, float)):
-                score += float(breakout_strength) * 10
-            
-            # Add volume confirmation bonus
-            volume_ratio = breakout_analysis.get('volume_ratio', 1.0)
-            if isinstance(volume_ratio, (int, float)) and float(volume_ratio) > 1.5:
+            # Volume confirmation bonus
+            if breakout_analysis.get('volume_confirmation', False):
                 score += 5
             
-            return float(score)
+            # Trend alignment bonus
+            trend = breakout_analysis.get('trend_direction', 'NEUTRAL')
+            if trend in ['BULLISH', 'BEARISH']:  # Clear trend direction
+                score += 3
+            
+            # Room to move bonus
+            room_to_move = breakout_analysis.get('room_to_next_pivot', 0.0)
+            if isinstance(room_to_move, (int, float)) and room_to_move > 2.0:
+                score += min(room_to_move, 10)  # Up to 10 points for room to move
+            
+            return max(score, 0.0)  # Ensure non-negative
+            
         except Exception as e:
-            logger.warning(f"[MULTI-SYMBOL] Error calculating priority score for {symbol}: {e}")
-            return 0.0
+            logger.error(f"[MULTI-SYMBOL] Error calculating priority score for {symbol}: {e}")
+            return confidence * 100  # Fallback to confidence-only scoring
+    
+    def _should_use_batch_analysis(self, opportunities_count: int) -> bool:
+        """
+        Determine if batch analysis should be used based on number of opportunities.
+        
+        Args:
+            opportunities_count: Number of potential opportunities to analyze
+            
+        Returns:
+            True if batch analysis should be used
+        """
+        # Use batch analysis for 2+ symbols to reduce API calls
+        # But only if enabled in config (default: True for cost savings)
+        batch_enabled = self.config.get('llm_batch_analysis', True)
+        return batch_enabled and opportunities_count >= 2
+    
+    def _create_batch_analysis_prompt(self, symbols_data: List[Dict]) -> str:
+        """
+        Create a single LLM prompt to analyze multiple symbols simultaneously.
+        
+        Args:
+            symbols_data: List of market data for each symbol
+            
+        Returns:
+            Formatted batch analysis prompt
+        """
+        prompt = "Analyze the following symbols simultaneously and provide trading decisions for each:\n\n"
+        
+        for i, data in enumerate(symbols_data, 1):
+            symbol = data.get('symbol', f'SYMBOL_{i}')
+            current_price = data.get('current_price', 0)
+            breakout_analysis = data.get('breakout_analysis', {})
+            
+            prompt += f"Symbol {i}: {symbol}\n"
+            prompt += f"Current Price: ${current_price:.2f}\n"
+            prompt += f"Breakout Analysis: {breakout_analysis}\n"
+            prompt += f"Technical Data: {len(data.get('ha_df', []))} candles available\n\n"
+        
+        prompt += "For each symbol, provide a trading decision (CALL/PUT/NO_TRADE), confidence (0-1), and reasoning. "
+        prompt += "Consider each symbol independently and rank them by opportunity quality."
+        
+        return prompt
+    
+    def _parse_batch_results(self, batch_result, symbols_data: List[Dict]) -> List[Dict]:
+        """
+        Parse batch LLM results and convert to individual symbol decisions.
+        
+        Args:
+            batch_result: LLM batch analysis result
+            symbols_data: Original symbol data for reference
+            
+        Returns:
+            List of individual trade decisions
+        """
+        try:
+            # For now, fall back to individual analysis if batch parsing fails
+            # This is a safety mechanism - batch analysis is an optimization
+            logger.warning("[MULTI-SYMBOL] Batch result parsing not fully implemented, using individual analysis")
+            return self._individual_analysis(symbols_data)
+            
+        except Exception as e:
+            logger.error(f"[MULTI-SYMBOL] Error parsing batch results: {e}")
+            return self._individual_analysis(symbols_data)
+    
+    def _individual_analysis(self, symbols_data: List[Dict]) -> List[Dict]:
+        """
+        Fallback to individual symbol analysis.
+        
+        Args:
+            symbols_data: List of market data for each symbol
+            
+        Returns:
+            List of individual trade decisions
+        """
+        results = []
+        for data in symbols_data:
+            symbol = data.get('symbol', 'UNKNOWN')
+            try:
+                # Use the existing robust LLM decision method
+                decision = self._robust_llm_decision(data, symbol)
+                results.append({
+                    'symbol': symbol,
+                    'decision': decision.decision,
+                    'confidence': decision.confidence,
+                    'reason': decision.reason,
+                    'tokens_used': decision.tokens_used
+                })
+            except Exception as e:
+                logger.error(f"[MULTI-SYMBOL] Error in individual analysis for {symbol}: {e}")
+                results.append({
+                    'symbol': symbol,
+                    'decision': 'NO_TRADE',
+                    'confidence': 0.0,
+                    'reason': f'Analysis error: {str(e)}',
+                    'tokens_used': 0
+                })
+        return results
     
     def _prioritize_opportunities(self, opportunities: List[Dict]) -> List[Dict]:
         """
@@ -279,15 +514,18 @@ class MultiSymbolScanner:
         
         try:
             if len(opportunities) == 1:
-                # Single opportunity - use standard breakout alert
+                # Single opportunity - use enhanced breakout alert with chart
                 opp = opportunities[0]
-                self.slack_notifier.send_breakout_alert(
+                # For enhanced Slack integration, we need market data DataFrame
+                # Create a simple DataFrame from the breakout analysis for chart generation
+                market_data = self._create_market_data_for_chart(opp)
+                
+                self.slack_notifier.send_breakout_alert_with_chart(
                     symbol=opp['symbol'],
                     decision=opp['decision'],
-                    confidence=opp['confidence'],
-                    current_price=opp['current_price'],
-                    reason=opp['reason'],
-                    breakout_analysis=opp['breakout_analysis']
+                    analysis=opp['breakout_analysis'],
+                    market_data=market_data,
+                    confidence=opp['confidence']
                 )
             else:
                 # Multiple opportunities - send summary alert
@@ -361,3 +599,72 @@ class MultiSymbolScanner:
             }
         
         return performance
+    
+    def _create_market_data_for_chart(self, opportunity: Dict) -> pd.DataFrame:
+        """
+        Create a simple market data DataFrame for chart generation.
+        
+        Args:
+            opportunity: Trading opportunity with breakout analysis
+            
+        Returns:
+            DataFrame with basic market data for charting
+        """
+        try:
+            # Create a minimal DataFrame with current price data
+            # This is a simplified version for chart generation
+            current_time = datetime.now()
+            
+            data = {
+                'timestamp': [current_time],
+                'Open': [opportunity['current_price']],
+                'High': [opportunity['current_price']],
+                'Low': [opportunity['current_price']],
+                'Close': [opportunity['current_price']],
+                'Volume': [1000]  # Placeholder volume
+            }
+            
+            df = pd.DataFrame(data)
+            df.set_index('timestamp', inplace=True)
+            
+            return df
+            
+        except Exception as e:
+            logger.warning(f"[MULTI-SYMBOL] Failed to create market data for chart: {e}")
+            # Return empty DataFrame as fallback
+            return pd.DataFrame()
+    
+    def _log_symbol_decision(self, symbol: str, decision: str, confidence: float, reason: str, current_price: float):
+        """
+        Log individual symbol decision for analytics and debugging.
+        
+        Args:
+            symbol: Stock symbol
+            decision: Trade decision (CALL, PUT, NO_TRADE)
+            confidence: LLM confidence score
+            reason: Decision reasoning
+            current_price: Current stock price
+        """
+        try:
+            from .logging_utils import log_trade_decision
+            
+            trade_data = {
+                'timestamp': datetime.now().isoformat(),
+                'symbol': symbol,
+                'decision': decision,
+                'confidence': confidence,
+                'reason': reason,
+                'current_price': current_price,
+                'strike': '',
+                'direction': '',
+                'quantity': '',
+                'premium': '',
+                'total_cost': '',
+                'llm_tokens': 0
+            }
+            
+            log_trade_decision(self.config.get('TRADE_LOG_FILE', 'logs/trade_log.csv'), trade_data)
+            logger.debug(f"[MULTI-SYMBOL] Logged {symbol} decision: {decision} (confidence: {confidence:.2f})")
+            
+        except Exception as e:
+            logger.error(f"[MULTI-SYMBOL] Error logging {symbol} decision: {e}")

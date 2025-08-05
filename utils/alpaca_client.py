@@ -142,28 +142,40 @@ class AlpacaClient:
             logger.debug(f"[ALPACA] Requesting {symbol} data from {start_time} with {timeframe}")
             bars = self.data_client.get_stock_bars(request)
             
-            logger.debug(f"[ALPACA] Response keys: {list(bars.keys()) if bars else 'None'}")
+            logger.debug(f"[ALPACA] Response type: {type(bars)}")
             
-            if bars and symbol in bars:
-                df = bars.df
-                logger.debug(f"[ALPACA] Raw DataFrame shape: {df.shape}")
-                logger.debug(f"[ALPACA] Raw DataFrame columns: {df.columns.tolist()}")
-                
-                if df.empty:
-                    logger.warning(f"[ALPACA] DataFrame is empty for {symbol}")
+            # Handle the BarSet response properly
+            if bars:
+                try:
+                    # Try to get the DataFrame directly
+                    df = bars.df
+                    
+                    # Filter for the specific symbol if multi-symbol response
+                    if 'symbol' in df.columns:
+                        df = df[df['symbol'] == symbol]
+                    
+                    logger.debug(f"[ALPACA] Raw DataFrame shape: {df.shape}")
+                    logger.debug(f"[ALPACA] Raw DataFrame columns: {df.columns.tolist()}")
+                    
+                    if df.empty:
+                        logger.warning(f"[ALPACA] DataFrame is empty for {symbol}")
+                        return None
+                    
+                    # Rename columns to match Yahoo Finance format
+                    df = df.rename(columns={
+                        'open': 'Open',
+                        'high': 'High',
+                        'low': 'Low',
+                        'close': 'Close',
+                        'volume': 'Volume'
+                    })
+                    
+                    logger.info(f"[ALPACA] Retrieved {len(df)} bars for {symbol} (timeframe: {timeframe})")
+                    return df
+                    
+                except Exception as df_error:
+                    logger.error(f"[ALPACA] Failed to process DataFrame for {symbol}: {df_error}")
                     return None
-                
-                # Rename columns to match Yahoo Finance format
-                df = df.rename(columns={
-                    'open': 'Open',
-                    'high': 'High',
-                    'low': 'Low',
-                    'close': 'Close',
-                    'volume': 'Volume'
-                })
-                
-                logger.info(f"[ALPACA] Retrieved {len(df)} bars for {symbol} (timeframe: {timeframe})")
-                return df
             else:
                 logger.warning(f"[ALPACA] No data found for symbol {symbol} in response")
             

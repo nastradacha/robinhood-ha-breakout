@@ -142,6 +142,7 @@ class RobinhoodBot:
         self.wait = None
         self.idle_since = None
         self.last_symbol = None
+        self.last_action = time.time()  # Track last action for session management
     
     def __enter__(self):
         self.start_browser()
@@ -273,6 +274,78 @@ class RobinhoodBot:
                 logger.warning(f"Failed to load cookies: {e}")
 
         logger.info("Browser started successfully (stealth mode)")
+        self.last_action = time.time()  # Update last action timestamp
+    
+    def ensure_session(self, max_idle_sec: int = 900) -> bool:
+        """
+        Ensure browser session is active and restart if idle too long.
+        
+        Args:
+            max_idle_sec: Maximum idle time in seconds (default 900 = 15 minutes)
+            
+        Returns:
+            True if session is active, False if restart failed
+        """
+        try:
+            current_time = time.time()
+            idle_time = current_time - self.last_action
+            
+            if idle_time > max_idle_sec:
+                logger.info(f"[SESSION] Idle for {idle_time:.0f}s (>{max_idle_sec}s), restarting browser")
+                return self.restart()
+            
+            # Check if browser is still responsive
+            if self.driver is None:
+                logger.info("[SESSION] No active driver, starting browser")
+                self.start_browser()
+                return True
+            
+            try:
+                # Simple responsiveness check
+                self.driver.current_url
+                self.last_action = current_time
+                return True
+            except Exception as e:
+                logger.warning(f"[SESSION] Browser unresponsive: {e}, restarting")
+                return self.restart()
+                
+        except Exception as e:
+            logger.error(f"[SESSION] Error ensuring session: {e}")
+            return False
+    
+    def restart(self) -> bool:
+        """
+        Restart the browser session.
+        
+        Returns:
+            True if restart successful, False otherwise
+        """
+        try:
+            logger.info("[SESSION] Restarting browser session")
+            
+            # Close existing session
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.driver = None
+                self.wait = None
+            
+            # Start new session
+            self.start_browser()
+            self.last_action = time.time()
+            
+            logger.info("[SESSION] Browser session restarted successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[SESSION] Failed to restart browser: {e}")
+            return False
+    
+    def _update_last_action(self):
+        """Update the last action timestamp."""
+        self.last_action = time.time()
     
     def ensure_open(self, symbol: str) -> bool:
         """Ensure the options chain is open for the given symbol.
@@ -694,7 +767,7 @@ class RobinhoodBot:
             
             # Step 3: Set quantity (simplified)
             try:
-                qty_input = self.driver.find_element(By.CSS_SELECTOR, "input[type='number']")
+                qty_input = self.driver.find_element(By.CSS_SELECTOR,  "#OptionOrderForm-Quantity-FormField")
                 qty_input.clear()
                 qty_input.send_keys(str(quantity))
                 logger.info(f"[OK] Set quantity to {quantity}")
@@ -945,7 +1018,7 @@ class RobinhoodBot:
                 
                 # Look for quantity input field on the contract selection screen
                 quantity_selectors = [
-                    "input[type='number']",
+                     "#OptionOrderForm-Quantity-FormField",
                     "input[name*='quantity']",
                     "input[name*='contracts']",
                     "input[placeholder*='quantity']",
@@ -1050,99 +1123,127 @@ class RobinhoodBot:
     
     def get_option_premium(self) -> Optional[float]:
         """
-        Extract option premium from the current page.
-        Based on actual Robinhood DOM structure and order flow.
+        Extract option premium from the current page - FAST VERSION.
+        Optimized for speed and accuracy in live trading.
         
         Returns:
             Option premium as float or None
         """
         try:
             import re
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
             
-            # Strategy 1: Look for premium in order form (most reliable)
-            order_form_selectors = [
-                "[data-testid*='order-form'] *[class*='price']",
-                "[data-testid*='order-form'] *[class*='premium']",
-                "[class*='OptionChainOrderForm'] *[class*='price']",
-                "[class*='OrderForm'] *[class*='price']"
-            ]
-            
-            for selector in order_form_selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        text = element.text.strip()
-                        # Look for price patterns like "$1.23", "1.23", "$1.23 per contract"
-                        price_match = re.search(r'\$?(\d+\.\d{1,2})', text)
-                        if price_match:
-                            premium = float(price_match.group(1))
-                            if 0.01 <= premium <= 100.0:  # Reasonable premium range
-                                logger.info(f"Found option premium in order form: ${premium}")
-                                return premium
-                except:
-                    continue
-            
-            # Strategy 2: Look for premium in options chain (Ask price)
-            ask_price_selectors = [
-                "*[class*='ask'] *[class*='price']",
-                "*[data-testid*='ask'] *[class*='price']",
-                "button[class*='ask'] span",
-                "button[aria-label*='ask'] span"
-            ]
-            
-            for selector in ask_price_selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        text = element.text.strip()
-                        price_match = re.search(r'\$?(\d+\.\d{1,2})', text)
-                        if price_match:
-                            premium = float(price_match.group(1))
-                            if 0.01 <= premium <= 100.0:  # Reasonable premium range
-                                logger.info(f"Found option premium from ask price: ${premium}")
-                                return premium
-                except:
-                    continue
-            
-            # Strategy 3: Look for any price-like elements on the page
-            general_price_selectors = [
-                "*[class*='price']",
-                "*[class*='premium']",
-                "*[data-testid*='price']",
-                "*[data-testid*='premium']",
-                "span:contains('$')",
-                "div:contains('$')"
-            ]
-            
-            for selector in general_price_selectors:
-                try:
-                    if ":contains" in selector:
-                        # Use JavaScript to find elements containing '$'
-                        elements = self.driver.execute_script(
-                            r"""
-                            return Array.from(document.querySelectorAll('span, div')).filter(
-                                el => el.textContent.includes('$') && 
-                                      el.textContent.match(/\$\d+\.\d{1,2}/) &&
-                                      el.offsetParent !== null
-                            );
-                            """
-                        )
-                    else:
-                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+            # Fast Strategy 1: Look for "Ask $X.XX" pattern (most common)
+            try:
+                # Use JavaScript for fastest extraction
+                premium = self.driver.execute_script(
+                    """
+                    // Look for Ask price pattern
+                    const askElements = Array.from(document.querySelectorAll('*')).filter(
+                        el => el.textContent && el.textContent.match(/Ask\s*\$\d+\.\d{2}/i)
+                    );
                     
-                    for element in elements:
-                        text = element.text.strip() if hasattr(element, 'text') else element.get('textContent', '')
-                        price_matches = re.findall(r'\$?(\d+\.\d{1,2})', text)
-                        
-                        for price_str in price_matches:
-                            premium = float(price_str)
-                            if 0.01 <= premium <= 100.0:  # Reasonable premium range
-                                logger.info(f"Found option premium (general search): ${premium}")
-                                return premium
-                except:
-                    continue
+                    for (let el of askElements) {
+                        const match = el.textContent.match(/Ask\s*\$([\d.]+)/i);
+                        if (match) {
+                            const price = parseFloat(match[1]);
+                            if (price >= 0.01 && price <= 100) {
+                                return price;
+                            }
+                        }
+                    }
+                    
+                    // Look for Bid/Ask format
+                    const bidAskElements = Array.from(document.querySelectorAll('*')).filter(
+                        el => el.textContent && el.textContent.match(/Bid\s*\$[\d.]+\s*•\s*Ask\s*\$[\d.]+/i)
+                    );
+                    
+                    for (let el of bidAskElements) {
+                        const match = el.textContent.match(/Ask\s*\$([\d.]+)/i);
+                        if (match) {
+                            const price = parseFloat(match[1]);
+                            if (price >= 0.01 && price <= 100) {
+                                return price;
+                            }
+                        }
+                    }
+                    
+                    return null;
+                    """
+                )
+                
+                if premium:
+                    logger.info(f"[FAST] Found option premium: ${premium:.2f}")
+                    return premium
+            except Exception as e:
+                logger.debug(f"Fast strategy 1 failed: {e}")
             
-            logger.warning("Could not extract option premium from any strategy")
+            # Fast Strategy 2: Look in order form area
+            try:
+                # Wait briefly for order form to load
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "[class*='order'], [class*='Order'], [data-testid*='order']"))
+                )
+                
+                premium = self.driver.execute_script(
+                    """
+                    // Look in order form area
+                    const orderForms = document.querySelectorAll('[class*="order"], [class*="Order"], [data-testid*="order"]');
+                    
+                    for (let form of orderForms) {
+                        const text = form.textContent || '';
+                        const matches = text.match(/\$([\d.]+)/g);
+                        
+                        if (matches) {
+                            for (let match of matches) {
+                                const price = parseFloat(match.replace('$', ''));
+                                if (price >= 0.01 && price <= 100) {
+                                    return price;
+                                }
+                            }
+                        }
+                    }
+                    
+                    return null;
+                    """
+                )
+                
+                if premium:
+                    logger.info(f"[FAST] Found option premium in order form: ${premium:.2f}")
+                    return premium
+            except Exception as e:
+                logger.debug(f"Fast strategy 2 failed: {e}")
+            
+            # Fast Strategy 3: Quick DOM scan for price patterns
+            try:
+                premium = self.driver.execute_script(
+                    """
+                    // Quick scan for any reasonable price
+                    const allText = document.body.textContent || '';
+                    const priceMatches = allText.match(/\$([0-9]+\.[0-9]{2})/g);
+                    
+                    if (priceMatches) {
+                        for (let match of priceMatches) {
+                            const price = parseFloat(match.replace('$', ''));
+                            if (price >= 0.01 && price <= 100) {
+                                return price;
+                            }
+                        }
+                    }
+                    
+                    return null;
+                    """
+                )
+                
+                if premium:
+                    logger.info(f"[FAST] Found option premium (DOM scan): ${premium:.2f}")
+                    return premium
+            except Exception as e:
+                logger.debug(f"Fast strategy 3 failed: {e}")
+            
+            logger.warning("[FAST] Could not extract option premium quickly")
             return None
         
         except Exception as e:
@@ -1399,7 +1500,7 @@ class RobinhoodBot:
             
             # Set quantity if needed
             quantity_selectors = [
-                "input[type='number']",
+                 "#OptionOrderForm-Quantity-FormField",
                 "input[placeholder*='quantity']",
                 "input[placeholder*='contracts']",
                 "[data-testid*='quantity'] input"

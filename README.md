@@ -216,6 +216,26 @@ python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 - Keeps the browser open between checks (more efficient)
 - Automatically restarts the browser if it's been idle for 4+ hours
 
+### 🧠 Enhanced AI Reliability (NEW!)
+
+**Bulletproof multi-symbol LLM integration with advanced error recovery:**
+
+- **Robust Error Recovery**: Automatic retry logic with exponential backoff for API failures
+- **Rate Limit Protection**: Smart delays and progressive wait times to prevent API throttling
+- **Context Isolation**: Fresh AI analysis for each symbol to prevent cross-contamination
+- **Standardized Data**: Consistent market data structure ensures reliable AI decisions
+- **Batch Analysis**: Optional batching for multiple symbols to reduce API costs
+- **Graceful Degradation**: Falls back to safe NO_TRADE decisions on persistent failures
+
+**Configuration options in `config.yaml`:**
+```yaml
+llm_batch_analysis: true  # Enable batching for cost savings
+multi_symbol:
+  enabled: true
+  max_concurrent_trades: 1  # Conservative approach
+  priority_order: ["SPY", "QQQ", "IWM"]  # Trade preference order
+```
+
 ### 📊 Position Monitoring Mode (NEW!)
 
 **Automated real-time position tracking with profit/loss alerts:**
@@ -819,6 +839,47 @@ python record_trade_outcome.py stats
    - **If CLOSE**: Enter exit price and record win/loss
    - System updates position ledger automatically
 
+### 📱 Slack Trade Confirmation
+
+The system now supports remote trade confirmation via Slack messages, perfect for mobile trading:
+
+#### Setup
+1. Ensure `SLACK_BOT_TOKEN` is configured in your `.env` file
+2. Invite the bot to your trading channel
+3. The bot will listen for confirmation messages
+
+#### Confirmation Messages
+After reaching the Review screen, send one of these messages to your Slack channel:
+
+**✅ Submitted at Expected Price:**
+```
+submitted
+```
+
+**✅ Submitted at Custom Price:**
+```
+filled $1.27
+filled 0.85
+```
+
+**❌ Cancelled Trade:**
+```
+cancelled
+```
+
+#### Bot Responses
+The bot will respond with an ephemeral confirmation:
+```
+✅ Trade recorded (SUBMITTED @ $1.27)
+❌ Trade recorded (CANCELLED)
+```
+
+#### Benefits
+- **Mobile-friendly**: Confirm trades from your phone
+- **Accurate logging**: Automatically records actual fill prices
+- **Bankroll reconciliation**: Adjusts bankroll based on real premiums
+- **Audit trail**: All confirmations logged with timestamps
+
 #### End of Session
 1. **Record Outcomes** (if not done automatically)
    ```bash
@@ -1133,6 +1194,41 @@ summary = manager.get_performance_summary()
 print(f"Win Rate: {summary['win_rate_pct']:.1f}%")
 print(f"Total Return: {summary['total_return_pct']:.1f}%")
 ```
+
+## 🔄 Exit-Monitor Auto-Launch
+
+**Automatic Position Monitoring After Trade Execution**
+
+When you submit a trade, the system automatically starts monitoring your position for profit/loss targets. This ensures you never miss important exit opportunities.
+
+### How It Works
+
+1. **Auto-Start**: After confirming a trade (clicking Submit), a background monitor process automatically starts
+2. **Real-Time Tracking**: Monitors your position every 15 seconds using real-time market data
+3. **Smart Alerts**: Sends Slack notifications when profit targets or stop-loss levels are hit
+4. **Graceful Cleanup**: Automatically stops monitoring when you exit the main script
+
+### CLI Usage
+
+```bash
+# Enable auto-monitoring (default behavior)
+python main.py --loop --auto-start-monitor --interval 2
+
+# Disable auto-monitoring for testing
+python main.py --loop --no-auto-start-monitor --interval 5
+
+# Manual monitor management
+python utils/monitor_launcher.py start --symbol SPY
+python utils/monitor_launcher.py list
+python utils/monitor_launcher.py cleanup
+```
+
+### Benefits
+
+- **Never Miss Exits**: Automatic monitoring ensures you're alerted to profit opportunities
+- **Mobile-Friendly**: Get Slack alerts on your phone while away from computer
+- **Resource Efficient**: Monitors run independently and clean up automatically
+- **Multi-Symbol**: Each symbol gets its own dedicated monitor process
 
 ### Key Metrics to Watch
 - **Win Rate**: Target >60% for profitable strategy

@@ -207,25 +207,8 @@ def initialize_trade_log(log_file: str):
         
         logging.info(f"Initialized trade log: {log_file}")
 
-def log_trade_decision(log_file: str, trade_data: Dict):
-    """Log trade decision to CSV file with correct 12-field format."""
-    with open(log_file, 'a', newline='') as f:
-        writer = csv.writer(f)
-        # Write 12 fields to match CSV header: timestamp,symbol,option_type,strike,expiry,action,quantity,price,total_cost,reason,pnl,pnl_pct
-        writer.writerow([
-            trade_data.get('timestamp', ''),
-            trade_data.get('symbol', ''),
-            trade_data.get('option_type', trade_data.get('decision', '')),  # Map decision to option_type
-            trade_data.get('strike', ''),
-            trade_data.get('expiry', ''),
-            trade_data.get('action', trade_data.get('direction', '')),  # Map direction to action
-            trade_data.get('quantity', ''),
-            trade_data.get('price', trade_data.get('premium', '')),  # Map premium to price
-            trade_data.get('total_cost', ''),
-            trade_data.get('reason', ''),
-            trade_data.get('pnl', trade_data.get('realized_pnl', '')),  # Map realized_pnl to pnl
-            trade_data.get('pnl_pct', '')  # pnl_pct field
-        ])
+# Import shared logging utility
+from utils.logging_utils import log_trade_decision
 
 def parse_end_time(end_time_str: str) -> Optional[datetime]:
     """Parse end time string (HH:MM) to datetime object in local timezone."""
@@ -249,6 +232,206 @@ def parse_end_time(end_time_str: str) -> Optional[datetime]:
         return end_time
     except (ValueError, IndexError):
         raise ValueError(f"Invalid end time format: {end_time_str}. Use HH:MM (24-hour format)")
+
+
+def execute_multi_symbol_trade(opportunity: Dict, config: Dict, args, env_vars: Dict, 
+                               bankroll_manager, portfolio_manager, slack_notifier, bot=None) -> Dict:
+    """
+    Execute a pre-approved multi-symbol trading opportunity directly.
+    
+    This function trusts the multi-symbol scanner decision and proceeds directly
+    to browser automation without re-analyzing market conditions.
+    
+    Args:
+        opportunity: Pre-approved trading opportunity from multi-symbol scanner
+        config: Trading configuration
+        args: Command line arguments
+        env_vars: Environment variables
+        bankroll_manager: Bankroll management instance
+        portfolio_manager: Portfolio tracking instance
+        slack_notifier: Slack notification instance
+        bot: Existing browser instance to reuse
+        
+    Returns:
+        Dict: Execution result with bot instance
+    """
+    import logging
+    from utils.browser import RobinhoodBot
+    from utils.trade_confirmation import TradeConfirmationManager
+    
+    logger = logging.getLogger(__name__)
+    
+    symbol = opportunity['symbol']
+    decision = opportunity['decision']
+    confidence = opportunity['confidence']
+    current_price = opportunity['current_price']
+    reason = opportunity['reason']
+    
+    logger.info(f"[MULTI-SYMBOL-EXECUTE] Executing pre-approved {symbol} {decision} (confidence: {confidence:.2f})")
+    
+    try:
+        # Check existing positions
+        current_positions = portfolio_manager.load_positions()
+        
+        # Determine trade action (OPEN or CLOSE)
+        trade_action, position_to_close = portfolio_manager.determine_trade_action(
+            symbol, decision
+        )
+        
+        # Check position limits for new positions
+        if trade_action == 'OPEN' and len(current_positions) >= config.get('MAX_POSITIONS', 3):
+            logger.info(f"[MULTI-SYMBOL-EXECUTE] Skipping {symbol} - position limits reached ({len(current_positions)}/{config.get('MAX_POSITIONS', 3)})")
+            return {'bot': bot}
+        
+        logger.info(f"[MULTI-SYMBOL-EXECUTE] Trade action: {trade_action} for {symbol} {decision}")
+        
+        # Initialize or reuse browser bot
+        if not bot:
+            bot = RobinhoodBot(
+                headless=config['HEADLESS'],
+                implicit_wait=config['IMPLICIT_WAIT'],
+                page_load_timeout=config['PAGE_LOAD_TIMEOUT']
+            )
+            bot.start_browser()
+            
+            # Login to Robinhood
+            if not bot.login(env_vars['RH_USER'], env_vars['RH_PASS']):
+                logger.error(f"[MULTI-SYMBOL-EXECUTE] Login failed for {symbol}")
+                return {'bot': bot}
+            
+            # Navigate to options chain
+            if not bot.navigate_to_options(symbol):
+                logger.error(f"[MULTI-SYMBOL-EXECUTE] Failed to navigate to {symbol} options")
+                return {'bot': bot}
+        else:
+            # Ensure we're on the correct symbol's options page
+            bot.ensure_open(symbol)
+        
+        # Find ATM option and prepare order
+        atm_option = bot.find_atm_option(current_price, decision)
+        if not atm_option:
+            logger.error(f"[MULTI-SYMBOL-EXECUTE] No ATM {decision} option found for {symbol}")
+            return {'bot': bot}
+        
+        # Get actual option premium from browser
+        actual_premium = bot.get_option_premium()
+        if not actual_premium:
+            logger.warning(f"[MULTI-SYMBOL-EXECUTE] Could not get option premium, using estimate")
+            actual_premium = current_price * 0.02  # Fallback estimate
+        
+        logger.info(f"[MULTI-SYMBOL-EXECUTE] Option premium: ${actual_premium:.2f}")
+        
+        # Calculate position size with actual premium
+        quantity = bankroll_manager.calculate_position_size(
+            premium=actual_premium,
+            risk_fraction=config['RISK_FRACTION'],
+            size_rule=config['SIZE_RULE'],
+            fixed_qty=config['CONTRACT_QTY']
+        )
+        
+        # Validate position size against bankroll
+        total_cost = actual_premium * quantity * 100  # Options are $100 multiplier
+        current_bankroll = bankroll_manager.get_current_bankroll()
+        max_risk = current_bankroll * config['RISK_FRACTION']
+        
+        if total_cost > max_risk:
+            # Recalculate with proper risk management
+            quantity = int(max_risk / (actual_premium * 100))
+            total_cost = actual_premium * quantity * 100
+            logger.warning(f"[MULTI-SYMBOL-EXECUTE] Position size adjusted for risk: {quantity} contracts (${total_cost:.2f} total)")
+        
+        # Final validation - ensure we don't exceed available buying power
+        if total_cost > current_bankroll * 0.8:  # Leave 20% buffer
+            quantity = int((current_bankroll * 0.8) / (actual_premium * 100))
+            total_cost = actual_premium * quantity * 100
+            logger.warning(f"[MULTI-SYMBOL-EXECUTE] Position size adjusted for buying power: {quantity} contracts (${total_cost:.2f} total)")
+        
+        logger.info(f"[MULTI-SYMBOL-EXECUTE] Final position size: {quantity} contracts (${total_cost:.2f} total cost)")
+        
+        # Pre-fill order and stop at Review
+        if bot.click_option_and_buy(atm_option, quantity):
+            logger.info(f"[MULTI-SYMBOL-EXECUTE] {symbol} {decision} order ready for review")
+            
+            # Send order ready notification
+            if slack_notifier:
+                try:
+                    # Try to use send_order_ready_alert if available (basic SlackNotifier)
+                    if hasattr(slack_notifier, 'send_order_ready_alert'):
+                        slack_notifier.send_order_ready_alert(
+                            trade_type=decision,
+                            strike=str(atm_option['strike']),
+                            expiry="Today",
+                            position_size=str(quantity),
+                            action=trade_action,
+                            confidence=confidence,
+                            reason=reason,
+                            current_price=current_price
+                        )
+                    else:
+                        # Fallback for EnhancedSlackIntegration - use basic heartbeat
+                        order_message = f"🚨 ORDER READY FOR REVIEW\n" \
+                                      f"Symbol: {symbol}\n" \
+                                      f"Direction: {decision}\n" \
+                                      f"Strike: ${atm_option['strike']}\n" \
+                                      f"Quantity: {quantity} contracts\n" \
+                                      f"Premium: ${actual_premium:.2f}\n" \
+                                      f"Total Cost: ${actual_premium * quantity * 100:.2f}\n" \
+                                      f"Confidence: {confidence:.1%}\n" \
+                                      f"Action: {trade_action}\n" \
+                                      f"Reason: {reason}"
+                        
+                        # Use basic_notifier if available (EnhancedSlackIntegration)
+                        if hasattr(slack_notifier, 'basic_notifier'):
+                            slack_notifier.basic_notifier.send_heartbeat(order_message)
+                        else:
+                            # Last resort - try send_heartbeat directly
+                            slack_notifier.send_heartbeat(order_message)
+                    
+                    logger.info(f"[MULTI-SYMBOL-EXECUTE] Slack order ready alert sent for {symbol}")
+                except Exception as e:
+                    logger.error(f"[MULTI-SYMBOL-EXECUTE] Failed to send Slack alert: {e}")
+            
+            # Trade confirmation workflow
+            confirmer = TradeConfirmationManager(
+                portfolio_manager=portfolio_manager,
+                bankroll_manager=bankroll_manager,
+                slack_notifier=slack_notifier
+            )
+            
+            # Prepare trade details for confirmation
+            trade_details = {
+                'symbol': symbol,
+                'direction': decision,  # Use 'direction' as expected by TradeConfirmationManager
+                'confidence': confidence,
+                'current_price': current_price,
+                'strike': atm_option['strike'],
+                'quantity': quantity,
+                'premium': actual_premium,
+                'action': trade_action,
+                'reason': reason,
+                'expiry': 'Today'  # Add expiry field
+            }
+            
+            # Get user decision (this will prompt for S/C)
+            logger.info(f"[MULTI-SYMBOL-EXECUTE] Waiting for trade confirmation...")
+            decision_result, actual_fill_premium = confirmer.get_user_decision(
+                trade_details, method="prompt"
+            )
+            
+            # Record the trade outcome
+            confirmer.record_trade_outcome(
+                trade_details, decision_result, actual_fill_premium
+            )
+            
+            logger.info(f"[MULTI-SYMBOL-EXECUTE] {symbol} trade confirmation completed: {decision_result}")
+            
+        else:
+            logger.error(f"[MULTI-SYMBOL-EXECUTE] Failed to prepare {symbol} {decision} order")
+        
+    except Exception as e:
+        logger.error(f"[MULTI-SYMBOL-EXECUTE] Error executing {symbol} trade: {e}")
+    
+    return {'bot': bot}
 
 
 def run_once(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_manager, 
@@ -350,8 +533,10 @@ def run_once(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_man
     
     # Step 5: Get LLM decision
     logger.info("[LLM] Getting LLM trade decision...")
-    win_history = bankroll_manager.get_win_history()
-    decision = llm_client.make_trade_decision(llm_payload, win_history)
+    # Use enhanced context for better LLM learning (hybrid approach)
+    enhanced_context = bankroll_manager.get_enhanced_llm_context()
+    win_history = enhanced_context.get('win_history', [])  # Backward compatibility
+    decision = llm_client.make_trade_decision(llm_payload, win_history, enhanced_context)
     
     logger.info(f"[DECISION] LLM Decision: {decision.decision} "
                f"(confidence: {decision.confidence:.2f})")
@@ -439,34 +624,51 @@ def main_loop(config: Dict, args, env_vars: Dict, bankroll_manager, portfolio_ma
                             heartbeat_msg = f"⚠️ {cycle_start.strftime('%H:%M')} · Low confidence {decision.decision} ({decision.confidence:.2f})"
                             slack_notifier.send_heartbeat(heartbeat_msg)
                     else:
-                        # Initialize or reuse browser bot
-                        if not bot or (bot_idle_since and 
-                                     (cycle_start - bot_idle_since).total_seconds() > 4 * 3600):  # 4 hours
-                            if bot:
-                                logger.info("[BROWSER] Restarting browser after 4h idle")
-                                bot.quit()
+                        # Initialize or ensure browser session is active
+                        if not bot and not args.dry_run:
+                            # Initialize persistent browser bot
+                            bot = RobinhoodBot(
+                                headless=config['HEADLESS'],
+                                implicit_wait=config['IMPLICIT_WAIT'],
+                                page_load_timeout=config['PAGE_LOAD_TIMEOUT']
+                            )
+                            bot.start_browser()
                             
-                            if not args.dry_run:
-                                bot = RobinhoodBot(
-                                    headless=config['HEADLESS'],
-                                    implicit_wait=config['IMPLICIT_WAIT'],
-                                    page_load_timeout=config['PAGE_LOAD_TIMEOUT']
-                                )
-                                bot.start_browser()
-                                
-                                # Login to Robinhood
-                                if not bot.login(env_vars['RH_USER'], env_vars['RH_PASS']):
-                                    logger.error("[ERROR] Login failed")
-                                    if slack_notifier:
-                                        slack_notifier.send_browser_status('login_failed', 'Failed to login to Robinhood')
-                                    continue
-                                
-                                # Navigate to options chain once
-                                if not bot.navigate_to_options(config['SYMBOL']):
-                                    logger.error("[ERROR] Failed to navigate to options")
-                                    continue
-                                    
-                                bot_idle_since = None
+                            # Login to Robinhood
+                            if not bot.login(env_vars['RH_USER'], env_vars['RH_PASS']):
+                                logger.error("[ERROR] Login failed")
+                                if slack_notifier:
+                                    slack_notifier.send_browser_status('login_failed', 'Failed to login to Robinhood')
+                                continue
+                            
+                            # Navigate to options chain once
+                            if not bot.navigate_to_options(config['SYMBOL']):
+                                logger.error("[ERROR] Failed to navigate to options")
+                                continue
+                        
+                        elif bot and not args.dry_run:
+                            # Ensure existing session is still active (15 min idle timeout)
+                            if not bot.ensure_session(max_idle_sec=900):
+                                logger.error("[ERROR] Failed to ensure browser session")
+                                if slack_notifier:
+                                    slack_notifier.send_browser_status('session_failed', 'Browser session recovery failed')
+                                continue
+                            
+                            # Re-login if needed after session restart
+                            try:
+                                current_url = bot.driver.current_url if bot.driver else ""
+                                if "login" in current_url.lower() or "robinhood.com" == current_url:
+                                    logger.info("[SESSION] Re-authenticating after session restart")
+                                    if not bot.login(env_vars['RH_USER'], env_vars['RH_PASS']):
+                                        logger.error("[ERROR] Re-login failed")
+                                        continue
+                                    if not bot.navigate_to_options(config['SYMBOL']):
+                                        logger.error("[ERROR] Failed to navigate to options after re-login")
+                                        continue
+                            except Exception as e:
+                                logger.warning(f"[SESSION] Error checking login status: {e}")
+                        
+                        bot_idle_since = None
                         
                         # Find ATM option and prepare order
                         if not args.dry_run and bot:
@@ -780,13 +982,18 @@ def run_multi_symbol_loop(config: Dict, args, env_vars: Dict, bankroll_manager,
                         logger.info(f"[MULTI-SYMBOL-LOOP] Processing opportunity {i+1}: {symbol}")
                         
                         if not args.dry_run:
-                            # Create symbol-specific config
-                            symbol_config = config.copy()
-                            symbol_config['SYMBOL'] = symbol
-                            
-                            # Execute trade
-                            result = run_once(symbol_config, args, env_vars, bankroll_manager,
-                                            portfolio_manager, llm_client, slack_notifier, bot)
+                            # Execute pre-approved multi-symbol decision directly
+                            # Don't re-analyze - trust the multi-symbol scanner decision
+                            result = execute_multi_symbol_trade(
+                                opportunity=opp,
+                                config=config,
+                                args=args,
+                                env_vars=env_vars,
+                                bankroll_manager=bankroll_manager,
+                                portfolio_manager=portfolio_manager,
+                                slack_notifier=slack_notifier,
+                                bot=bot
+                            )
                             
                             # Update bot instance for reuse
                             if result.get('bot'):
@@ -887,6 +1094,10 @@ def main():
                        help='Enable multi-symbol scanning mode')
     parser.add_argument('--max-trades', type=int, default=1,
                        help='Maximum concurrent trades across all symbols')
+    parser.add_argument('--auto-start-monitor', action='store_true', default=True,
+                       help='Auto-start position monitoring after trade submission (default: True)')
+    parser.add_argument('--no-auto-start-monitor', dest='auto_start_monitor', action='store_false',
+                       help='Disable auto-start of position monitoring')
     
     args = parser.parse_args()
     
@@ -1391,6 +1602,16 @@ def main():
     
     except KeyboardInterrupt:
         logger.info("[INTERRUPT] Script interrupted by user")
+        
+        # Graceful shutdown: cleanup monitor processes
+        try:
+            from utils.monitor_launcher import cleanup_all_monitors
+            logger.info("[CLEANUP] Stopping all monitor processes...")
+            cleanup_all_monitors()
+            logger.info("[CLEANUP] Monitor cleanup complete")
+        except Exception as cleanup_error:
+            logger.error(f"[CLEANUP] Error during monitor cleanup: {cleanup_error}")
+        
         if slack_notifier:
             slack_notifier.send_error_alert("User Interrupt", "Script was interrupted by user (Ctrl+C)")
     except Exception as e:
