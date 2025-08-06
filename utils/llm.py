@@ -244,6 +244,30 @@ DECISION RULES:
 - Think step-by-step internally, output only JSON
 - When confidence < 0.5, include a short 'reason' string in the JSON
 
+ENHANCED MARKET FEATURES (v2.2.0):
+- VWAP DEVIATION (vwap_deviation_pct): Real-time deviation from 5-min volume-weighted average price
+  * Values >0.5% suggest strong institutional buying pressure (favor CALL)
+  * Values <-0.5% suggest strong institutional selling pressure (favor PUT)
+  * Values between -0.5% and 0.5% are neutral
+- ATM DELTA (atm_delta): Black-Scholes option sensitivity for at-the-money options
+  * Values >0.6 strongly favor CALL entries (high directional sensitivity)
+  * Values <0.4 strongly favor PUT entries (high directional sensitivity)
+  * Values 0.4-0.6 are balanced risk (use other signals)
+- ATM OPEN INTEREST (atm_oi): Liquidity assessment for trade execution quality
+  * Values >5000 indicate excellent liquidity (boost confidence by 0.05)
+  * Values 1000-5000 indicate adequate liquidity (neutral)
+  * Values <1000 indicate poor liquidity (reduce confidence by 0.10)
+- DEALER GAMMA (dealer_gamma_$): Market maker positioning for volatility prediction
+  * Large negative values (<-$100M) suggest volatility expansion potential (boost confidence by 0.05)
+  * Large positive values (>$100M) suggest volatility compression (reduce confidence by 0.05)
+  * Values between -$100M and $100M are neutral
+
+CONTEXT MEMORY RULES:
+- Learn from recent_trades context to adapt strategy
+- If recent trades show consistent losses in similar market conditions, reduce confidence by 0.10
+- If recent trades show consistent wins in similar conditions, boost confidence by 0.05
+- Pay attention to symbol-specific performance patterns
+
 BANKROLL MANAGEMENT:
 - At the end of each trading session you will receive the realized P/L
 - If bankroll change > 5%, propose an update_bankroll call
@@ -254,6 +278,8 @@ ANALYSIS FOCUS:
 - Support/resistance levels and room to move
 - True range and volatility context
 - Volume confirmation
+- Enhanced market features (VWAP, ATM delta, OI, dealer gamma)
+- Recent trade performance context
 - Risk/reward assessment"""
 
     @api_retry
