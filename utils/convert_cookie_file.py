@@ -1,7 +1,9 @@
-import json, datetime, re
+import json
+import datetime
+import re
 from pathlib import Path
 
-SRC  = Path("robin_cookies.json")
+SRC = Path("robin_cookies.json")
 DEST = Path("robin_cookies_selenium.json")
 
 with SRC.open() as fh:
@@ -10,13 +12,13 @@ with SRC.open() as fh:
 converted = []
 for ck in raw:
     out = {
-        "name":   ck["Name"],
-        "value":  ck["Value"],
+        "name": ck["Name"],
+        "value": ck["Value"],
         "domain": ck["Domain"],
-        "path":   ck.get("Path", "/"),
+        "path": ck.get("Path", "/"),
     }
     # Secure / httpOnly
-    out["secure"]    = bool(ck.get("Secure"))
+    out["secure"] = bool(ck.get("Secure"))
     if ck.get("HttpOnly") is not None:
         out["httpOnly"] = bool(ck["HttpOnly"])
     # SameSite, if present

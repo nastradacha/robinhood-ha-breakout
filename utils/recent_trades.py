@@ -17,17 +17,15 @@ Returned dict schema::
 The file may contain malformed lines (e.g. legacy NO_TRADE with fewer
 columns).  Those lines are skipped to keep robustness.
 """
+
 from __future__ import annotations
 
-import csv
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
 
-from .llm import load_config
-
-CONFIG = load_config()
-TRADE_FILE = Path(CONFIG.get("TRADE_LOG_FILE", "logs/trade_log.csv"))
+# NOTE: Avoid circular import by not importing utils.llm at module load time.
+DEFAULT_TRADE_FILE = Path("logs/trade_log.csv")
 
 
 def _classify_result(pnl_pct: str) -> str:
@@ -43,7 +41,9 @@ def _classify_result(pnl_pct: str) -> str:
     return "FLAT"
 
 
-def load_recent(n: int = 5) -> List[Dict[str, str]]:
+def load_recent(
+    n: int = 5, trade_file: str | Path | None = None
+) -> List[Dict[str, str]]:
     """Load the last *n* trade rows from the trade log.
 
     Only BUY_TO_OPEN rows (actual trades) are considered for WIN/LOSS –
@@ -52,12 +52,22 @@ def load_recent(n: int = 5) -> List[Dict[str, str]]:
     """
     if n <= 0:
         return []
-    if not TRADE_FILE.exists():
+    if trade_file is None:
+        # Lazy-load config to avoid circular import during module initialization
+        try:
+            from utils.llm import load_config  # noqa: WPS433
+
+            trade_file = load_config().get("TRADE_LOG_FILE", str(DEFAULT_TRADE_FILE))
+        except Exception:
+            trade_file = str(DEFAULT_TRADE_FILE)
+
+    tf_path = Path(trade_file)
+    if not tf_path.exists():
         return []
 
     # Read file backwards efficiently
     rows: List[List[str]] = []
-    with TRADE_FILE.open(newline="", encoding="utf-8") as fh:
+    with tf_path.open(newline="", encoding="utf-8") as fh:
         for line in fh:
             rows.append(line.rstrip("\n").split(","))
 
@@ -67,17 +77,25 @@ def load_recent(n: int = 5) -> List[Dict[str, str]]:
         if len(r) < 11:
             # malformed legacy row
             continue
-        ts_raw, symbol, action, *_rest, pnl_pct, _status, _reason = r + [""] * (12 - len(r))
+        ts_raw, symbol, action, *_rest, pnl_pct, _status, _reason = r + [""] * (
+            12 - len(r)
+        )
         stamp = ""
         try:
             stamp = datetime.fromisoformat(ts_raw).strftime("%H:%M")
         except ValueError:
             # fallback – try space‐separated datetime
             try:
-                stamp = datetime.strptime(ts_raw[:19], "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
+                stamp = datetime.strptime(ts_raw[:19], "%Y-%m-%d %H:%M:%S").strftime(
+                    "%H:%M"
+                )
             except Exception:
                 stamp = ts_raw[-5:]
-        decision = "NO_TRADE" if action == "NO_TRADE" else ("CALL" if "CALL" in action else "PUT")
+        decision = (
+            "NO_TRADE"
+            if action == "NO_TRADE"
+            else ("CALL" if "CALL" in action else "PUT")
+        )
         result = _classify_result(pnl_pct)
         results.append({"stamp": stamp, "decision": decision, "result": result})
     return results

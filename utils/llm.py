@@ -40,7 +40,7 @@ Function Calling Schema:
 Usage:
     # Initialize LLM client
     llm = LLMClient(model='gpt-4o-mini')
-    
+
     # Make trade decision
     decision = llm.make_trade_decision(market_data, win_history)
     if decision.decision != 'NO_TRADE' and decision.confidence > 0.7:
@@ -54,9 +54,14 @@ License: MIT
 
 import json
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 from dataclasses import dataclass
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 import httpx
 import requests
@@ -76,36 +81,45 @@ def load_config(config_path: str = "config.yaml") -> dict:
     config_file = Path(config_path)
     if not config_file.exists():
         config_file = Path(__file__).parent.parent / config_path
-    
-    with open(config_file, 'r') as f:
+
+    with open(config_file, "r") as f:
         config = yaml.safe_load(f)
-    
+
     # Add derived fields
-    config['TRADE_LOG_FILE'] = config.get('TRADE_LOG_FILE', 'logs/trade_log.csv')
-    config['LOG_FILE'] = config.get('LOG_FILE', 'logs/app.log')
-    
+    config["TRADE_LOG_FILE"] = config.get("TRADE_LOG_FILE", "logs/trade_log.csv")
+    config["LOG_FILE"] = config.get("LOG_FILE", "logs/app.log")
+
     return config
 
 
 # Custom exceptions for better error handling
 class LLMAPIError(Exception):
     """Base exception for LLM API errors."""
+
     pass
+
 
 class LLMTimeoutError(LLMAPIError):
     """Timeout error for LLM API calls."""
+
     pass
+
 
 class LLMAuthError(LLMAPIError):
     """Authentication error for LLM API calls."""
+
     pass
+
 
 class LLMRateLimitError(LLMAPIError):
     """Rate limit error for LLM API calls."""
+
     pass
+
 
 class LLMParseError(LLMAPIError):
     """JSON parsing error for LLM responses."""
+
     pass
 
 
@@ -113,14 +127,17 @@ class LLMParseError(LLMAPIError):
 api_retry = retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((LLMTimeoutError, LLMRateLimitError, httpx.TimeoutException, httpx.ConnectError)),
-    reraise=True
+    retry=retry_if_exception_type(
+        (LLMTimeoutError, LLMRateLimitError, httpx.TimeoutException, httpx.ConnectError)
+    ),
+    reraise=True,
 )
 
 
 @dataclass
 class TradeDecision:
     """Data class for trade decision results."""
+
     decision: str  # "CALL", "PUT", "NO_TRADE"
     confidence: float  # 0.0 to 1.0
     reason: Optional[str] = None
@@ -130,6 +147,7 @@ class TradeDecision:
 @dataclass
 class BankrollUpdate:
     """Data class for bankroll update suggestions."""
+
     new_bankroll: float
     reason: str
     tokens_used: int = 0
@@ -137,21 +155,21 @@ class BankrollUpdate:
 
 class LLMClient:
     """Unified client for OpenAI and DeepSeek APIs."""
-    
+
     def __init__(self, model: str = "gpt-4o-mini"):
         self.model = model
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.deepseek_key = os.getenv("DEEPSEEK_API_KEY")
-        
+
         if model.startswith("gpt") and not self.openai_key:
             raise ValueError("OPENAI_API_KEY required for OpenAI models")
         elif model.startswith("deepseek") and not self.deepseek_key:
             raise ValueError("DEEPSEEK_API_KEY required for DeepSeek models")
-        
+
         # Initialize OpenAI client if using OpenAI
         if model.startswith("gpt"):
             openai.api_key = self.openai_key
-    
+
     def _get_function_schemas(self) -> list:
         """Get function calling schemas for trade decisions."""
         return [
@@ -164,21 +182,21 @@ class LLMClient:
                         "decision": {
                             "type": "string",
                             "enum": ["CALL", "PUT", "NO_TRADE"],
-                            "description": "Trading decision"
+                            "description": "Trading decision",
                         },
                         "confidence": {
                             "type": "number",
                             "minimum": 0.0,
                             "maximum": 1.0,
-                            "description": "Confidence level (0.0 to 1.0)"
+                            "description": "Confidence level (0.0 to 1.0)",
                         },
                         "reason": {
                             "type": "string",
-                            "description": "Brief reason for the decision (required if confidence < 0.5)"
-                        }
+                            "description": "Brief reason for the decision (required if confidence < 0.5)",
+                        },
                     },
-                    "required": ["decision", "confidence"]
-                }
+                    "required": ["decision", "confidence"],
+                },
             },
             {
                 "name": "update_bankroll",
@@ -188,23 +206,25 @@ class LLMClient:
                     "properties": {
                         "new_bankroll": {
                             "type": "number",
-                            "description": "Suggested new bankroll amount"
+                            "description": "Suggested new bankroll amount",
                         },
                         "reason": {
                             "type": "string",
-                            "description": "Reason for bankroll update"
-                        }
+                            "description": "Reason for bankroll update",
+                        },
                     },
-                    "required": ["new_bankroll", "reason"]
-                }
-            }
+                    "required": ["new_bankroll", "reason"],
+                },
+            },
         ]
-    
+
     def _get_system_prompt(self) -> str:
         """Get the system prompt for trade decision making including new rich-feature and context memory rules."""
         """Get the system prompt for trade decision making."""
         config = load_config()
-        body_cutoff = config.get('MIN_CANDLE_BODY_PCT', 0.05)  # Lowered from 0.30% to 0.05%
+        body_cutoff = config.get(
+            "MIN_CANDLE_BODY_PCT", 0.05
+        )  # Lowered from 0.30% to 0.05%
         return f"""You are an options-trading assistant specializing in SPY breakout strategies using Heikin-Ashi candles analyzing 5-minute intervals.
 
 DECISION RULES:
@@ -235,109 +255,106 @@ ANALYSIS FOCUS:
 - True range and volatility context
 - Volume confirmation
 - Risk/reward assessment"""
-    
+
     @api_retry
     def _call_openai(self, messages: list, functions: list) -> Dict:
         """Call OpenAI API with function calling and robust error handling."""
         try:
             from openai import OpenAI
             import ssl
-            
+
             # Create SSL context that handles certificate issues
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
-            
+
             # Create HTTP client with SSL handling
             http_client = httpx.Client(
                 verify=False,  # Disable SSL verification for problematic certificates
-                timeout=httpx.Timeout(30.0, read=30.0, write=10.0, connect=5.0)
+                timeout=httpx.Timeout(30.0, read=30.0, write=10.0, connect=5.0),
             )
-            
+
             client = OpenAI(
                 api_key=self.openai_key,
                 http_client=http_client,
-                max_retries=0  # We handle retries with tenacity
+                max_retries=0,  # We handle retries with tenacity
             )
-            
+
             response = client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=[{"type": "function", "function": func} for func in functions],
                 tool_choice="auto",
                 temperature=0.1,
-                max_tokens=500
+                max_tokens=500,
             )
-            
-            return {
-                "response": response,
-                "tokens_used": response.usage.total_tokens
-            }
-        
+
+            return {"response": response, "tokens_used": response.usage.total_tokens}
+
         except httpx.TimeoutException as e:
             logger.error(f"OpenAI API timeout: {e}")
             raise LLMTimeoutError(f"OpenAI API timeout: {e}") from e
-        
+
         except httpx.ConnectError as e:
             logger.error(f"OpenAI API connection error: {e}")
             raise LLMTimeoutError(f"OpenAI connection failed: {e}") from e
-        
+
         except openai.AuthenticationError as e:
             logger.error(f"OpenAI authentication error: {e}")
             raise LLMAuthError(f"OpenAI authentication failed: {e}") from e
-        
+
         except openai.RateLimitError as e:
             logger.error(f"OpenAI rate limit error: {e}")
             raise LLMRateLimitError(f"OpenAI rate limit exceeded: {e}") from e
-        
+
         except json.JSONDecodeError as e:
             logger.error(f"OpenAI response JSON parse error: {e}")
             raise LLMParseError(f"Failed to parse OpenAI response: {e}") from e
-        
+
         except Exception as e:
             logger.error(f"Unexpected OpenAI API error: {e}", exc_info=True)
             raise LLMAPIError(f"OpenAI API error: {e}") from e
-    
+
     @api_retry
     def _call_deepseek(self, messages: list, functions: list) -> Dict:
         """Call DeepSeek API with function calling and robust error handling."""
         try:
             headers = {
                 "Authorization": f"Bearer {self.deepseek_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-            
+
             payload = {
                 "model": self.model,
                 "messages": messages,
                 "functions": functions,
                 "function_call": "auto",
                 "temperature": 0.1,
-                "max_tokens": 500
+                "max_tokens": 500,
             }
-            
+
             response = requests.post(
                 "https://api.deepseek.com/v1/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=30,
             )
             response.raise_for_status()
-            
+
             result = response.json()
             return {
                 "response": result,
-                "tokens_used": result.get("usage", {}).get("total_tokens", 0)
+                "tokens_used": result.get("usage", {}).get("total_tokens", 0),
             }
-        
+
         except requests.exceptions.Timeout as e:
             logger.error(f"DeepSeek API timeout: {e}")
             raise LLMTimeoutError(f"DeepSeek API timeout: {e}") from e
-        
+
         except requests.exceptions.ConnectionError as e:
             logger.error(f"DeepSeek API connection error: {e}")
             raise LLMTimeoutError(f"DeepSeek connection failed: {e}") from e
-        
+
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
                 logger.error(f"DeepSeek authentication error: {e}")
@@ -348,55 +365,69 @@ ANALYSIS FOCUS:
             else:
                 logger.error(f"DeepSeek HTTP error: {e}")
                 raise LLMAPIError(f"DeepSeek HTTP error: {e}") from e
-        
+
         except json.JSONDecodeError as e:
             logger.error(f"DeepSeek response JSON parse error: {e}")
             raise LLMParseError(f"Failed to parse DeepSeek response: {e}") from e
-        
+
         except Exception as e:
             logger.error(f"Unexpected DeepSeek API error: {e}", exc_info=True)
             raise LLMAPIError(f"DeepSeek API error: {e}") from e
-    
+
     def _validate_and_fill_market_data(self, market_data: Dict) -> Dict:
         """
         Validate market data and fill missing required fields with sensible defaults.
-        
+
         The system prompt expects specific keys that must be present for consistent LLM behavior.
         """
         validated_data = market_data.copy()
-        
+
         # Required fields with defaults
         required_fields = {
-            'today_true_range_pct': 0.0,  # Default to 0% if not calculated
-            'room_to_next_pivot': 0.0,    # Default to 0% room to move
-            'iv_5m': 30.0,                # Default to moderate IV if not available
-            'candle_body_pct': 0.0,       # Default to 0% body strength
-            'current_price': 0.0,         # Should always be present, but safety default
-            'trend_direction': 'NEUTRAL', # Default trend if not determined
-            'volume_confirmation': False,  # Default to no volume confirmation
-            'support_levels': [],         # Default to empty list
-            'resistance_levels': []       # Default to empty list
+            "today_true_range_pct": 0.0,  # Default to 0% if not calculated
+            "room_to_next_pivot": 0.0,  # Default to 0% room to move
+            "iv_5m": 30.0,  # Default to moderate IV if not available
+            "candle_body_pct": 0.0,  # Default to 0% body strength
+            "current_price": 0.0,  # Should always be present, but safety default
+            "trend_direction": "NEUTRAL",  # Default trend if not determined
+            "volume_confirmation": False,  # Default to no volume confirmation
+            "support_levels": [],  # Default to empty list
+            "resistance_levels": [],  # Default to empty list
         }
-        
+
         # Fill missing fields with defaults
         for field, default_value in required_fields.items():
             if field not in validated_data or validated_data[field] is None:
                 validated_data[field] = default_value
-                logger.warning(f"[LLM] Missing field '{field}', using default: {default_value}")
-        
+                logger.warning(
+                    f"[LLM] Missing field '{field}', using default: {default_value}"
+                )
+
         # Ensure numeric fields are actually numeric
-        numeric_fields = ['today_true_range_pct', 'room_to_next_pivot', 'iv_5m', 
-                         'candle_body_pct', 'current_price']
+        numeric_fields = [
+            "today_true_range_pct",
+            "room_to_next_pivot",
+            "iv_5m",
+            "candle_body_pct",
+            "current_price",
+        ]
         for field in numeric_fields:
             try:
                 validated_data[field] = float(validated_data[field])
             except (ValueError, TypeError):
                 validated_data[field] = required_fields[field]
-                logger.warning(f"[LLM] Invalid numeric value for '{field}', using default: {required_fields[field]}")
-        
+                logger.warning(
+                    f"[LLM] Invalid numeric value for '{field}', using default: {required_fields[field]}"
+                )
+
         return validated_data
-    
-    def make_trade_decision(self, market_data: Dict, win_history: Optional[list] = None, enhanced_context: Optional[Dict] = None) -> TradeDecision:
+
+    def make_trade_decision(
+        self,
+        market_data: Dict,
+        win_history: Optional[list] = None,
+        enhanced_context: Optional[Dict] = None,
+    ) -> TradeDecision:
         """Make a trade decision including recent-trade context memory."""
         # Load recent trades for context memory
         try:
@@ -423,58 +454,60 @@ ANALYSIS FOCUS:
         """
         # Validate and fill missing market data fields
         validated_market_data = self._validate_and_fill_market_data(market_data)
-        
+
         # Prepare enhanced context about recent performance
         performance_context = ""
-        
+
         if enhanced_context:
             # Use enhanced context for richer LLM learning
-            perf_metrics = enhanced_context.get('performance_metrics', {})
-            recent_patterns = enhanced_context.get('recent_patterns', [])
-            symbol_performance = enhanced_context.get('symbol_performance', {})
-            confidence_modifiers = enhanced_context.get('confidence_modifiers', {})
-            
+            perf_metrics = enhanced_context.get("performance_metrics", {})
+            recent_patterns = enhanced_context.get("recent_patterns", [])
+            symbol_performance = enhanced_context.get("symbol_performance", {})
+            confidence_modifiers = enhanced_context.get("confidence_modifiers", {})
+
             # Build comprehensive performance context
-            win_rate = perf_metrics.get('win_rate', 0.0)
-            current_streak = perf_metrics.get('current_streak', 0)
-            avg_win_pct = perf_metrics.get('avg_win_pct', 0.0)
-            avg_loss_pct = perf_metrics.get('avg_loss_pct', 0.0)
-            total_trades = perf_metrics.get('total_trades', 0)
-            
+            win_rate = perf_metrics.get("win_rate", 0.0)
+            current_streak = perf_metrics.get("current_streak", 0)
+            avg_win_pct = perf_metrics.get("avg_win_pct", 0.0)
+            avg_loss_pct = perf_metrics.get("avg_loss_pct", 0.0)
+            total_trades = perf_metrics.get("total_trades", 0)
+
             performance_context = f"""TRADING PERFORMANCE CONTEXT:
 • Overall Performance: {win_rate:.1%} win rate over {total_trades} trades
 • Current Streak: {current_streak} {'wins' if current_streak > 0 else 'losses' if current_streak < 0 else 'neutral'}
 • Average Win: +{avg_win_pct:.1f}%, Average Loss: {avg_loss_pct:.1f}%
 """
-            
+
             # Add recent trade patterns
             if recent_patterns:
                 performance_context += "\n• Recent Trade Patterns:\n"
                 for i, pattern in enumerate(recent_patterns[-3:], 1):  # Last 3 trades
-                    outcome_emoji = "✅" if pattern['outcome'] == 'WIN' else "❌"
+                    outcome_emoji = "✅" if pattern["outcome"] == "WIN" else "❌"
                     performance_context += f"  {i}. {pattern['symbol']} {pattern['option_type']}: {outcome_emoji} {pattern['pnl_pct']:+.1f}% ({pattern['market_condition']})\n"
-            
+
             # Add symbol-specific performance
-            current_symbol = validated_market_data.get('symbol', 'UNKNOWN')
+            current_symbol = validated_market_data.get("symbol", "UNKNOWN")
             if current_symbol in symbol_performance:
                 sym_perf = symbol_performance[current_symbol]
                 performance_context += f"\n• {current_symbol} Performance: {sym_perf['win_rate']:.1%} win rate over {sym_perf['total_trades']} trades (avg: {sym_perf['avg_pnl']:+.1f}%)\n"
-            
+
             # Add confidence modifiers
-            streak_mod = confidence_modifiers.get('streak_modifier', 0.0)
-            recent_mod = confidence_modifiers.get('recent_performance_modifier', 0.0)
+            streak_mod = confidence_modifiers.get("streak_modifier", 0.0)
+            recent_mod = confidence_modifiers.get("recent_performance_modifier", 0.0)
             if abs(streak_mod) > 0.01 or abs(recent_mod) > 0.01:
                 performance_context += f"\n• Suggested Confidence Adjustments: Streak {streak_mod:+.2f}, Recent Performance {recent_mod:+.2f}\n"
-            
+
         elif win_history:
             # Fallback to basic win history for backward compatibility
             recent_wins = sum(1 for result in win_history[-20:] if result)
             win_rate = recent_wins / min(len(win_history), 20)
             performance_context = f"Recent win rate: {win_rate:.2f} over {min(len(win_history), 20)} trades. "
-        
+
         messages = [
             {"role": "system", "content": self._get_system_prompt()},
-            {"role": "user", "content": f"""
+            {
+                "role": "user",
+                "content": f"""
 {performance_context}
 
 Market Analysis:
@@ -495,18 +528,19 @@ PAY SPECIAL ATTENTION TO:
 - price_change_15min_pct: >0.3% move in 15 minutes = significant momentum
 - STRONG_BULLISH/STRONG_BEARISH trends override low body percentage thresholds
 
-Use the choose_trade function to respond."""}
+Use the choose_trade function to respond.""",
+            },
         ]
-        
+
         functions = self._get_function_schemas()
-        
+
         try:
             # Call appropriate API
             if self.model.startswith("gpt"):
                 result = self._call_openai(messages, functions)
                 response = result["response"]
                 tokens_used = result["tokens_used"]
-                
+
                 # Parse OpenAI response
                 if response.choices[0].message.tool_calls:
                     tool_call = response.choices[0].message.tool_calls[0]
@@ -516,14 +550,14 @@ Use the choose_trade function to respond."""}
                             decision=args["decision"],
                             confidence=args["confidence"],
                             reason=args.get("reason"),
-                            tokens_used=tokens_used
+                            tokens_used=tokens_used,
                         )
-            
+
             else:  # DeepSeek
                 result = self._call_deepseek(messages, functions)
                 response = result["response"]
                 tokens_used = result["tokens_used"]
-                
+
                 # Parse DeepSeek response
                 if response["choices"][0]["message"].get("function_call"):
                     func_call = response["choices"][0]["message"]["function_call"]
@@ -533,50 +567,53 @@ Use the choose_trade function to respond."""}
                             decision=args["decision"],
                             confidence=args["confidence"],
                             reason=args.get("reason"),
-                            tokens_used=tokens_used
+                            tokens_used=tokens_used,
                         )
-            
+
             # Fallback if no function call
             logger.warning("No valid function call received, defaulting to NO_TRADE")
             return TradeDecision(
                 decision="NO_TRADE",
                 confidence=0.0,
                 reason="LLM did not provide valid function call",
-                tokens_used=tokens_used
+                tokens_used=tokens_used,
             )
-        
+
         except Exception as e:
             logger.error(f"Error making trade decision: {e}")
             return TradeDecision(
                 decision="NO_TRADE",
                 confidence=0.0,
                 reason=f"API error: {str(e)}",
-                tokens_used=0
+                tokens_used=0,
             )
-    
-    def suggest_bankroll_update(self, current_bankroll: float, realized_pnl: float, 
-                              trade_details: Dict) -> Optional[BankrollUpdate]:
+
+    def suggest_bankroll_update(
+        self, current_bankroll: float, realized_pnl: float, trade_details: Dict
+    ) -> Optional[BankrollUpdate]:
         """
         Suggest bankroll update based on realized P/L.
-        
+
         Args:
             current_bankroll: Current bankroll amount
             realized_pnl: Realized profit/loss
             trade_details: Details about the completed trade
-        
+
         Returns:
             BankrollUpdate object if update suggested, None otherwise
         """
         new_bankroll = current_bankroll + realized_pnl
         change_pct = abs(realized_pnl / current_bankroll) * 100
-        
+
         # Only suggest update if change > 5%
         if change_pct <= 5.0:
             return None
-        
+
         messages = [
             {"role": "system", "content": self._get_system_prompt()},
-            {"role": "user", "content": f"""
+            {
+                "role": "user",
+                "content": f"""
 Trade completed with the following results:
 - Previous bankroll: ${current_bankroll:.2f}
 - Realized P/L: ${realized_pnl:.2f}
@@ -586,18 +623,19 @@ Trade completed with the following results:
 Trade details:
 {json.dumps(trade_details, indent=2)}
 
-The bankroll change is significant (>{5.0}%). Use the update_bankroll function to suggest the new bankroll amount."""}
+The bankroll change is significant (>{5.0}%). Use the update_bankroll function to suggest the new bankroll amount.""",
+            },
         ]
-        
+
         functions = self._get_function_schemas()
-        
+
         try:
             # Call appropriate API
             if self.model.startswith("gpt"):
                 result = self._call_openai(messages, functions)
                 response = result["response"]
                 tokens_used = result["tokens_used"]
-                
+
                 # Parse OpenAI response
                 if response.choices[0].message.tool_calls:
                     tool_call = response.choices[0].message.tool_calls[0]
@@ -606,14 +644,14 @@ The bankroll change is significant (>{5.0}%). Use the update_bankroll function t
                         return BankrollUpdate(
                             new_bankroll=args["new_bankroll"],
                             reason=args["reason"],
-                            tokens_used=tokens_used
+                            tokens_used=tokens_used,
                         )
-            
+
             else:  # DeepSeek
                 result = self._call_deepseek(messages, functions)
                 response = result["response"]
                 tokens_used = result["tokens_used"]
-                
+
                 # Parse DeepSeek response
                 if response["choices"][0]["message"].get("function_call"):
                     func_call = response["choices"][0]["message"]["function_call"]
@@ -622,32 +660,39 @@ The bankroll change is significant (>{5.0}%). Use the update_bankroll function t
                         return BankrollUpdate(
                             new_bankroll=args["new_bankroll"],
                             reason=args["reason"],
-                            tokens_used=tokens_used
+                            tokens_used=tokens_used,
                         )
-            
+
             return None
-        
+
         except Exception as e:
             logger.error(f"Error suggesting bankroll update: {e}")
             return None
-    
-    def suggest_similar_trade(self, completed_trade: Dict, market_data: Dict) -> Optional[str]:
+
+    def suggest_similar_trade(
+        self, completed_trade: Dict, market_data: Dict
+    ) -> Optional[str]:
         """
         Suggest a similar trade opportunity after a completed trade.
-        
+
         Args:
             completed_trade: Details of the just-completed trade
             market_data: Current market analysis
-        
+
         Returns:
             String suggestion or None
         """
         messages = [
-            {"role": "system", "content": """You are an options trading assistant. 
+            {
+                "role": "system",
+                "content": """You are an options trading assistant. 
             Analyze the completed trade and current market conditions to suggest similar opportunities.
             Focus on SPY or other liquid ETFs with similar characteristics.
-            Keep suggestions brief and actionable."""},
-            {"role": "user", "content": f"""
+            Keep suggestions brief and actionable.""",
+            },
+            {
+                "role": "user",
+                "content": f"""
 Just completed trade:
 {json.dumps(completed_trade, indent=2)}
 
@@ -661,58 +706,54 @@ suggest a similar trading opportunity. Consider:
 3. Liquid options with good spreads
 4. Time decay considerations
 
-Provide a brief, actionable suggestion or say "No similar opportunities identified" if none exist."""}
+Provide a brief, actionable suggestion or say "No similar opportunities identified" if none exist.""",
+            },
         ]
-        
+
         try:
             if self.model.startswith("gpt"):
                 from openai import OpenAI
                 import httpx
-                
+
                 # Create HTTP client with SSL handling
                 http_client = httpx.Client(
                     verify=False,
-                    timeout=httpx.Timeout(30.0, read=30.0, write=10.0, connect=5.0)
+                    timeout=httpx.Timeout(30.0, read=30.0, write=10.0, connect=5.0),
                 )
-                
+
                 client = OpenAI(
-                    api_key=self.openai_key,
-                    http_client=http_client,
-                    max_retries=2
+                    api_key=self.openai_key, http_client=http_client, max_retries=2
                 )
-                
+
                 response = client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=200
+                    model=self.model, messages=messages, temperature=0.3, max_tokens=200
                 )
                 return response.choices[0].message.content.strip()
-            
+
             else:  # DeepSeek
                 headers = {
                     "Authorization": f"Bearer {self.deepseek_key}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
                 }
-                
+
                 payload = {
                     "model": self.model,
                     "messages": messages,
                     "temperature": 0.3,
-                    "max_tokens": 200
+                    "max_tokens": 200,
                 }
-                
+
                 response = requests.post(
                     "https://api.deepseek.com/v1/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=30
+                    timeout=30,
                 )
                 response.raise_for_status()
-                
+
                 result = response.json()
                 return result["choices"][0]["message"]["content"].strip()
-        
+
         except Exception as e:
             logger.error(f"Error suggesting similar trade: {e}")
             return None

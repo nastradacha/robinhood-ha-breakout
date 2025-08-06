@@ -56,7 +56,7 @@ Usage:
         bankroll_manager=bankroll,
         slack_notifier=slack
     )
-    
+
     # Get user decision after Review screen
     decision, actual_premium = confirmer.get_user_decision(
         trade_details={
@@ -68,7 +68,7 @@ Usage:
         },
         method='prompt'  # or 'slack', 'browser', 'auto'
     )
-    
+
     # Record trade outcome
     confirmer.record_trade_outcome(
         trade_details=trade_details,
@@ -81,33 +81,32 @@ Version: 2.0.0
 License: MIT
 """
 
-import time
 import logging
 from typing import Optional, Dict, Tuple
 from datetime import datetime
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 logger = logging.getLogger(__name__)
 
 
 class TradeConfirmationManager:
     """Manages trade confirmation and outcome recording."""
-    
+
     def __init__(self, portfolio_manager, bankroll_manager, slack_notifier=None):
         self.portfolio_manager = portfolio_manager
         self.bankroll_manager = bankroll_manager
         self.slack_notifier = slack_notifier
         self.pending_trade = None  # Store trade details for Slack bridge
-    
-    def get_user_decision(self, trade_details: Dict, method: str = "prompt") -> Tuple[str, Optional[float]]:
+
+    def get_user_decision(
+        self, trade_details: Dict, method: str = "prompt"
+    ) -> Tuple[str, Optional[float]]:
         """
         Get user's decision about trade execution.
-        
+
         Args:
             trade_details: Dictionary with trade information
             method: Method to use ('prompt', 'browser', 'slack', 'auto')
-        
+
         Returns:
             Tuple of (decision, actual_premium) where decision is 'SUBMITTED', 'CANCELLED', or 'UNKNOWN'
         """
@@ -119,51 +118,60 @@ class TradeConfirmationManager:
             return self._wait_for_slack_confirmation(trade_details)
         else:
             return self._auto_detect_decision(trade_details)
-    
+
     def _prompt_user_decision(self, trade_details: Dict) -> Tuple[str, Optional[float]]:
         """Prompt user directly for their decision with Slack bridge support."""
         # Store pending trade for potential Slack confirmation
         self.pending_trade = trade_details.copy()
-        
-        print("\n" + "="*60)
+
+        print("\n" + "=" * 60)
         print("🎯 TRADE DECISION REQUIRED")
-        print("="*60)
-        print(f"Trade: {trade_details.get('direction', 'N/A')} ${trade_details.get('strike', 'N/A')}")
+        print("=" * 60)
+        print(
+            f"Trade: {trade_details.get('direction', 'N/A')} ${trade_details.get('strike', 'N/A')}"
+        )
         print(f"Expected Premium: ${trade_details.get('premium', 'N/A'):.2f}")
         print(f"Quantity: {trade_details.get('quantity', 1)} contracts")
-        print("-"*60)
+        print("-" * 60)
         print("💡 TIP: Away from PC? Send Slack message: 'filled 1.28' or 'cancelled'")
-        print("-"*60)
-        
+        print("-" * 60)
+
         while True:
             print("\nOptions:")
-            print("  [S] Submit at expected price (${:.2f})".format(trade_details.get('premium', 0)))
+            print(
+                "  [S] Submit at expected price (${:.2f})".format(
+                    trade_details.get("premium", 0)
+                )
+            )
             print("  [C] Cancel trade")
             print("  [P] Submit at different price (enter custom premium)")
             print("  [0.XX] Enter premium directly (e.g., 0.75)")
-            
+
             decision = input("\nYour choice: ").lower().strip()
-            
+
             # Check if user entered a premium directly (e.g., "0.75", "1.25")
             try:
-                if decision.replace('.', '').replace('-', '').isdigit() and float(decision) > 0:
+                if (
+                    decision.replace(".", "").replace("-", "").isdigit()
+                    and float(decision) > 0
+                ):
                     actual_premium = float(decision)
                     print(f"[OK] Trade SUBMITTED at ${actual_premium:.2f}")
                     return "SUBMITTED", actual_premium
             except ValueError:
                 pass
-            
-            if decision in ['s', 'submit', 'submitted']:
+
+            if decision in ["s", "submit", "submitted"]:
                 # Submit at expected price
-                actual_premium = trade_details.get('premium', 0)
+                actual_premium = trade_details.get("premium", 0)
                 print(f"[OK] Trade SUBMITTED at expected price ${actual_premium:.2f}")
                 return "SUBMITTED", actual_premium
-                
-            elif decision in ['p', 'price', 'custom']:
+
+            elif decision in ["p", "price", "custom"]:
                 # Get custom fill price
                 while True:
                     try:
-                        custom_input = input(f"Enter actual fill price: $").strip()
+                        custom_input = input("Enter actual fill price: $").strip()
                         actual_premium = float(custom_input)
                         if actual_premium <= 0:
                             print("Price must be greater than 0")
@@ -171,56 +179,68 @@ class TradeConfirmationManager:
                         break
                     except ValueError:
                         print("Please enter a valid price (e.g., 1.25)")
-                
+
                 print(f"[OK] Trade SUBMITTED at custom price ${actual_premium:.2f}")
                 return "SUBMITTED", actual_premium
-                
-            elif decision in ['c', 'cancel', 'cancelled']:
+
+            elif decision in ["c", "cancel", "cancelled"]:
                 print("❌ Trade CANCELLED")
                 return "CANCELLED", None
-                
+
             else:
-                print("Invalid input. Please choose S, C, P, or enter a premium directly (e.g., 0.75)")
-    
-    def _detect_browser_decision(self, trade_details: Dict, timeout: int = 30) -> Tuple[str, Optional[float]]:
+                print(
+                    "Invalid input. Please choose S, C, P, or enter a premium directly (e.g., 0.75)"
+                )
+
+    def _detect_browser_decision(
+        self, trade_details: Dict, timeout: int = 30
+    ) -> Tuple[str, Optional[float]]:
         """Try to detect if trade was submitted by monitoring browser."""
         # This would require access to the browser driver
         # Implementation depends on Robinhood's confirmation screens
         logger.info("Browser detection not yet implemented")
         return "UNKNOWN", None
-    
-    def _wait_for_slack_confirmation(self, trade_details: Dict, timeout: int = 300) -> Tuple[str, Optional[float]]:
+
+    def _wait_for_slack_confirmation(
+        self, trade_details: Dict, timeout: int = 300
+    ) -> Tuple[str, Optional[float]]:
         """Wait for Slack confirmation (if Slack integration is available)."""
         if not self.slack_notifier:
             logger.warning("Slack notifier not available")
             return "UNKNOWN", None
-        
+
         # Send notification asking for confirmation
         message = f"🤔 Trade Decision Needed:\n{trade_details.get('direction')} ${trade_details.get('strike')} @ ${trade_details.get('premium', 0):.2f}\n\nReply with:\n• 'submitted' or 'filled $X.XX'\n• 'cancelled'"
-        
+
         if self.slack_notifier.send_heartbeat(message):
             logger.info("Sent Slack confirmation request")
             # In a real implementation, you'd listen for Slack responses
             # For now, fall back to prompt
             return self._prompt_user_decision(trade_details)
-        
+
         return "UNKNOWN", None
-    
+
     def _auto_detect_decision(self, trade_details: Dict) -> Tuple[str, Optional[float]]:
         """Try multiple detection methods automatically."""
         # Try browser detection first
         decision, premium = self._detect_browser_decision(trade_details, timeout=10)
-        
+
         if decision == "UNKNOWN":
             # Fall back to user prompt
             decision, premium = self._prompt_user_decision(trade_details)
-        
+
         return decision, premium
-    
-    def record_trade_outcome(self, trade_details: Dict, decision: str, actual_premium: Optional[float] = None, auto_start_monitor: bool = True):
+
+    def record_trade_outcome(
+        self,
+        trade_details: Dict,
+        decision: str,
+        actual_premium: Optional[float] = None,
+        auto_start_monitor: bool = True,
+    ):
         """
         Record the trade outcome in all tracking systems.
-        
+
         Args:
             trade_details: Original trade details
             decision: 'SUBMITTED', 'CANCELLED', or 'UNKNOWN'
@@ -228,24 +248,24 @@ class TradeConfirmationManager:
             auto_start_monitor: Whether to auto-start position monitoring
         """
         timestamp = datetime.now().isoformat()
-        
+
         if decision == "SUBMITTED":
             # Create position record
             from utils.portfolio import Position
-            
+
             position = Position(
                 entry_time=timestamp,
-                symbol=trade_details.get('symbol', 'SPY'),
-                expiry=trade_details.get('expiry', ''),
-                strike=trade_details.get('strike', 0),
-                side=trade_details.get('direction', ''),
-                contracts=trade_details.get('quantity', 1),
-                entry_premium=actual_premium or trade_details.get('premium', 0)
+                symbol=trade_details.get("symbol", "SPY"),
+                expiry=trade_details.get("expiry", ""),
+                strike=trade_details.get("strike", 0),
+                side=trade_details.get("direction", ""),
+                contracts=trade_details.get("quantity", 1),
+                entry_premium=actual_premium or trade_details.get("premium", 0),
             )
-            
+
             # Add to portfolio
             self.portfolio_manager.add_position(position)
-            
+
             # Update bankroll with actual fill price
             if actual_premium is not None:
                 # Apply actual fill price to reconcile bankroll
@@ -253,109 +273,128 @@ class TradeConfirmationManager:
                 self.bankroll_manager.apply_fill(
                     position_id=position_id,
                     fill_price=actual_premium,
-                    contracts=trade_details.get('quantity', 1)
+                    contracts=trade_details.get("quantity", 1),
                 )
-            
+
             # Record trade in bankroll history
-            total_cost = (actual_premium or trade_details.get('premium', 0)) * trade_details.get('quantity', 1) * 100
-            self.bankroll_manager.record_trade({
-                **trade_details,
-                'actual_premium': actual_premium,
-                'total_cost': total_cost,
-                'status': 'SUBMITTED',
-                'position_id': f"{trade_details.get('symbol', 'SPY')}_{trade_details.get('strike', 0)}_{timestamp}"
-            })
-            
-            logger.info(f"[OK] Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
-            
+            total_cost = (
+                (actual_premium or trade_details.get("premium", 0))
+                * trade_details.get("quantity", 1)
+                * 100
+            )
+            self.bankroll_manager.record_trade(
+                {
+                    **trade_details,
+                    "actual_premium": actual_premium,
+                    "total_cost": total_cost,
+                    "status": "SUBMITTED",
+                    "position_id": f"{trade_details.get('symbol', 'SPY')}_{trade_details.get('strike', 0)}_{timestamp}",
+                }
+            )
+
+            logger.info(
+                f"[OK] Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}"
+            )
+
             # Auto-start position monitoring if enabled
             if auto_start_monitor:
                 try:
                     from utils.monitor_launcher import ensure_monitor_running
-                    symbol = trade_details.get('symbol', 'SPY')
+
+                    symbol = trade_details.get("symbol", "SPY")
                     if ensure_monitor_running(symbol):
                         logger.info(f"[OK] Auto-started position monitor for {symbol}")
                     else:
-                        logger.warning(f"[WARNING] Failed to auto-start monitor for {symbol}")
+                        logger.warning(
+                            f"[WARNING] Failed to auto-start monitor for {symbol}"
+                        )
                 except Exception as e:
                     logger.error(f"[ERROR] Monitor auto-start failed: {e}")
-            
+
             # Send Slack confirmation
             if self.slack_notifier:
-                self.slack_notifier.send_heartbeat(f"[OK] Trade Confirmed: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}")
-        
+                self.slack_notifier.send_heartbeat(
+                    f"[OK] Trade Confirmed: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}"
+                )
+
         elif decision == "CANCELLED":
             # Record cancelled trade for statistics
-            self.bankroll_manager.record_trade({
-                **trade_details,
-                'status': 'CANCELLED',
-                'total_cost': 0
-            })
-            
-            logger.info(f"❌ Recorded CANCELLED trade: {trade_details.get('direction')} ${trade_details.get('strike')}")
-            
+            self.bankroll_manager.record_trade(
+                {**trade_details, "status": "CANCELLED", "total_cost": 0}
+            )
+
+            logger.info(
+                f"❌ Recorded CANCELLED trade: {trade_details.get('direction')} ${trade_details.get('strike')}"
+            )
+
             # Send Slack confirmation
             if self.slack_notifier:
-                self.slack_notifier.send_heartbeat(f"❌ Trade Cancelled: {trade_details.get('direction')} ${trade_details.get('strike')}")
-        
+                self.slack_notifier.send_heartbeat(
+                    f"❌ Trade Cancelled: {trade_details.get('direction')} ${trade_details.get('strike')}"
+                )
+
         else:
             logger.warning(f"⚠️ Unknown trade outcome: {decision}")
-    
+
     def process_slack_message(self, message: str) -> bool:
         """Process Slack message for trade confirmation.
-        
+
         Args:
             message: Slack message content (e.g., 'filled 1.28', 'cancelled')
-            
+
         Returns:
             True if message was processed, False otherwise
         """
         if not self.pending_trade:
             logger.warning("No pending trade to confirm via Slack")
             return False
-        
+
         message = message.lower().strip()
-        
+
         # Parse different message formats
-        if message in ['cancelled', 'cancel', 'no', 'abort']:
+        if message in ["cancelled", "cancel", "no", "abort"]:
             decision = "CANCELLED"
             actual_premium = None
             logger.info("Slack confirmation: Trade CANCELLED")
-            
-        elif message in ['submitted', 'submit', 'yes', 'filled']:
+
+        elif message in ["submitted", "submit", "yes", "filled"]:
             decision = "SUBMITTED"
-            actual_premium = self.pending_trade.get('premium', 0)
-            logger.info(f"Slack confirmation: Trade SUBMITTED at expected premium ${actual_premium:.2f}")
-            
-        elif message.startswith('filled ') or message.startswith('fill '):
+            actual_premium = self.pending_trade.get("premium", 0)
+            logger.info(
+                f"Slack confirmation: Trade SUBMITTED at expected premium ${actual_premium:.2f}"
+            )
+
+        elif message.startswith("filled ") or message.startswith("fill "):
             # Parse "filled 1.28" format
             try:
                 parts = message.split()
-                actual_premium = float(parts[1].replace('$', ''))
+                actual_premium = float(parts[1].replace("$", ""))
                 decision = "SUBMITTED"
-                logger.info(f"Slack confirmation: Trade SUBMITTED at ${actual_premium:.2f}")
+                logger.info(
+                    f"Slack confirmation: Trade SUBMITTED at ${actual_premium:.2f}"
+                )
             except (IndexError, ValueError):
                 logger.error(f"Invalid Slack message format: {message}")
                 return False
-                
+
         else:
             logger.warning(f"Unrecognized Slack message: {message}")
             return False
-        
+
         # Record the trade outcome
         self.record_trade_outcome(self.pending_trade, decision, actual_premium)
-        
+
         # Clear pending trade
         self.pending_trade = None
-        
+
         # Send confirmation back to Slack
         if self.slack_notifier:
             if decision == "SUBMITTED":
                 confirm_msg = f"[OK] Confirmed via Slack: {self.pending_trade.get('direction')} ${self.pending_trade.get('strike')} @ ${actual_premium:.2f}"
             else:
-                confirm_msg = f"❌ Confirmed via Slack: Trade cancelled"
+                confirm_msg = "❌ Confirmed via Slack: Trade cancelled"
             self.slack_notifier.send_heartbeat(confirm_msg)
-        
+
         return True
 
 
@@ -420,10 +459,10 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-    
+
     with open("confirm_trade.py", "w") as f:
         f.write(script_content)
-    
+
     logger.info("Created confirm_trade.py script")
 
 
@@ -431,23 +470,25 @@ if __name__ == "__main__":
     # Demo usage
     from utils.portfolio import PortfolioManager
     from utils.bankroll import BankrollManager
-    
+
     portfolio_manager = PortfolioManager()
     bankroll_manager = BankrollManager()
     confirmation_manager = TradeConfirmationManager(portfolio_manager, bankroll_manager)
-    
+
     # Example trade details
     trade_details = {
-        'symbol': 'SPY',
-        'direction': 'CALL',
-        'strike': 635.0,
-        'premium': 1.25,
-        'quantity': 1,
-        'expiry': '2025-01-03'
+        "symbol": "SPY",
+        "direction": "CALL",
+        "strike": 635.0,
+        "premium": 1.25,
+        "quantity": 1,
+        "expiry": "2025-01-03",
     }
-    
+
     # Get user decision
-    decision, actual_premium = confirmation_manager.get_user_decision(trade_details, method="prompt")
-    
+    decision, actual_premium = confirmation_manager.get_user_decision(
+        trade_details, method="prompt"
+    )
+
     # Record outcome
     confirmation_manager.record_trade_outcome(trade_details, decision, actual_premium)

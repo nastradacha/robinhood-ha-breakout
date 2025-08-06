@@ -8,6 +8,7 @@ This lightweight helper avoids external dependencies beyond NumPy / SciPy.
 SciPy is not a hard requirement because we only need the standard normal
 CDF, which NumPy provides via `math.erf` approximation.
 """
+
 from __future__ import annotations
 
 import math
@@ -49,7 +50,7 @@ def black_scholes_delta(
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return 0.0
 
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
 
     if option_type == "call":
         return _Phi(d1)
