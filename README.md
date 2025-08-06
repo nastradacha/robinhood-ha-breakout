@@ -235,6 +235,42 @@ python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 - **🧠 Context Memory**: LLM learns from recent trades and adapts strategy
 - **🔄 Robust Data Fallback**: Automatic Yahoo Finance backup when Alpaca is unavailable
 
+### Enhanced LLM Features
+
+The system includes professional-grade market analysis features with dynamic threshold adjustment:
+
+### VWAP Deviation Analysis
+- Real-time deviation from 5-minute volume-weighted average price
+- Identifies when price moves significantly from institutional levels
+- Helps confirm breakout authenticity
+- **Rule**: >0.2% deviation suggests institutional interest
+
+### ATM Delta Calculation
+- Black-Scholes option sensitivity analysis
+- Optimal timing for option entry based on delta values
+- Risk assessment for position sizing
+- **Rule**: Delta 0.45-0.55 optimal for ATM trades
+
+### ATM Open Interest Assessment
+- Liquidity analysis for better trade execution
+- Market maker positioning insights
+- Volume confirmation signals
+- **Rule**: >10,000 OI suggests good liquidity
+
+### Dealer Gamma Intelligence
+- Market maker positioning data for volatility prediction
+- Gamma exposure analysis for market direction
+- Enhanced breakout confirmation
+- **Rule**: Negative gamma = higher volatility expected
+
+### Dynamic Candle-Body Threshold (NEW in v0.6.1)
+- **Adaptive threshold based on dealer gamma exposure**
+- Standard threshold: 0.05% candle body
+- Strong negative gamma (<-$1M): Lowered to 0.025% (50% reduction)
+- Moderate negative gamma (<$0): Lowered to 0.0375% (25% reduction)
+- Positive gamma: Standard 0.05% threshold maintained
+- **Rationale**: Negative dealer gamma indicates market makers are short gamma, leading to higher volatility and more significant price moves on smaller candle bodies
+
 ### 🤖 Ensemble LLM Decision Engine (v0.6.0)
 
 **Two-model ensemble for enhanced decision reliability:**
@@ -529,6 +565,62 @@ pip install -r requirements.txt
 2. **Run in debug mode**: Use `--log-level DEBUG` for more information
 3. **Test in dry-run**: Use `--dry-run` to isolate issues
 4. **Check your configuration**: Verify all settings in `config.yaml` and `.env`
+
+---
+
+## 📱 Slack UX Improvements (v0.7.0)
+
+**Zero Manual Terminal Watching Required** - Get all updates directly in Slack!
+
+### 🟢 S1: Monitor Breadcrumbs
+Automatic start/stop notifications when position monitoring begins or ends:
+```
+🟢 Monitor started for SPY
+🔴 Monitor stopped for SPY
+```
+
+### ⏳ S2: Throttled Heartbeat
+Periodic "still alive" messages during loop mode to confirm system is running:
+```
+⏳ Cycle 6 (14:30) · SPY $580.25 · NO_TRADE
+⏳ Cycle 12 (15:00) · SPY $582.10, QQQ $485.50 · NO_TRADE
+```
+- Configurable via `HEARTBEAT_EVERY` in config.yaml (default: every 3 cycles)
+- Prevents Slack spam while keeping you informed
+
+### ✅ S3: Fill-Price Echo
+Immediate confirmation when trades are recorded with actual fill prices:
+```
+✅ Trade recorded: CALL 580 @ $1.28 · Qty 1
+❌ Trade cancelled: PUT 485
+```
+- Shows actual fill price vs. estimated price
+- Confirms successful trade recording
+- Mobile-friendly format for quick review
+
+### 📊 S4: Daily Summary Block
+End-of-day wrap-up when loop mode exits at `--end-at` time:
+```
+📊 Daily Wrap-Up 15:45 EST
+Trades: 3
+Wins/Loss: 2/1
+P&L: $45.50
+Peak balance: $545.50
+Current balance: $540.25
+```
+
+### Configuration
+Add to your `config.yaml`:
+```yaml
+# Slack UX Settings
+HEARTBEAT_EVERY: 3  # Send heartbeat every N cycles (0 = disabled)
+```
+
+### Benefits
+- **No terminal watching**: Get all updates in Slack
+- **Mobile trading**: Make decisions from your phone
+- **Peace of mind**: Always know system status
+- **Complete audit trail**: Every action is logged to Slack
 
 ---
 

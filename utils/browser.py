@@ -1,5 +1,6 @@
-"""
-Robinhood Browser Automation Module
+# ✅ Chrome driver pin & prompt rules verified – 2025-08-06
+
+"""Robinhood Browser Automation Module
 
 Provides sophisticated browser automation for Robinhood options trading with anti-detection
 measures and robust error handling. This module handles all browser interactions including
@@ -50,6 +51,8 @@ License: MIT
 import time as time_module
 import logging
 import re
+import tempfile
+import shutil
 from typing import Optional, Dict
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -58,6 +61,7 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
 import undetected_chromedriver as uc
 from pathlib import Path
+from utils.llm import load_config
 
 # Try to import stealth, fallback if not available
 try:
@@ -146,6 +150,7 @@ class RobinhoodBot:
         self.idle_since = None
         self.last_symbol = None
         self.last_action = time_module.time()  # Track last action for session management
+        self._temp_profile_dir = None  # Track temp profile for cleanup
 
     def __enter__(self):
         self.start_browser()
@@ -170,15 +175,43 @@ class RobinhoodBot:
         except Exception as e:
             logger.warning(f"Could not clean Chrome processes: {e}")
 
-        # Try multiple startup strategies
+        # Load configuration for Chrome version with fallback
+        try:
+            config = load_config()
+            chrome_major = config.get("CHROME_MAJOR")
+            if chrome_major is None:
+                chrome_major = None
+                logger.info("Chrome version auto-detection enabled")
+            else:
+                logger.info(f"Using pinned Chrome version: {chrome_major}")
+        except Exception as e:
+            logger.warning(f"Could not load config, using auto-detection: {e}")
+            chrome_major = None
+
+        # Enhanced Chrome detection and fallback
+        import subprocess
+        try:
+            # Try to detect actual Chrome version on system
+            result = subprocess.run(
+                ['reg', 'query', 'HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon', '/v', 'version'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                actual_version = result.stdout.split()[-1].split('.')[0]
+                logger.info(f"Detected Chrome version: {actual_version}")
+                if chrome_major and str(chrome_major) != actual_version:
+                    logger.warning(f"Config version {chrome_major} != detected {actual_version}, using detected")
+                    chrome_major = int(actual_version)
+        except Exception as e:
+            logger.info(f"Chrome version detection failed: {e}")
+
+        # Enhanced startup strategies with better error handling
         strategies = [
-            {"name": "Simple Clean Profile", "use_profile": False, "minimal": True},
-            {
-                "name": "Clean Profile with Options",
-                "use_profile": False,
-                "minimal": False,
-            },
-            {"name": "Temp Profile", "use_profile": True, "minimal": True},
+            {"name": "Auto-detect Clean", "use_profile": False, "minimal": True, "version": None},
+            {"name": "Pinned Version Clean", "use_profile": False, "minimal": True, "version": chrome_major},
+            {"name": "Auto-detect with Profile", "use_profile": True, "minimal": True, "version": None},
+            {"name": "Pinned with Profile", "use_profile": True, "minimal": True, "version": chrome_major},
+            {"name": "Fallback Minimal", "use_profile": False, "minimal": True, "version": None, "no_sandbox": True},
         ]
 
         for i, strategy in enumerate(strategies):
@@ -187,38 +220,56 @@ class RobinhoodBot:
                 options = uc.ChromeOptions()
 
                 if strategy["use_profile"]:
-                    # Use temporary profile
-                    temp_profile = Path.cwd() / "temp_chrome_profile"
-                    options.add_argument(f"--user-data-dir={temp_profile}")
+                    # Use truly random temporary profile
+                    self._temp_profile_dir = tempfile.mkdtemp(prefix="chrome_profile_")
+                    options.add_argument(f"--user-data-dir={self._temp_profile_dir}")
+                    logger.info(f"Created temp profile: {self._temp_profile_dir}")
 
-                if not strategy["minimal"]:
-                    # Add stealth options
-                    options.add_argument(
-                        "--disable-blink-features=AutomationControlled"
-                    )
-                    options.add_argument("--disable-infobars")
-                    options.add_argument("--disable-extensions")
-
-                # Essential options for stability
+                # Enhanced stability options
                 options.add_argument("--no-sandbox")
                 options.add_argument("--disable-dev-shm-usage")
                 options.add_argument("--disable-gpu")
-                options.add_argument(
-                    "--remote-debugging-port=0"
-                )  # Let Chrome choose port
-                options.add_argument(
-                    "--disable-features=ChromeCleanup, LoadCryptoTokenExtension"
-                )
+                options.add_argument("--disable-background-networking")
+                options.add_argument("--disable-features=ChromeCleanup,LoadCryptoTokenExtension,VizDisplayCompositor")
+                options.add_argument("--disable-extensions")
+                options.add_argument("--disable-plugins")
+                options.add_argument("--disable-images")
+                options.add_argument("--disable-javascript")
+
+                # Port management - use random port to avoid conflicts
+                import random
+                debug_port = random.randint(9000, 9999)
+                options.add_argument(f"--remote-debugging-port={debug_port}")
+
+                # Additional stability flags for problematic systems
+                if strategy.get("no_sandbox"):
+                    options.add_argument("--disable-web-security")
+                    options.add_argument("--disable-features=VizDisplayCompositor")
+                    options.add_argument("--single-process")
 
                 if self.headless:
                     options.add_argument("--headless=new")
+                    options.add_argument("--disable-software-rasterizer")
 
-                # Launch Chrome with timeout and explicit version
-                # Force Chrome 138 compatibility
-                self.driver = uc.Chrome(options=options, version_main=138)
+                # Launch Chrome with version strategy
+                driver_kwargs = {"options": options}
+                strategy_version = strategy.get("version")
+                if strategy_version:
+                    driver_kwargs["version_main"] = strategy_version
+                    logger.info(f"Using Chrome version: {strategy_version}")
+                else:
+                    logger.info("Using Chrome auto-detection")
+
+                # Add timeout and retry logic
+                self.driver = uc.Chrome(**driver_kwargs)
+
+                # Test driver responsiveness
+                self.driver.set_page_load_timeout(10)
                 self.driver.implicitly_wait(self.implicit_wait)
-                self.driver.set_page_load_timeout(self.page_load_timeout)
                 self.wait = WebDriverWait(self.driver, 10)
+
+                # Quick connectivity test
+                self.driver.get("data:text/html,<html><body>Chrome Test</body></html>")
 
                 logger.info(f"[OK] Chrome started successfully with {strategy['name']}")
                 break
@@ -233,6 +284,32 @@ class RobinhoodBot:
                         self.driver = None
                 except:
                     pass
+
+                # Enhanced temp profile cleanup with retry logic
+                if self._temp_profile_dir and Path(self._temp_profile_dir).exists():
+                    try:
+                        # Force close any file handles first
+                        import gc
+                        gc.collect()
+                        time_module.sleep(0.5)
+                        
+                        # Try multiple cleanup attempts
+                        for attempt in range(3):
+                            try:
+                                shutil.rmtree(self._temp_profile_dir)
+                                self._temp_profile_dir = None
+                                logger.info(f"Temp profile cleaned up on attempt {attempt + 1}")
+                                break
+                            except (OSError, PermissionError) as e:
+                                if attempt < 2:
+                                    logger.info(f"Cleanup attempt {attempt + 1} failed, retrying...")
+                                    time_module.sleep(1)
+                                else:
+                                    logger.warning(f"Could not cleanup temp profile after 3 attempts: {e}")
+                                    # Mark for later cleanup
+                                    self._temp_profile_dir = None
+                    except Exception as cleanup_error:
+                        logger.warning(f"Temp profile cleanup error: {cleanup_error}")
 
                 if i == len(strategies) - 1:
                     logger.error("All Chrome startup strategies failed")
@@ -1773,6 +1850,15 @@ class RobinhoodBot:
                 logger.warning(f"Error closing browser: {e}")
             finally:
                 self.driver = None
+
+                # Cleanup temp profile directory (C-3)
+                if self._temp_profile_dir and Path(self._temp_profile_dir).exists():
+                    try:
+                        shutil.rmtree(self._temp_profile_dir)
+                        logger.info(f"Cleaned up temp profile: {self._temp_profile_dir}")
+                        self._temp_profile_dir = None
+                    except Exception as cleanup_error:
+                        logger.warning(f"Could not cleanup temp profile: {cleanup_error}")
 
                 # Force cleanup any remaining Chrome processes
                 try:

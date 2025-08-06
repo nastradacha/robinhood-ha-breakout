@@ -227,28 +227,110 @@ from utils.logging_utils import log_trade_decision
 
 def parse_end_time(end_time_str: str) -> Optional[datetime]:
     """Parse end time string (HH:MM) to datetime object in local timezone."""
-    if not end_time_str:
-        return None
-
     try:
-        hour, minute = map(int, end_time_str.split(":"))
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError("Invalid time format")
-
-        # Use America/New_York timezone as specified
         tz = ZoneInfo("America/New_York")
         now = datetime.now(tz)
+        
+        # Parse the time string
+        time_parts = end_time_str.split(":")
+        if len(time_parts) != 2:
+            raise ValueError("Time must be in HH:MM format")
+        
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+        
+        # Create end time for today
         end_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-
-        # If end time is before current time, assume it's for tomorrow
+        
+        # If end time has already passed today, set it for tomorrow
         if end_time <= now:
             end_time += timedelta(days=1)
-
+        
         return end_time
-    except (ValueError, IndexError):
-        raise ValueError(
-            f"Invalid end time format: {end_time_str}. Use HH:MM (24-hour format)"
+    except (ValueError, IndexError) as e:
+        logger.error(f"Invalid end time format '{end_time_str}': {e}")
+        sys.exit(1)
+
+
+def generate_daily_summary(config: Dict, end_time: datetime) -> str:
+    """Generate S4 daily summary block for end-of-day Slack notification.
+    
+    Args:
+        config: Trading configuration
+        end_time: End time of trading session
+        
+    Returns:
+        Formatted daily summary message
+    """
+    try:
+        from datetime import date
+        import csv
+        from pathlib import Path
+        
+        today = date.today()
+        trade_log_file = config.get('TRADE_LOG_FILE', 'logs/trade_history.csv')
+        
+        # Initialize counters
+        n_trades = 0
+        wins = 0
+        losses = 0
+        total_pl = 0.0
+        
+        # Read today's trades from trade log
+        if Path(trade_log_file).exists():
+            with open(trade_log_file, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    try:
+                        # Parse trade date
+                        trade_date = datetime.fromisoformat(row.get('timestamp', '')).date()
+                        if trade_date == today and row.get('status') == 'SUBMITTED':
+                            n_trades += 1
+                            
+                            # Calculate P&L if available
+                            entry_premium = float(row.get('actual_premium', row.get('premium', 0)))
+                            exit_premium = float(row.get('exit_premium', 0))
+                            contracts = int(row.get('quantity', 1))
+                            
+                            if exit_premium > 0:  # Position closed
+                                pl = (exit_premium - entry_premium) * contracts * 100
+                                total_pl += pl
+                                
+                                if pl > 0:
+                                    wins += 1
+                                else:
+                                    losses += 1
+                                    
+                    except (ValueError, KeyError) as e:
+                        continue  # Skip malformed rows
+        
+        # Get current bankroll
+        try:
+            from utils.bankroll import BankrollManager
+            bankroll_manager = BankrollManager(config.get('BANKROLL_FILE', 'bankroll.json'))
+            current_bankroll = bankroll_manager.get_current_bankroll()
+            peak_bankroll = getattr(bankroll_manager, 'peak_bankroll', current_bankroll)
+        except Exception:
+            current_bankroll = config.get('START_CAPITAL', 500.0)
+            peak_bankroll = current_bankroll
+        
+        # Format daily summary block
+        tz_name = end_time.strftime('%Z')
+        summary = (
+            f"📊 **Daily Wrap-Up** {end_time.strftime('%H:%M %Z')}\n"
+            f"**Trades:** {n_trades}\n"
+            f"**Wins/Loss:** {wins}/{losses}\n"
+            f"**P&L:** ${total_pl:.2f}\n"
+            f"**Peak balance:** ${peak_bankroll:.2f}\n"
+            f"**Current balance:** ${current_bankroll:.2f}"
         )
+        
+        return summary
+        
+    except Exception as e:
+        logger.error(f"Error generating daily summary: {e}")
+        # Fallback summary
+        return f"📊 **Daily Wrap-Up** {end_time.strftime('%H:%M %Z')}\nSession complete"
 
 
 def execute_multi_symbol_trade(
@@ -665,6 +747,7 @@ def main_loop(
 
     try:
         loop_count = 0
+        heartbeat_counter = 0  # S2: Track heartbeat throttling
 
         while True:
             loop_count += 1
@@ -675,6 +758,16 @@ def main_loop(
                 logger.info(
                     f"[LOOP] Reached end time {end_time.strftime('%H:%M %Z')} - exiting"
                 )
+                
+                # S4: Send daily summary block at --end-at cutoff
+                if slack_notifier:
+                    try:
+                        daily_summary = generate_daily_summary(config, end_time)
+                        slack_notifier.send_heartbeat(daily_summary)
+                        logger.info("[S4-DAILY-SUMMARY] Sent end-of-day summary")
+                    except Exception as e:
+                        logger.error(f"[S4-DAILY-SUMMARY] Failed to send daily summary: {e}")
+                
                 break
 
             logger.info(
@@ -701,10 +794,17 @@ def main_loop(
 
                 # Handle different decision types
                 if decision.decision == "NO_TRADE":
-                    # Send lightweight heartbeat to Slack
-                    if slack_notifier:
-                        heartbeat_msg = f"[{cycle_start.strftime('%H:%M')}] No breakout detected (candle body {analysis['candle_body_pct']:.2f}%)"
+                    # S2: Send throttled heartbeat one-liner to Slack
+                    heartbeat_counter += 1
+                    heartbeat_every = config.get('HEARTBEAT_EVERY', 3)
+                    
+                    if slack_notifier and (heartbeat_counter % heartbeat_every == 0):
+                        # Format: ⏳ 09:45 · SPY · no breakout (body 0.03%)
+                        symbol = config.get('SYMBOL', 'SPY')
+                        body_pct = analysis.get('candle_body_pct', 0.0)
+                        heartbeat_msg = f"⏳ {cycle_start.strftime('%H:%M')} · {symbol} · no breakout (body {body_pct:.02f}%)"
                         slack_notifier.send_heartbeat(heartbeat_msg)
+                        logger.info(f"[S2-HEARTBEAT] Sent throttled heartbeat ({heartbeat_counter}/{heartbeat_every})")
 
                     # Log the no-trade decision
                     trade_data = {
@@ -728,6 +828,7 @@ def main_loop(
                             f"[LOW_CONFIDENCE] Confidence {decision.confidence:.2f} below threshold"
                         )
                         if slack_notifier:
+                            # S2: Low confidence heartbeat (always sent, not throttled)
                             heartbeat_msg = f"⚠️ {cycle_start.strftime('%H:%M')} · Low confidence {decision.decision} ({decision.confidence:.2f})"
                             slack_notifier.send_heartbeat(heartbeat_msg)
                     else:
@@ -927,6 +1028,15 @@ def main_loop(
                 )
 
     finally:
+        # S1: Clean up monitors and send shutdown breadcrumbs
+        try:
+            from utils.monitor_launcher import kill_all_monitors
+            killed_count = kill_all_monitors()
+            if killed_count > 0:
+                logger.info(f"[S1-CLEANUP] Killed {killed_count} monitor processes")
+        except Exception as e:
+            logger.error(f"[S1-CLEANUP] Error killing monitors: {e}")
+        
         # Clean up browser
         if bot:
             logger.info("[CLEANUP] Closing browser")

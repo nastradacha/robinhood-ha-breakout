@@ -481,6 +481,21 @@ ANALYSIS FOCUS:
         # Validate and fill missing market data fields
         validated_market_data = self._validate_and_fill_market_data(market_data)
 
+        # Dynamic candle-body threshold based on dealer gamma (R-2)
+        dealer_gamma = validated_market_data.get("dealer_gamma_$", 0.0)
+        base_threshold = 0.05  # Base 0.05% threshold
+        
+        # Lower threshold when dealer gamma is negative (more volatility expected)
+        if dealer_gamma < -1000000:  # Strong negative gamma
+            dynamic_threshold = base_threshold * 0.5  # 0.025%
+            threshold_context = f"DYNAMIC THRESHOLD: Lowered to {dynamic_threshold:.3f}% due to strong negative dealer gamma (${dealer_gamma:,.0f})"
+        elif dealer_gamma < 0:  # Moderate negative gamma
+            dynamic_threshold = base_threshold * 0.75  # 0.0375%
+            threshold_context = f"DYNAMIC THRESHOLD: Lowered to {dynamic_threshold:.3f}% due to negative dealer gamma (${dealer_gamma:,.0f})"
+        else:
+            dynamic_threshold = base_threshold  # Keep standard 0.05%
+            threshold_context = f"DYNAMIC THRESHOLD: Standard {dynamic_threshold:.3f}% (dealer gamma: ${dealer_gamma:,.0f})"
+        
         # Prepare enhanced context about recent performance
         performance_context = ""
 
@@ -536,11 +551,13 @@ ANALYSIS FOCUS:
                 "content": f"""
 {performance_context}
 
+{threshold_context}
+
 Market Analysis:
 {json.dumps(validated_market_data, indent=2)}
 
 Based on this Heikin-Ashi analysis and your trading performance history, make your trading decision. Consider:
-1. Breakout strength (candle body %) - now more sensitive with 0.05% threshold
+1. Breakout strength (candle body %) - use dynamic threshold of {dynamic_threshold:.3f}%
 2. Volatility context (true range %)
 3. Room to move to next support/resistance
 4. Volume confirmation
@@ -553,6 +570,7 @@ PAY SPECIAL ATTENTION TO:
 - consecutive_bullish/consecutive_bearish: 3+ candles in same direction = strong momentum
 - price_change_15min_pct: >0.3% move in 15 minutes = significant momentum
 - STRONG_BULLISH/STRONG_BEARISH trends override low body percentage thresholds
+- Negative dealer gamma suggests higher volatility - use lower candle body threshold
 
 Use the choose_trade function to respond.""",
             },

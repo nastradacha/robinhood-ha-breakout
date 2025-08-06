@@ -11,6 +11,9 @@ ENSEMBLE_MODELS:
   - gpt-4o-mini
   - deepseek-chat
 
+# Chrome Driver Configuration (v0.6.1)
+CHROME_MAJOR: 131            # Chrome major version; null = auto-detect
+
 # Bankroll Management
 START_CAPITAL: 500.0         # USD - Minimum realistic amount for SPY options
 RISK_FRACTION: 0.20          # max % of bankroll you may risk per trade
@@ -92,6 +95,9 @@ MARKET_OPEN_HOUR: 9
 MARKET_OPEN_MINUTE: 30
 MARKET_CLOSE_HOUR: 16
 MARKET_CLOSE_MINUTE: 0
+
+# Slack UX Configuration (v0.7.0)
+HEARTBEAT_EVERY: 3  # Send heartbeat every N scan intervals to avoid spam
 
 
 

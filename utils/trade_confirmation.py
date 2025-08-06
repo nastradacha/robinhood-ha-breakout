@@ -311,11 +311,17 @@ class TradeConfirmationManager:
                 except Exception as e:
                     logger.error(f"[ERROR] Monitor auto-start failed: {e}")
 
-            # Send Slack confirmation
+            # S3: Send fill-price echo to Slack
             if self.slack_notifier:
-                self.slack_notifier.send_heartbeat(
-                    f"[OK] Trade Confirmed: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}"
-                )
+                # Enhanced fill-price echo format: ✅ Trade recorded: CALL 580 @ $1.28 · Qty 1
+                side = trade_details.get('direction', 'CALL')
+                strike = trade_details.get('strike', 0)
+                qty = trade_details.get('quantity', 1)
+                fill_price = actual_premium or trade_details.get('premium', 0)
+                
+                fill_echo_msg = f"✅ Trade recorded: {side} {strike} @ ${fill_price:.2f} · Qty {qty}"
+                self.slack_notifier.send_heartbeat(fill_echo_msg)
+                logger.info(f"[S3-FILL-ECHO] Sent fill-price echo: {fill_echo_msg}")
 
         elif decision == "CANCELLED":
             # Record cancelled trade for statistics
@@ -327,11 +333,12 @@ class TradeConfirmationManager:
                 f"❌ Recorded CANCELLED trade: {trade_details.get('direction')} ${trade_details.get('strike')}"
             )
 
-            # Send Slack confirmation
+            # Send Slack confirmation for cancelled trade
             if self.slack_notifier:
-                self.slack_notifier.send_heartbeat(
-                    f"❌ Trade Cancelled: {trade_details.get('direction')} ${trade_details.get('strike')}"
-                )
+                side = trade_details.get('direction', 'CALL')
+                strike = trade_details.get('strike', 0)
+                cancel_msg = f"❌ Trade cancelled: {side} {strike}"
+                self.slack_notifier.send_heartbeat(cancel_msg)
 
         else:
             logger.warning(f"⚠️ Unknown trade outcome: {decision}")

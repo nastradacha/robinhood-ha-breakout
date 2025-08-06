@@ -13,6 +13,15 @@ from pathlib import Path
 from typing import Optional
 import atexit
 
+# Import enhanced Slack for S1 breadcrumbs
+try:
+    from .enhanced_slack import EnhancedSlackIntegration
+except ImportError:
+    # Handle standalone execution
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.enhanced_slack import EnhancedSlackIntegration
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +41,13 @@ class MonitorLauncher:
 
         self.project_root = Path(project_root)
         self.pid_dir = self.project_root
+        
+        # Initialize Slack integration for S1 breadcrumbs
+        try:
+            self.slack = EnhancedSlackIntegration()
+        except Exception as e:
+            logger.warning(f"Slack integration not available: {e}")
+            self.slack = None
 
         # Register cleanup on exit
         atexit.register(self.cleanup_all_monitors)
@@ -144,6 +160,18 @@ class MonitorLauncher:
         if new_pid:
             self._write_pid_file(symbol, new_pid)
             logger.info(f"Successfully started monitor for {symbol}: PID {new_pid}")
+            
+            # S1: Send monitor started breadcrumb
+            if self.slack:
+                try:
+                    # Load config to get monitor interval
+                    from .llm import load_config
+                    config = load_config()
+                    interval = config.get('MONITOR_INTERVAL', 15)
+                    self.slack.send_info(f"🟢 Exit-monitor started for {symbol} ({interval}s interval)")
+                except Exception as e:
+                    logger.debug(f"Could not send monitor started breadcrumb: {e}")
+            
             return True
         else:
             logger.error(f"Failed to start monitor for {symbol}")
@@ -191,24 +219,59 @@ class MonitorLauncher:
                 pass
 
             logger.info(f"Stopped monitor for {symbol}: PID {pid}")
+            
+            # S1: Send monitor stopped breadcrumb
+            if self.slack:
+                try:
+                    self.slack.send_info(f"🔴 Exit-monitor for {symbol} shut down")
+                except Exception as e:
+                    logger.debug(f"Could not send monitor stopped breadcrumb: {e}")
+            
             return True
 
         except Exception as e:
             logger.error(f"Failed to stop monitor for {symbol}: {e}")
             return False
 
-    def cleanup_all_monitors(self) -> None:
-        """Stop all running monitors and clean up PID files."""
-        logger.info("Cleaning up all monitors...")
+    def kill_all_monitors(self) -> int:
+        """Kill all running monitor processes (S1: for graceful shutdown).
+
+        Returns:
+            Number of processes killed
+        """
+        stopped_count = 0
+        logger.info("Killing all monitors...")
 
         # Find all PID files
         pid_files = list(self.pid_dir.glob(".monitor_*.pid"))
-
         for pid_file in pid_files:
             try:
                 # Extract symbol from filename
                 symbol = pid_file.stem.replace(".monitor_", "")
-                self.stop_monitor(symbol)
+                if self.stop_monitor(symbol):
+                    stopped_count += 1
+            except Exception as e:
+                logger.error(f"Error killing monitor {pid_file}: {e}")
+
+        return stopped_count
+
+    def cleanup_all_monitors(self) -> int:
+        """Stop all running monitors and clean up PID files.
+        
+        Returns:
+            Number of monitors stopped
+        """
+        stopped_count = 0
+        logger.info("Cleaning up all monitors...")
+
+        # Find all PID files
+        pid_files = list(self.pid_dir.glob(".monitor_*.pid"))
+        for pid_file in pid_files:
+            try:
+                # Extract symbol from filename
+                symbol = pid_file.stem.replace(".monitor_", "")
+                if self.stop_monitor(symbol):
+                    stopped_count += 1
             except Exception as e:
                 logger.error(f"Error cleaning up {pid_file}: {e}")
                 # Force remove PID file
@@ -217,7 +280,17 @@ class MonitorLauncher:
                 except OSError:
                     pass
 
+        logger.info(f"Cleaned up {stopped_count} monitors")
+        
+        # S1: Send bulk shutdown breadcrumb if any monitors were stopped
+        if stopped_count > 0 and self.slack:
+            try:
+                self.slack.send_info(f"🔴 All exit-monitors shut down ({stopped_count} stopped)")
+            except Exception as e:
+                logger.debug(f"Could not send bulk shutdown breadcrumb: {e}")
+
         logger.info("Monitor cleanup complete")
+        return stopped_count
 
     def list_running_monitors(self) -> dict:
         """List all running monitors.

@@ -2,6 +2,101 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [0.7.0] - 2025-01-10
+
+### 📱 Slack UX Improvements - Zero Manual Terminal Watching
+
+**Major Enhancement**: Complete Slack-based workflow eliminates need for manual terminal monitoring during trading sessions.
+
+#### 🟢 S1: Monitor Start/Stop Breadcrumbs
+- **Automatic notifications** when position monitoring starts/stops
+- **Enhanced Slack integration** with `send_info()` method for informational messages
+- **Graceful shutdown** integration in main.py cleanup process
+- **Monitor lifecycle tracking** with clear visual indicators
+
+#### ⏳ S2: Throttled Heartbeat One-Liner
+- **Configurable heartbeat** messages during loop mode NO_TRADE cycles
+- **Spam prevention** via `HEARTBEAT_EVERY` config (default: every 3 cycles)
+- **Multi-symbol support** with price display for all tracked symbols
+- **Time-stamped updates** showing current market prices and cycle count
+
+#### ✅ S3: Fill-Price Echo After Confirmation
+- **Immediate trade confirmation** with actual fill prices in Slack
+- **Enhanced format**: `✅ Trade recorded: CALL 580 @ $1.28 · Qty 1`
+- **Mobile-optimized** display for quick review and decision making
+- **Cancellation notifications** with clear visual indicators
+
+#### 📊 S4: End-of-Day Summary Block
+- **Automatic daily wrap-up** when loop mode exits at `--end-at` cutoff
+- **Comprehensive statistics**: trades, wins/losses, P&L, bankroll status
+- **Peak balance tracking** for daily performance monitoring
+- **Timezone-aware** formatting for accurate time display
+
+### 🔧 Technical Implementation
+- **Enhanced TradeConfirmationManager**: S3 fill-price echo integration
+- **Main loop integration**: S2 heartbeat and S4 daily summary
+- **Monitor launcher enhancements**: S1 breadcrumb notifications
+- **Graceful shutdown**: S1 cleanup integration in finally blocks
+
+### 🧪 Comprehensive Testing
+- **Unit test suite**: Complete coverage for all four Slack UX features
+- **test_slack_breadcrumbs.py**: Monitor start/stop notification testing
+- **test_heartbeat.py**: Throttling logic and message format validation
+- **test_fill_echo.py**: Trade confirmation and fill-price echo testing
+- **test_daily_summary.py**: End-of-day summary generation and formatting
+
+### 📚 Documentation Updates
+- **README.md**: New comprehensive Slack UX section with examples
+- **Configuration guide**: HEARTBEAT_EVERY setting documentation
+- **Mobile trading workflow**: Complete Slack-based trading instructions
+
+### 🎯 User Benefits
+- **Zero terminal watching**: All updates delivered to Slack automatically
+- **Mobile trading capability**: Make decisions from anywhere using Slack
+- **Complete audit trail**: Every system action logged to Slack
+- **Peace of mind**: Always know system status without manual checking
+- **Professional workflow**: Institutional-quality trade tracking and reporting
+
+**Impact**: Transforms the system from terminal-dependent to fully mobile-enabled, allowing users to trade professionally from anywhere with complete confidence in system status and trade execution.
+
+## [0.6.1] - 2025-01-06
+
+### 🔧 Chrome Driver Stability Enhancements
+- **Chrome Version Pinning**: Added `CHROME_MAJOR` config option to pin Chrome driver version for consistent automation
+- **Random Temp Profiles**: Implemented truly random temporary profile directories with automatic cleanup
+- **Enhanced Hardening**: Added additional Chrome flags for improved bot detection avoidance
+- **Robust Cleanup**: Automatic temp profile cleanup on browser quit and failure scenarios
+- **Comprehensive Testing**: Full unit test suite for Chrome driver stability features
+
+### 🧠 Enhanced LLM Prompt Rules
+- **Dynamic Candle-Body Threshold**: Adaptive threshold based on dealer gamma exposure
+  - Strong negative gamma (<-$1M): 0.025% threshold (50% reduction)
+  - Moderate negative gamma (<$0): 0.0375% threshold (25% reduction) 
+  - Positive gamma: Standard 0.05% threshold
+- **Embedded Feature Rules**: All enhanced LLM features now have explicit rules in system prompt
+  - VWAP deviation analysis with >0.2% institutional interest threshold
+  - ATM delta optimization for 0.45-0.55 range
+  - Open interest liquidity assessment (>10K OI threshold)
+  - Dealer gamma volatility prediction integration
+- **Context Memory Integration**: Recent trades context fully embedded in LLM decision process
+
+### 🛡️ Stability & Reliability
+- **Browser Session Persistence**: Improved Chrome session management across trading loops
+- **Error Recovery**: Enhanced error handling for Chrome startup failures
+- **Resource Management**: Proper cleanup of temporary files and processes
+
+### 🧪 Testing & Validation
+- **Chrome Driver Tests**: Comprehensive unit tests for version pinning and temp profile management
+- **LLM Feature Tests**: Validation of dynamic threshold logic and enhanced prompt rules
+- **Production Simulation**: End-to-end testing with real market data and Chrome automation
+
+### 📚 Documentation
+- **Enhanced README**: Detailed documentation of dynamic threshold logic and Chrome stability features
+- **Configuration Guide**: Clear examples for Chrome version pinning setup
+- **Feature Rules**: Explicit documentation of all LLM feature decision rules
+
+**Impact**: Significantly improved browser automation reliability and LLM decision accuracy through adaptive thresholds and enhanced market analysis rules.
+
 ## [0.6.0] - 2025-08-06
 
 ### Added - Ensemble LLM Decision Engine

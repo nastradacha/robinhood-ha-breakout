@@ -318,38 +318,119 @@ python trade_history.py
 
 ## 🔄 How Everything Works Together
 
-### Single Trade Mode (Traditional)
+### Complete System Architecture (v0.7.0)
 
 ```mermaid
 graph TD
-    A[Start] --> B[Data Dept: Get Market Data]
-    B --> C[Data Dept: Analyze Patterns]
-    C --> D[AI Dept: Make Decision]
-    D --> E{Trade Signal?}
-    E -->|No| F[Log & Exit]
-    E -->|Yes| G[Finance Dept: Check Risk]
-    G --> H[Automation Dept: Open Browser]
-    H --> I[Automation Dept: Fill Trade Form]
-    I --> J[Stop at Review Screen]
-    J --> K[You Decide: Submit or Cancel]
+    %% Initialization Phase
+    A[🚀 System Start] --> B[📋 Load Config & Environment]
+    B --> C[🔌 Initialize Alpaca Client]
+    C --> D[📱 Initialize Enhanced Slack Integration]
+    D --> E[💰 Load Bankroll & Portfolio]
+    E --> F[🌐 Start Chrome Browser Session]
+    
+    %% Main Trading Loop
+    F --> G[📊 Data Dept: Fetch Multi-Symbol Data]
+    G --> H[📊 Alpaca: Real-time Market Data]
+    H --> I[📊 Yahoo Finance: Backup Data Source]
+    I --> J[🔍 Data Analysis: Technical Indicators]
+    J --> K[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
+    K --> L[🧠 Context Memory: Load Recent 5 Trades]
+    
+    %% Ensemble AI Decision Engine
+    L --> M[🤖 AI Ensemble Decision Engine]
+    M --> N[🧠 GPT-4o-mini Analysis]
+    M --> O[🧠 DeepSeek-V2 Analysis]
+    N --> P[🗳️ Majority Vote Logic]
+    O --> P
+    P --> Q{Both Models Agree?}
+    Q -->|Yes| R[✅ Consensus Decision]
+    Q -->|No| S[🎯 Tie-Break: Higher Confidence Wins]
+    S --> R
+    
+    %% Decision Processing
+    R --> T{Trade Signal?}
+    T -->|NO_TRADE| U[📱 S2: Throttled Heartbeat Check]
+    U --> V{Send Heartbeat?}
+    V -->|Yes| W[📱 Slack: ⏳ Cycle N · SPY $XXX · NO_TRADE]
+    V -->|No| X[⏸️ Silent Cycle]
+    W --> Y[⏰ Wait for Next Interval]
+    X --> Y
+    
+    %% Trade Execution Path
+    T -->|CALL/PUT| Z[💰 Finance: Risk & Position Size Check]
+    Z --> AA[🌐 Browser: Navigate to Options Chain]
+    AA --> BB[🔍 Find ATM Option]
+    BB --> CC[📝 Pre-fill Order Form]
+    CC --> DD[🛑 Stop at Review Screen]
+    DD --> EE[📱 Slack: Rich Trade Alert with Charts]
+    EE --> FF[👤 User Decision: Submit/Cancel]
+    
+    %% Trade Confirmation Workflow
+    FF --> GG{User Choice?}
+    GG -->|Submit| HH[✅ Record Trade with Actual Fill Price]
+    GG -->|Cancel| II[❌ Record Cancelled Trade]
+    HH --> JJ[📱 S3: Fill-Price Echo to Slack]
+    II --> KK[📱 Slack: Trade Cancelled Notification]
+    JJ --> LL[🟢 S1: Auto-Start Position Monitor]
+    KK --> Y
+    LL --> MM[📊 Monitor: Real-time P&L Tracking]
+    MM --> Y
+    
+    %% Loop Control
+    Y --> NN{End Time Reached?}
+    NN -->|No| OO[📊 Increment Cycle Counter]
+    OO --> G
+    NN -->|Yes| PP[📱 S4: Generate Daily Summary]
+    PP --> QQ[📱 Slack: 📊 Daily Wrap-Up Block]
+    QQ --> RR[🟢 S1: Kill All Monitors with Breadcrumbs]
+    RR --> SS[🧹 Cleanup: Close Browser & Resources]
+    SS --> TT[🏁 System Exit]
+    
+    %% Error Handling
+    G -.->|API Failure| UU[🔄 Fallback to Yahoo Finance]
+    UU --> J
+    N -.->|GPT Failure| VV[🔄 Single Model Fallback]
+    O -.->|DeepSeek Failure| VV
+    VV --> R
+    
+    %% Styling
+    classDef slackUX fill:#e1f5fe,stroke:#01579b,stroke-width:3px
+    classDef aiEngine fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
+    classDef dataFlow fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    classDef userAction fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    
+    class W,JJ,KK,PP,QQ,RR slackUX
+    class M,N,O,P,R aiEngine
+    class G,H,I,J,K dataFlow
+    class FF,GG userAction
 ```
 
-### Continuous Loop Mode (NEW!)
+### Key System Components Integration
 
-```mermaid
-graph TD
-    A[Start Loop] --> B[Data Dept: Get Market Data]
-    B --> C[AI Dept: Make Decision]
-    C --> D{Trade Signal?}
-    D -->|No| E[Comms Dept: Send Heartbeat]
-    D -->|Yes| F[Automation Dept: Prepare Trade]
-    F --> G[Comms Dept: Send Alert]
-    E --> H[Wait for Next Interval]
-    G --> H
-    H --> I{End Time Reached?}
-    I -->|No| B
-    I -->|Yes| J[Clean Exit]
-```
+#### 🤖 **Ensemble AI Decision Engine**
+- **Dual Model Analysis**: Both GPT-4o-mini and DeepSeek-V2 analyze identical market data
+- **Majority Voting**: Models vote independently on {CALL, PUT, NO_TRADE}
+- **Intelligent Tie-Breaking**: Higher confidence model wins when decisions differ
+- **Robust Fallback**: Single-model operation if one provider fails
+
+#### 📱 **Slack UX Integration (v0.7.0)**
+- **S1 Breadcrumbs**: 🟢 Monitor started/stopped notifications
+- **S2 Heartbeat**: ⏳ Throttled "still alive" messages during NO_TRADE cycles
+- **S3 Fill Echo**: ✅ Immediate trade confirmation with actual fill prices
+- **S4 Daily Summary**: 📊 End-of-day wrap-up with comprehensive statistics
+
+#### 📊 **Enhanced Data Pipeline**
+- **Primary**: Alpaca API for real-time market data
+- **Fallback**: Yahoo Finance for reliability
+- **Features**: VWAP deviation, ATM delta, open interest, dealer gamma
+- **Context**: Recent 5-trade memory for adaptive learning
+
+#### 🔄 **Position Monitoring Ecosystem**
+- **Auto-Launch**: Monitors start automatically after trade submission
+- **Real-Time Tracking**: Continuous P&L monitoring with Alpaca data
+- **Smart Alerts**: Profit target and stop-loss notifications
+- **Graceful Shutdown**: Clean monitor termination with Slack breadcrumbs
 
 ---
 
@@ -371,11 +452,17 @@ robinhood-ha-breakout/
 ├── utils/                       # The "departments"
 │   ├── 📈 data.py              # Data Department (with Alpaca integration)
 │   ├── 🔌 alpaca_client.py     # Alpaca API client for real-time data
-│   ├── 🧠 llm.py               # AI Department  
+│   ├── 🧠 llm.py               # AI Department (Ensemble Engine)
+│   ├── 🧠 llm_client.py        # LLM Client with dual-model support
 │   ├── 💰 bankroll.py          # Finance Department
 │   ├── 🌐 browser.py           # Automation Department
-│   ├── 📱 slack.py             # Communications Department (enhanced alerts)
-│   └── 📊 portfolio.py         # Portfolio Department
+│   ├── 📱 enhanced_slack.py    # Enhanced Slack Integration (v0.7.0)
+│   ├── 📱 slack_charts.py      # Slack Chart Generation
+│   ├── 📊 portfolio.py         # Portfolio Department
+│   ├── 🔧 trade_confirmation.py # Trade Confirmation Manager (S3)
+│   ├── 🚀 monitor_launcher.py  # Monitor Lifecycle Manager (S1)
+│   ├── 📊 exit_strategies.py   # Advanced Exit Strategy Engine
+│   └── 📈 recent_trades.py     # Context Memory System
 ├── 
 ├── tests/                       # Quality control
 ├── logs/                        # System records and monitoring logs

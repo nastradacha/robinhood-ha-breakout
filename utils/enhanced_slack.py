@@ -417,6 +417,17 @@ class EnhancedSlackIntegration:
         """Delegate basic heartbeat to basic notifier."""
         self.basic_notifier.send_heartbeat(message)
 
+    def send_info(self, message: str):
+        """Send informational message (S1: Monitor breadcrumbs)."""
+        if not self.enabled:
+            return
+        
+        try:
+            self.basic_notifier.send_heartbeat(message)
+            logger.info(f"[ENHANCED-SLACK] Sent info message: {message[:50]}...")
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send info message: {e}")
+
     def send_startup_notification(self, dry_run: bool = False):
         """Send system startup notification."""
         mode = "DRY RUN" if dry_run else "LIVE TRADING"
