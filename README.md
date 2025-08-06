@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-SPY%20%7C%20QQQ%20%7C%20IWM-orange.svg)](#-multi-symbol-trading-new)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20%7C%20Yahoo-blue.svg)](#-real-time-market-data)
 
@@ -25,9 +25,17 @@
 
 **Think of it as your trading co-pilot** - it does all the heavy lifting, but you're always in the driver's seat for the final decision.
 
-### 🆕 **Latest Features (v2.1.0)**
+### 🆕 **Latest Features (v2.2.0)**
+- ✅ **Enhanced LLM Decision Engine**: 4 new professional-grade features for smarter trades
+  - 📊 **VWAP Deviation**: Real-time deviation from 5-minute volume-weighted average price
+  - 🎯 **ATM Delta**: Black-Scholes calculated option sensitivity for optimal timing
+  - 💧 **ATM Open Interest**: Liquidity assessment for better trade execution
+  - 🏛️ **Dealer Gamma**: Market maker positioning data for volatility prediction
+- ✅ **Context Memory System**: LLM learns from recent trades for improved decisions
+- ✅ **Robust Data Fallback**: Automatic Yahoo Finance backup when Alpaca is unavailable
+- ✅ **Full E2E Testing**: Comprehensive validation including browser automation
 - ✅ **Multi-Symbol Trading**: Scan SPY, QQQ, and IWM simultaneously
-- ✅ **Real-Time Market Data**: Alpaca integration for professional data feeds
+- ✅ **Real-Time Market Data**: Alpaca integration with professional data feeds
 - ✅ **Enhanced Position Monitoring**: Automated P&L tracking with Slack alerts
 - ✅ **Advanced Exit Strategies**: Trailing stops and time-based exits
 - ✅ **Performance Analytics**: Comprehensive trading statistics and reports
@@ -216,7 +224,59 @@ python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 - Keeps the browser open between checks (more efficient)
 - Automatically restarts the browser if it's been idle for 4+ hours
 
-### 🧠 Enhanced AI Reliability (NEW!)
+### 🧠 Enhanced LLM Decision Engine (NEW!)
+
+**Professional-grade AI trading with 4 new enhanced features:**
+
+- **📊 VWAP Deviation Analysis**: Real-time deviation from 5-minute volume-weighted average price
+- **🎯 ATM Delta Calculation**: Black-Scholes option sensitivity for optimal timing
+- **💧 Liquidity Assessment**: Open interest analysis for better trade execution
+- **🏛️ Market Structure Intelligence**: Dealer gamma positioning for volatility prediction
+- **🧠 Context Memory**: LLM learns from recent trades and adapts strategy
+- **🔄 Robust Data Fallback**: Automatic Yahoo Finance backup when Alpaca is unavailable
+
+### 🤖 Ensemble LLM Decision Engine (v0.6.0)
+
+**Two-model ensemble for enhanced decision reliability:**
+
+- **🗳️ Majority Voting**: GPT-4o-mini and DeepSeek-V2 both analyze market data and vote
+- **🎯 Tie-Breaking**: Higher confidence model wins when decisions differ
+- **📊 Confidence Averaging**: Final confidence is average of winning class
+- **🛡️ Fault Tolerance**: Single-model fallback if one provider fails
+- **⚙️ Configuration Toggle**: Enable/disable via `ENSEMBLE_ENABLED` setting
+
+**Benefits:**
+- Reduced model bias through diverse LLM architectures
+- Improved decision reliability with majority consensus
+- Enhanced confidence scoring with ensemble validation
+- Robust operation even with provider failures
+
+**Configuration options in `config.yaml`:**
+```yaml
+# Enhanced LLM Features
+MEMORY_DEPTH: 5  # Number of recent trades to remember
+GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # SpotGamma data source
+
+# Ensemble LLM Decision Engine (v0.6.0)
+ENSEMBLE_ENABLED: true  # Enable two-model ensemble decision making
+ENSEMBLE_MODELS:        # List of models to use in ensemble
+  - "gpt-4o-mini"
+  - "deepseek-chat"
+
+# Multi-Symbol Trading
+llm_batch_analysis: true  # Enable batching for cost savings
+multi_symbol:
+  enabled: true
+  max_concurrent_trades: 1  # Conservative approach
+  priority_order: ["SPY", "QQQ", "IWM"]  # Trade preference order
+
+# Data Sources (with fallback)
+alpaca:
+  enabled: true  # Primary real-time data source
+  fallback_to_yahoo: true  # Automatic fallback on connection issues
+```
+
+### 🔄 AI Reliability & Error Recovery
 
 **Bulletproof multi-symbol LLM integration with advanced error recovery:**
 
@@ -226,15 +286,6 @@ python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 - **Standardized Data**: Consistent market data structure ensures reliable AI decisions
 - **Batch Analysis**: Optional batching for multiple symbols to reduce API costs
 - **Graceful Degradation**: Falls back to safe NO_TRADE decisions on persistent failures
-
-**Configuration options in `config.yaml`:**
-```yaml
-llm_batch_analysis: true  # Enable batching for cost savings
-multi_symbol:
-  enabled: true
-  max_concurrent_trades: 1  # Conservative approach
-  priority_order: ["SPY", "QQQ", "IWM"]  # Trade preference order
-```
 
 ### 📊 Position Monitoring Mode (NEW!)
 
@@ -630,29 +681,58 @@ python main.py
 
 ## 📋 How It Works
 
-### 1. Market Data Analysis
-- Fetches 5-minute SPY candles via yfinance
-- Converts to Heikin-Ashi for smoother trend analysis
-- Identifies support/resistance levels using pivot points
-- Calculates volatility metrics (True Range)
+### 1. Enhanced Market Data Analysis
+- **Real-Time Data**: Alpaca API for professional-grade market data (falls back to Yahoo Finance)
+- **Multi-Timeframe**: Fetches 1-minute and 5-minute candles for comprehensive analysis
+- **Heikin-Ashi Conversion**: Smoother trend analysis with reduced noise
+- **Support/Resistance**: Advanced pivot point detection for key levels
+- **Volatility Metrics**: True Range and ATR calculations
+- **Enhanced Features**: 4 new professional-grade metrics for LLM analysis
 
-### 2. LLM Decision Making
-The LLM receives compact market data and returns a structured decision:
+### 2. Enhanced LLM Decision Making
+The LLM now receives enriched market data with professional-grade features:
 
 ```json
 {
   "decision": "CALL|PUT|NO_TRADE",
   "confidence": 0.75,
-  "reason": "Strong bullish breakout with volume confirmation"
+  "reason": "Strong bullish breakout with volume confirmation",
+  "enhanced_features": {
+    "vwap_deviation_pct": 0.8,
+    "atm_delta": 0.55,
+    "atm_oi": 12500,
+    "dealer_gamma_$": -250000000
+  },
+  "recent_trades_context": "Last 5 trades: 3 wins, 2 losses"
 }
 ```
 
+**🧠 Enhanced LLM Features:**
+- **📊 VWAP Deviation**: Real-time deviation from 5-minute volume-weighted average price
+  - Positive = Price above institutional benchmark (bullish pressure)
+  - Negative = Price below institutional benchmark (bearish pressure)
+- **🎯 ATM Delta**: Black-Scholes calculated option sensitivity
+  - Higher delta = More sensitive to price moves (better for momentum)
+  - Lower delta = Less sensitive (safer but lower profit potential)
+- **💧 ATM Open Interest**: Liquidity assessment for trade execution
+  - High OI (10,000+) = Tight spreads, easy entry/exit
+  - Low OI (<1,000) = Wide spreads, poor execution
+- **🏛️ Dealer Gamma**: Market maker positioning from SpotGamma
+  - Negative gamma = Volatility amplification expected
+  - Positive gamma = Range-bound behavior likely
+
+**🧠 Context Memory System:**
+- LLM remembers last 5 trades and their outcomes
+- Learns from previous decisions and market conditions
+- Adapts strategy based on recent performance patterns
+
 **Decision Rules:**
-- Confidence calibrated against recent 20-trade win rate
-- Low volatility (TR < 40%) reduces confidence by 0.15
-- Small candle bodies (< 0.30% of price) trigger NO_TRADE
-- Room to next pivot ≥ 0.5% boosts confidence by 0.10
-- High IV (> 45%) halves confidence
+- Enhanced features weighted into confidence calculation
+- VWAP deviation signals momentum strength
+- ATM delta optimizes risk/reward timing
+- Open interest ensures good execution quality
+- Dealer gamma predicts volatility behavior
+- Context memory prevents repeating recent mistakes
 - Confidence < 0.35 overrides to NO_TRADE
 
 ### 3. Risk Management

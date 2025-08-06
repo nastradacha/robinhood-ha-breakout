@@ -601,9 +601,25 @@ def run_once(
     # Use enhanced context for better LLM learning (hybrid approach)
     enhanced_context = bankroll_manager.get_enhanced_llm_context()
     win_history = enhanced_context.get("win_history", [])  # Backward compatibility
-    decision = llm_client.make_trade_decision(
-        llm_payload, win_history, enhanced_context
-    )
+    
+    # Check if ensemble is enabled (v0.6.0)
+    config = load_config()
+    if config.get("ENSEMBLE_ENABLED", True):
+        logger.info("[ENSEMBLE] Using two-model ensemble decision making")
+        from utils.ensemble_llm import choose_trade
+        ensemble_result = choose_trade(llm_payload)
+        # Convert ensemble result to TradeDecision format
+        from utils.llm import TradeDecision
+        decision = TradeDecision(
+            decision=ensemble_result["decision"],
+            confidence=ensemble_result["confidence"],
+            reason=ensemble_result["reason"]
+        )
+    else:
+        logger.info("[LLM] Using single-model decision making")
+        decision = llm_client.make_trade_decision(
+            llm_payload, win_history, enhanced_context
+        )
 
     logger.info(
         f"[DECISION] LLM Decision: {decision.decision} "

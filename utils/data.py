@@ -450,14 +450,32 @@ def build_llm_features(symbol: str = "SPY") -> Dict[str, float]:
         atm_oi: open interest of that ATM option
         dealer_gamma_$: dealer gamma (dollar) from SpotGamma cache.
     """
-    # --- VWAP deviation (5-min window) ---
-    df = fetch_market_data(symbol, period="1d", interval="1m").tail(5)
-    if df.empty:
-        raise ValueError("No intraday data for VWAP calculation")
+    # --- VWAP deviation (5-min window) with fallback ---
+    try:
+        df = fetch_market_data(symbol, period="1d", interval="1m").tail(5)
+        if df.empty:
+            raise ValueError("No intraday data for VWAP calculation")
 
-    vwap = (df["Close"] * df["Volume"]).sum() / df["Volume"].sum()
-    close_price = float(df["Close"].iloc[-1])
-    vwap_deviation_pct = ((close_price - vwap) / vwap) * 100.0
+        vwap = (df["Close"] * df["Volume"]).sum() / df["Volume"].sum()
+        close_price = float(df["Close"].iloc[-1])
+        vwap_deviation_pct = ((close_price - vwap) / vwap) * 100.0
+    except Exception as e:
+        logger.warning(f"VWAP calculation failed (likely Alpaca timeout): {e}")
+        logger.info("Falling back to Yahoo Finance for VWAP calculation")
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period="1d", interval="1m").tail(5)
+            if df.empty:
+                raise ValueError("No Yahoo Finance data available")
+            
+            vwap = (df["Close"] * df["Volume"]).sum() / df["Volume"].sum()
+            close_price = float(df["Close"].iloc[-1])
+            vwap_deviation_pct = ((close_price - vwap) / vwap) * 100.0
+            logger.info(f"Yahoo Finance fallback successful: VWAP deviation {vwap_deviation_pct:.3f}%")
+        except Exception as fallback_error:
+            logger.error(f"Both Alpaca and Yahoo Finance failed for VWAP: {fallback_error}")
+            vwap_deviation_pct = 0.0  # Default value when all data sources fail
 
     # --- ATM option chain ---
     try:

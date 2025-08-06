@@ -47,7 +47,7 @@ Version: 2.0.0
 License: MIT
 """
 
-import time
+import time as time_module
 import logging
 import re
 from typing import Optional, Dict
@@ -145,7 +145,7 @@ class RobinhoodBot:
         self.wait = None
         self.idle_since = None
         self.last_symbol = None
-        self.last_action = time.time()  # Track last action for session management
+        self.last_action = time_module.time()  # Track last action for session management
 
     def __enter__(self):
         self.start_browser()
@@ -213,8 +213,9 @@ class RobinhoodBot:
                 if self.headless:
                     options.add_argument("--headless=new")
 
-                # Launch Chrome with timeout
-                self.driver = uc.Chrome(options=options)
+                # Launch Chrome with timeout and explicit version
+                # Force Chrome 138 compatibility
+                self.driver = uc.Chrome(options=options, version_main=138)
                 self.driver.implicitly_wait(self.implicit_wait)
                 self.driver.set_page_load_timeout(self.page_load_timeout)
                 self.wait = WebDriverWait(self.driver, 10)
@@ -240,9 +241,7 @@ class RobinhoodBot:
                     )
 
                 # Wait before next attempt
-                import time
-
-                time.sleep(2)
+                time_module.sleep(2)
 
         # Apply stealth if available
         if STEALTH_AVAILABLE and stealth:
@@ -297,7 +296,7 @@ class RobinhoodBot:
                 logger.warning(f"Failed to load cookies: {e}")
 
         logger.info("Browser started successfully (stealth mode)")
-        self.last_action = time.time()  # Update last action timestamp
+        self.last_action = time_module.time()  # Update last action timestamp
 
     def ensure_session(self, max_idle_sec: int = 900) -> bool:
         """
@@ -310,7 +309,7 @@ class RobinhoodBot:
             True if session is active, False if restart failed
         """
         try:
-            current_time = time.time()
+            current_time = time_module.time()
             idle_time = current_time - self.last_action
 
             if idle_time > max_idle_sec:
@@ -359,7 +358,7 @@ class RobinhoodBot:
 
             # Start new session
             self.start_browser()
-            self.last_action = time.time()
+            self.last_action = time_module.time()
 
             logger.info("[SESSION] Browser session restarted successfully")
             return True
@@ -370,7 +369,7 @@ class RobinhoodBot:
 
     def _update_last_action(self):
         """Update the last action timestamp."""
-        self.last_action = time.time()
+        self.last_action = time_module.time()
 
     def ensure_open(self, symbol: str) -> bool:
         """Ensure the options chain is open for the given symbol.
@@ -432,7 +431,7 @@ class RobinhoodBot:
 
         for ch in text:
             element.send_keys(ch)
-            time.sleep(random.uniform(min_delay, max_delay))
+            time_module.sleep(random.uniform(min_delay, max_delay))
 
     def login(self, username: str, password: str) -> bool:
         """
@@ -448,7 +447,7 @@ class RobinhoodBot:
         try:
             logger.info("Navigating to Robinhood login page")
             self.driver.get("https://robinhood.com/login")
-            time.sleep(3)
+            time_module.sleep(3)
 
             # Find and fill username
             username_field = self.wait.until(
@@ -456,13 +455,13 @@ class RobinhoodBot:
             )
             username_field.clear()
             self._human_type(username_field, username)
-            time.sleep(2)
+            time_module.sleep(2)
 
             # Find and fill password
             password_field = self.driver.find_element(By.NAME, "password")
             password_field.clear()
             self._human_type(password_field, password)
-            time.sleep(2)
+            time_module.sleep(2)
 
             # Click login button
             login_button = self.driver.find_element(
@@ -518,12 +517,13 @@ class RobinhoodBot:
         Returns:
             True if navigation successful
         """
+        # Using time_module (imported at top of file)
         try:
             options_url = f"https://robinhood.com/options/chains/{symbol}"
             logger.info(f"Navigating to {symbol} options chain")
 
             self.driver.get(options_url)
-            time.sleep(5)
+            time_module.sleep(5)
 
             # Wait for options chain to load
             self.wait.until(
@@ -538,6 +538,18 @@ class RobinhoodBot:
         except Exception as e:
             logger.error(f"Failed to navigate to options: {e}")
             return False
+
+    def navigate_to_symbol(self, symbol: str) -> bool:
+        """
+        Navigate to a symbol's options page.
+        
+        Args:
+            symbol: Stock symbol to navigate to
+            
+        Returns:
+            True if navigation successful
+        """
+        return self.navigate_to_options(symbol)
 
     def select_option_type(self, option_type: str, timeout: int = 10) -> bool:
         """
@@ -575,7 +587,7 @@ class RobinhoodBot:
                 logger.info(
                     f"Selected {target_text} via OptionChainOptionTypeControl XPath"
                 )
-                time.sleep(1)
+                time_module.sleep(1)
                 return True
             except TimeoutException:
                 pass
@@ -592,7 +604,7 @@ class RobinhoodBot:
                 )
                 button.click()
                 logger.info(f"Selected {target_text} via general button XPath")
-                time.sleep(2)
+                time_module.sleep(2)
                 return True
             except TimeoutException:
                 pass
@@ -619,7 +631,7 @@ class RobinhoodBot:
 
                 if result:
                     logger.info(f"Selected {target_text} via JavaScript fallback")
-                    time.sleep(2)
+                    time_module.sleep(2)
                     return True
             except Exception as js_error:
                 logger.warning(f"JavaScript fallback failed: {js_error}")
@@ -637,12 +649,13 @@ class RobinhoodBot:
         Accepts the live `current_price` and side string ("CALL"/"PUT").
         Tries both ChainTableRow-* <div> layout and <tr role='row'> layout.
         """
+        # Using time_module (imported at top of file)
 
         # 1) Ensure correct side is active
         if not self.select_option_type(option_type):
             logger.error(f"Failed to click {option_type} toggle")
             return None
-        time.sleep(1)  # let table paint
+        time_module.sleep(1)  # let table paint
 
         # 2) Helper: get all candidate row elements
         def _get_rows():
@@ -697,7 +710,7 @@ class RobinhoodBot:
             # Scroll down every other pass, up on the next → reaches both buffers
             scroll_dir = 1 if _ % 2 == 0 else -1
             actions.move_by_offset(0, scroll_dir * 400).perform()
-            time.sleep(0.3)
+            time_module.sleep(0.3)
 
         if not best_strike:
             logger.error("No ATM strike row found after scanning/scrolling")
@@ -782,7 +795,7 @@ class RobinhoodBot:
             self.driver.execute_script(
                 "arguments[0].scrollIntoView({block:'center'});", row
             )
-            time.sleep(0.5)
+            time_module.sleep(0.5)
 
             side_key = "ask" if option_type.upper() == "CALL" else "bid"
             buttons = row.find_elements(
@@ -809,7 +822,7 @@ class RobinhoodBot:
                 f"[OK] Found {side_key.upper()} button: {buy_button.text.strip()}"
             )
             self.driver.execute_script("arguments[0].click();", buy_button)
-            time.sleep(3)
+            time_module.sleep(3)
 
             # Step 2: Look for Continue button (simplified)
             logger.info("Looking for Continue button...")
@@ -828,7 +841,7 @@ class RobinhoodBot:
                         "arguments[0].click();", continue_buttons[0]
                     )
                     logger.info("[OK] Clicked Continue button")
-                    time.sleep(3)
+                    time_module.sleep(3)
                 else:
                     logger.warning("Continue button not found, proceeding...")
             except Exception as e:
@@ -842,7 +855,7 @@ class RobinhoodBot:
                 qty_input.clear()
                 qty_input.send_keys(str(quantity))
                 logger.info(f"[OK] Set quantity to {quantity}")
-                time.sleep(1)
+                time_module.sleep(1)
             except Exception as e:
                 logger.warning(f"Could not set quantity: {e}")
 
@@ -862,7 +875,7 @@ class RobinhoodBot:
                         "arguments[0].click();", review_buttons[0]
                     )
                     logger.info("[SUCCESS] Reached Review Order screen - STOPPING HERE")
-                    time.sleep(2)
+                    time_module.sleep(2)
                     return True
                 else:
                     logger.warning("Review button not found")
@@ -979,7 +992,7 @@ class RobinhoodBot:
                         "arguments[0].scrollIntoView({block: 'center'});",
                         strike_element,
                     )
-                    time.sleep(1)
+                    time_module.sleep(1)
 
                     # Try the previous strategies again after scrolling
                     parent = strike_element
@@ -1069,7 +1082,7 @@ class RobinhoodBot:
 
             # Step 1: Click the Ask Price button (green button with price)
             self.driver.execute_script("arguments[0].click();", buy_button)
-            time.sleep(2)
+            time_module.sleep(2)
 
             # Step 2: Wait for OptionChainOrderFormHeader to appear
             logger.info("Step 2: Waiting for OptionChainOrderFormHeader to load")
@@ -1123,7 +1136,7 @@ class RobinhoodBot:
             if continue_button:
                 logger.info("[OK] Found Continue button, clicking")
                 self.driver.execute_script("arguments[0].click();", continue_button)
-                time.sleep(3)
+                time_module.sleep(3)
             else:
                 logger.warning(
                     "Continue button not found, proceeding to quantity setting"
@@ -1154,7 +1167,7 @@ class RobinhoodBot:
                         )
                         qty_input.clear()
                         qty_input.send_keys(str(quantity))
-                        time.sleep(1)
+                        time_module.sleep(1)
                         quantity_set = True
                         logger.info(f"[OK] Successfully set quantity to {quantity}")
                         break
@@ -1170,7 +1183,7 @@ class RobinhoodBot:
             logger.info("Step 5: Looking for Review Order button")
 
             # Wait a moment for the page to update after quantity change
-            time.sleep(2)
+            time_module.sleep(2)
 
             review_selectors = [
                 "button:contains('Review Order')",
@@ -1221,7 +1234,7 @@ class RobinhoodBot:
                     "Step 6: Clicking Review Order button to reach final review screen"
                 )
                 self.driver.execute_script("arguments[0].click();", review_button)
-                time.sleep(3)
+                time_module.sleep(3)
 
                 # Wait for final review screen to load
                 try:
@@ -1413,7 +1426,7 @@ class RobinhoodBot:
         """
         try:
             if not filename:
-                timestamp = int(time.time())
+                timestamp = int(time_module.time())
                 filename = f"screenshot_{timestamp}.png"
 
             screenshot_path = Path("logs") / filename
@@ -1452,7 +1465,7 @@ class RobinhoodBot:
             for url in positions_urls:
                 try:
                     self.driver.get(url)
-                    time.sleep(3)
+                    time_module.sleep(3)
 
                     # Check if we're on a positions-related page
                     if any(
@@ -1492,12 +1505,12 @@ class RobinhoodBot:
                             self.driver.execute_script(
                                 "arguments[0].click();", elements[0]
                             )
-                            time.sleep(3)
+                            time_module.sleep(3)
                             break
                     else:
                         element = self.driver.find_element(By.CSS_SELECTOR, selector)
                         self.driver.execute_script("arguments[0].click();", element)
-                        time.sleep(3)
+                        time_module.sleep(3)
                         break
                 except:
                     continue
@@ -1534,7 +1547,7 @@ class RobinhoodBot:
             logger.info(f"[CLOSE] Looking for {symbol} {side} ${strike} position...")
 
             # Wait for positions to load
-            time.sleep(3)
+            time_module.sleep(3)
 
             # Look for position rows/cards containing our criteria
             position_selectors = [
@@ -1593,7 +1606,7 @@ class RobinhoodBot:
                                         self.driver.execute_script(
                                             "arguments[0].click();", buttons[0]
                                         )
-                                        time.sleep(2)
+                                        time_module.sleep(2)
                                         logger.info("Clicked close/sell button")
                                         return True
                                 else:
@@ -1603,7 +1616,7 @@ class RobinhoodBot:
                                     self.driver.execute_script(
                                         "arguments[0].click();", close_button
                                     )
-                                    time.sleep(2)
+                                    time_module.sleep(2)
                                     logger.info("Clicked close/sell button")
                                     return True
                             except:
@@ -1612,7 +1625,7 @@ class RobinhoodBot:
                         # If no close button found, try clicking the position itself
                         try:
                             self.driver.execute_script("arguments[0].click();", element)
-                            time.sleep(2)
+                            time_module.sleep(2)
                             logger.info("Clicked on position element")
                             return True
                         except:
@@ -1644,7 +1657,7 @@ class RobinhoodBot:
             )
 
             # Wait for close order page to load
-            time.sleep(3)
+            time_module.sleep(3)
 
             # Look for "Sell to Close" or similar options
             sell_to_close_selectors = [
@@ -1668,12 +1681,12 @@ class RobinhoodBot:
                             self.driver.execute_script(
                                 "arguments[0].click();", buttons[0]
                             )
-                            time.sleep(2)
+                            time_module.sleep(2)
                             break
                     else:
                         button = self.driver.find_element(By.CSS_SELECTOR, selector)
                         self.driver.execute_script("arguments[0].click();", button)
-                        time.sleep(2)
+                        time_module.sleep(2)
                         break
                 except:
                     continue
@@ -1691,7 +1704,7 @@ class RobinhoodBot:
                     qty_input = self.driver.find_element(By.CSS_SELECTOR, selector)
                     qty_input.clear()
                     qty_input.send_keys(str(contracts))
-                    time.sleep(1)
+                    time_module.sleep(1)
                     break
                 except:
                     continue
@@ -1764,9 +1777,8 @@ class RobinhoodBot:
                 # Force cleanup any remaining Chrome processes
                 try:
                     import psutil
-                    import time
 
-                    time.sleep(1)  # Give processes time to close naturally
+                    time_module.sleep(1)  # Give processes time to close naturally
 
                     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                         try:

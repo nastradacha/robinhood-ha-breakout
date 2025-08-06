@@ -349,9 +349,25 @@ class MultiSymbolScanner:
                             else []
                         )
 
-                result = symbol_llm.make_trade_decision(
-                    market_data, win_history, enhanced_context
-                )
+                # Check if ensemble is enabled (v0.6.0)
+                from ..llm import load_config
+                config = load_config()
+                if config.get("ENSEMBLE_ENABLED", True):
+                    logger.debug(f"[MULTI-SYMBOL] {symbol}: Using ensemble decision making")
+                    from ..ensemble_llm import choose_trade
+                    from ..llm import TradeDecision
+                    ensemble_result = choose_trade(market_data)
+                    # Convert ensemble result to TradeDecision format
+                    result = TradeDecision(
+                        decision=ensemble_result["decision"],
+                        confidence=ensemble_result["confidence"],
+                        reason=ensemble_result["reason"]
+                    )
+                else:
+                    logger.debug(f"[MULTI-SYMBOL] {symbol}: Using single-model decision making")
+                    result = symbol_llm.make_trade_decision(
+                        market_data, win_history, enhanced_context
+                    )
 
                 # Add small delay after successful call to prevent rate limiting
                 time.sleep(0.5)  # 500ms delay between LLM calls
