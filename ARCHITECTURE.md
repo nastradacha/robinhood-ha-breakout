@@ -333,66 +333,67 @@ graph TD
     F --> G[📊 Data Dept: Fetch Multi-Symbol Data]
     G --> H[📊 Alpaca: Real-time Market Data]
     H --> I[📊 Yahoo Finance: Backup Data Source]
-    I --> J[🔍 Data Analysis: Technical Indicators]
-    J --> K[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
-    K --> L[🧠 Context Memory: Load Recent 5 Trades]
+    I --> J[🔍 Calculate Heikin-Ashi Candles]
+    J --> K[🔍 Data Analysis: Technical Indicators]
+    K --> L[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
+    L --> M[🧠 Context Memory: Load Recent 5 Trades]
     
     %% Ensemble AI Decision Engine
-    L --> M[🤖 AI Ensemble Decision Engine]
-    M --> N[🧠 GPT-4o-mini Analysis]
-    M --> O[🧠 DeepSeek-V2 Analysis]
-    N --> P[🗳️ Majority Vote Logic]
-    O --> P
-    P --> Q{Both Models Agree?}
-    Q -->|Yes| R[✅ Consensus Decision]
-    Q -->|No| S[🎯 Tie-Break: Higher Confidence Wins]
-    S --> R
+    M --> N[🤖 AI Ensemble Decision Engine]
+    N --> O[🧠 GPT-4o-mini Analysis]
+    N --> P[🧠 DeepSeek-V2 Analysis]
+    O --> Q[🗳️ Majority Vote Logic]
+    P --> Q
+    Q --> R{Both Models Agree?}
+    R -->|Yes| S[✅ Consensus Decision]
+    R -->|No| T[🎯 Tie-Break: Higher Confidence Wins]
+    T --> S
     
     %% Decision Processing
-    R --> T{Trade Signal?}
-    T -->|NO_TRADE| U[📱 S2: Throttled Heartbeat Check]
-    U --> V{Send Heartbeat?}
-    V -->|Yes| W[📱 Slack: ⏳ Cycle N · SPY $XXX · NO_TRADE]
-    V -->|No| X[⏸️ Silent Cycle]
-    W --> Y[⏰ Wait for Next Interval]
-    X --> Y
+    S --> U{Trade Signal?}
+    U -->|NO_TRADE| V[📱 S2: Throttled Heartbeat Check]
+    V --> W{Send Heartbeat?}
+    W -->|Yes| X[📱 Slack: ⏳ Cycle N · SPY $XXX · NO_TRADE]
+    W -->|No| Y[⏸️ Silent Cycle]
+    X --> Z[⏰ Wait for Next Interval]
+    Y --> Z
     
     %% Trade Execution Path
-    T -->|CALL/PUT| Z[💰 Finance: Risk & Position Size Check]
-    Z --> AA[🌐 Browser: Navigate to Options Chain]
-    AA --> BB[🔍 Find ATM Option]
-    BB --> CC[📝 Pre-fill Order Form]
-    CC --> DD[🛑 Stop at Review Screen]
-    DD --> EE[📱 Slack: Rich Trade Alert with Charts]
-    EE --> FF[👤 User Decision: Submit/Cancel]
+    U -->|CALL/PUT| AA[💰 Finance: Risk & Position Size Check]
+    AA --> BB[🌐 Browser: Navigate to Options Chain]
+    BB --> CC[🔍 Find ATM Option]
+    CC --> DD[📝 Pre-fill Order Form]
+    DD --> EE[🛑 Stop at Review Screen]
+    EE --> FF[📱 Slack: Rich Trade Alert with Charts]
+    FF --> GG[👤 User Decision: Submit/Cancel]
     
     %% Trade Confirmation Workflow
-    FF --> GG{User Choice?}
-    GG -->|Submit| HH[✅ Record Trade with Actual Fill Price]
-    GG -->|Cancel| II[❌ Record Cancelled Trade]
-    HH --> JJ[📱 S3: Fill-Price Echo to Slack]
-    II --> KK[📱 Slack: Trade Cancelled Notification]
-    JJ --> LL[🟢 S1: Auto-Start Position Monitor]
-    KK --> Y
-    LL --> MM[📊 Monitor: Real-time P&L Tracking]
-    MM --> Y
+    GG --> HH{User Choice?}
+    HH -->|Submit| II[✅ Record Trade with Actual Fill Price]
+    HH -->|Cancel| JJ[❌ Record Cancelled Trade]
+    II --> KK[📱 S3: Fill-Price Echo to Slack]
+    JJ --> LL[📱 Slack: Trade Cancelled Notification]
+    KK --> MM[🟢 S1: Auto-Start Position Monitor]
+    LL --> Z
+    MM --> NN[📊 Monitor: Real-time P&L Tracking]
+    NN --> Z
     
     %% Loop Control
-    Y --> NN{End Time Reached?}
-    NN -->|No| OO[📊 Increment Cycle Counter]
-    OO --> G
-    NN -->|Yes| PP[📱 S4: Generate Daily Summary]
-    PP --> QQ[📱 Slack: 📊 Daily Wrap-Up Block]
-    QQ --> RR[🟢 S1: Kill All Monitors with Breadcrumbs]
-    RR --> SS[🧹 Cleanup: Close Browser & Resources]
-    SS --> TT[🏁 System Exit]
+    Z --> OO{End Time Reached?}
+    OO -->|No| PP[📊 Increment Cycle Counter]
+    PP --> G
+    OO -->|Yes| QQ[📱 S4: Generate Daily Summary]
+    QQ --> RR[📱 Slack: 📊 Daily Wrap-Up Block]
+    RR --> SS[🟢 S1: Kill All Monitors with Breadcrumbs]
+    SS --> TT[🧹 Cleanup: Close Browser & Resources]
+    TT --> UU[🏁 System Exit]
     
     %% Error Handling
-    G -.->|API Failure| UU[🔄 Fallback to Yahoo Finance]
-    UU --> J
-    N -.->|GPT Failure| VV[🔄 Single Model Fallback]
-    O -.->|DeepSeek Failure| VV
-    VV --> R
+    G -.->|API Failure| VV[🔄 Fallback to Yahoo Finance]
+    VV --> K
+    O -.->|GPT Failure| WW[🔄 Single Model Fallback]
+    P -.->|DeepSeek Failure| WW
+    WW --> S
     
     %% Styling
     classDef slackUX fill:#e1f5fe,stroke:#01579b,stroke-width:3px
