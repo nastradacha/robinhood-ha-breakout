@@ -65,6 +65,9 @@ import os
 import yaml
 from pathlib import Path
 
+# New: recent trades memory
+from utils.recent_trades import load_recent
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,6 +201,7 @@ class LLMClient:
         ]
     
     def _get_system_prompt(self) -> str:
+        """Get the system prompt for trade decision making including new rich-feature and context memory rules."""
         """Get the system prompt for trade decision making."""
         config = load_config()
         body_cutoff = config.get('MIN_CANDLE_BODY_PCT', 0.05)  # Lowered from 0.30% to 0.05%
@@ -213,6 +217,9 @@ DECISION RULES:
 - For STRONG_BEARISH trend: prefer PUT signals
 - Boost confidence by 0.10 only when room_to_next_pivot >= 0.5%
 - If 5-min IV > 45%, halve confidence
+- If dealer_gamma_$ < -2e8 tighten candle_body threshold to 0.05 %.
+- If the last two trades (most recent) are both LOSS, require candle_body_pct ≥ 0.20 % before considering CALL/PUT.
+- If the last trade was WIN you may accept a 0.10 % body.
 - If confidence < 0.35, override decision to NO_TRADE
 - Think step-by-step internally, output only JSON
 - When confidence < 0.5, include a short 'reason' string in the JSON
@@ -390,6 +397,19 @@ ANALYSIS FOCUS:
         return validated_data
     
     def make_trade_decision(self, market_data: Dict, win_history: Optional[list] = None, enhanced_context: Optional[Dict] = None) -> TradeDecision:
+        """Make a trade decision including recent-trade context memory."""
+        # Load recent trades for context memory
+        try:
+            depth = load_config().get("MEMORY_DEPTH", 5)
+            recent_trades = load_recent(depth)
+        except Exception as e:
+            logger.warning(f"Could not load recent trades: {e}")
+            recent_trades = []
+
+        # Attach to enhanced_context
+        if enhanced_context is None:
+            enhanced_context = {}
+        enhanced_context["recent_trades"] = recent_trades
         """
         Make a trade decision based on market analysis with enhanced learning context.
         

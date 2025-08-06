@@ -12,6 +12,10 @@ SIZE_RULE: "dynamic-qty"       # Options: "fixed-qty", "dynamic-qty"
 BANKROLL_FILE: "bankroll.json"
 POSITIONS_FILE: "positions.csv"  # Position tracking ledger
 
+# Memory / Dealer Gamma
+MEMORY_DEPTH: 5  # Number of recent trades to include in LLM context
+GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # Path to SpotGamma CSV cache
+
 # Market Data
 SYMBOLS: ["SPY", "QQQ", "IWM"]  # Multi-symbol support for diversified trading
 SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility

@@ -52,6 +52,7 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 import logging
 from .alpaca_client import AlpacaClient
+from .llm import load_config  # Import config loader
 logger = logging.getLogger(__name__)
 
 
@@ -391,6 +392,74 @@ def analyze_breakout_pattern(df: pd.DataFrame, lookback: int = 20) -> Dict:
     return analysis
 
 
+def build_llm_features(symbol: str = "SPY") -> Dict[str, float]:
+    """Return richer numerical features for LLM decision engine.
+
+    Features:
+        vwap_deviation_pct: deviation of last close from 5-min VWAP
+        atm_delta: delta of ATM option (nearest expiry) via Black-Scholes
+        atm_oi: open interest of that ATM option
+        dealer_gamma_$: dealer gamma (dollar) from SpotGamma cache.
+    """
+    # --- VWAP deviation (5-min window) ---
+    df = fetch_market_data(symbol, period="1d", interval="1m").tail(5)
+    if df.empty:
+        raise ValueError("No intraday data for VWAP calculation")
+
+    vwap = (df['Close'] * df['Volume']).sum() / df['Volume'].sum()
+    close_price = float(df['Close'].iloc[-1])
+    vwap_deviation_pct = ((close_price - vwap) / vwap) * 100.0
+
+    # --- ATM option chain ---
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        expiries = ticker.options
+        if not expiries:
+            raise ValueError("No expiries")
+        expiry = expiries[0]
+        chain = ticker.option_chain(expiry)
+        calls = chain.calls
+
+        # Pick strike closest to spot
+        spot = close_price
+        calls['dist'] = (calls['strike'] - spot).abs()
+        atm_row = calls.nsmallest(1, 'dist').iloc[0]
+        atm_strike = float(atm_row['strike'])
+        atm_oi = int(atm_row.get('openInterest', 0) or 0)
+
+        # Time to expiry in years (rough, assume 252 trading days)
+        from datetime import datetime, timezone
+        T_days = (datetime.strptime(expiry, "%Y-%m-%d").replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).days
+        T = max(T_days, 0) / 252.0
+
+        from .option_math import black_scholes_delta
+        atm_delta = black_scholes_delta(spot, atm_strike, max(T, 1/252), sigma=0.3, option_type="call")
+    except Exception as e:
+        logger.warning(f"ATM option calc failed: {e}")
+        atm_delta = 0.0
+        atm_oi = 0
+
+    # --- Dealer gamma dollar ---
+    gamma_path = load_config().get('GAMMA_FEED_PATH', 'data/spotgamma_dummy.csv')
+    dealer_gamma = 0.0
+    try:
+        sg_df = pd.read_csv(gamma_path)
+        # Expect columns: symbol, gamma_dollar
+        row = sg_df[sg_df['symbol'] == symbol].tail(1)
+        if not row.empty:
+            dealer_gamma = float(row.iloc[-1]['gamma_dollar'])
+    except Exception as e:
+        logger.warning(f"Dealer gamma read failed: {e}")
+
+    return {
+        'vwap_deviation_pct': round(vwap_deviation_pct, 3),
+        'atm_delta': round(atm_delta, 3),
+        'atm_oi': atm_oi,
+        'dealer_gamma_$': round(dealer_gamma, 2),
+    }
+
+
 def prepare_llm_payload(analysis: Dict, max_tokens: int = 400) -> Dict:
     """
     Prepare a compact JSON payload for LLM analysis, staying under token limit.
@@ -436,5 +505,12 @@ def prepare_llm_payload(analysis: Dict, max_tokens: int = 400) -> Dict:
     # 3. Merge compact and full fields
     payload = {**compact, **full_fields}
     
-    logger.info("Prepared compact LLM payload with full field names")
+        # 4. Append richer numerical features if available
+    try:
+        richer = build_llm_features(analysis.get('symbol', 'SPY'))
+        payload.update(richer)
+    except Exception as e:
+        logger.warning(f"[LLM] Could not append richer features: {e}")
+
+    logger.info("Prepared compact LLM payload with full field names and richer features")
     return payload
