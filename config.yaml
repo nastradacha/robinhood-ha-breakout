@@ -45,7 +45,7 @@ PAGE_LOAD_TIMEOUT: 30
 
 # Risk Management
 MAX_PREMIUM_PCT: 0.50        # Max premium as % of bankroll
-MIN_CONFIDENCE: 0.35         # Minimum LLM confidence to trade
+MIN_CONFIDENCE: 0.65         # Minimum LLM confidence to trade (conservative)
 IV_THRESHOLD: 45.0           # Implied volatility threshold
 MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lowered for sensitivity)
 
