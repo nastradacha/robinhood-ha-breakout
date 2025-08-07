@@ -30,6 +30,7 @@ from datetime import datetime
 try:
     from .slack import SlackNotifier
     from .slack_charts import SlackChartGenerator, EnhancedSlackNotifier
+    from .enhanced_slack_charts import EnhancedSlackChartSender
 except ImportError:
     # Handle standalone execution
     import sys
@@ -38,6 +39,7 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils.slack import SlackNotifier
     from utils.slack_charts import SlackChartGenerator, EnhancedSlackNotifier
+    from utils.enhanced_slack_charts import EnhancedSlackChartSender
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class EnhancedSlackIntegration:
         self.basic_notifier = SlackNotifier()
         self.chart_generator = SlackChartGenerator()
         self.enhanced_notifier = EnhancedSlackNotifier()
+        self.enhanced_chart_sender = EnhancedSlackChartSender()  # New high-quality chart system
 
         # Configuration
         self.enabled = self.basic_notifier.enabled
@@ -89,10 +92,15 @@ class EnhancedSlackIntegration:
 
         try:
             if self.charts_enabled and decision in ["CALL", "PUT"]:
-                # Send rich alert with chart
-                self.enhanced_notifier.send_breakout_alert_with_chart(
-                    symbol, decision, analysis, market_data, confidence
+                # Send rich alert with high-quality chart using new system
+                success = self.enhanced_chart_sender.send_breakout_chart_to_slack(
+                    market_data, analysis, symbol
                 )
+                if not success:
+                    # Fallback to basic chart system
+                    self.enhanced_notifier.send_breakout_alert_with_chart(
+                        symbol, decision, analysis, market_data, confidence
+                    )
                 logger.info(
                     f"[ENHANCED-SLACK] Sent breakout alert with chart for {symbol} {decision}"
                 )

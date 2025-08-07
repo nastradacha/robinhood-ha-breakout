@@ -60,16 +60,18 @@ class SlackChartGenerator:
         plt.style.use("dark_background")
         sns.set_palette("husl")
 
-        # Chart configuration for mobile optimization
+        # Enhanced chart configuration for high-quality mobile viewing
         self.chart_config = {
-            "figsize": (12, 8),  # Good for mobile viewing
-            "dpi": 100,
-            "facecolor": "#1e1e1e",
-            "edgecolor": "white",
-            "grid_alpha": 0.3,
-            "title_size": 16,
-            "label_size": 12,
-            "tick_size": 10,
+            "figsize": (14, 10),  # Larger for better clarity
+            "dpi": 150,  # Higher DPI for crisp images
+            "facecolor": "#0d1117",  # GitHub dark theme
+            "edgecolor": "#f0f6fc",  # Light text color
+            "grid_alpha": 0.4,
+            "title_size": 18,  # Larger titles
+            "label_size": 14,  # Larger labels
+            "tick_size": 12,  # Larger ticks
+            "line_width": 2.5,  # Thicker lines for clarity
+            "marker_size": 8,  # Larger markers
         }
 
         logger.info("[CHARTS] Slack chart generator initialized")
