@@ -116,7 +116,8 @@ class EnsembleLLM:
         
         # Handle failure cases
         if not decisions:
-            raise RuntimeError("All LLM providers failed")
+            logger.error("[ENSEMBLE] All LLM providers failed - attempting rule-based fallback")
+            return self._rule_based_fallback(payload)
         
         if len(decisions) == 1:
             logger.warning(f"[ENSEMBLE] Only one model succeeded, using single decision")
@@ -129,6 +130,77 @@ class EnsembleLLM:
         
         # Apply ensemble voting logic
         return self._apply_ensemble_voting(decisions, failed_models)
+    
+    def _rule_based_fallback(self, payload: Dict) -> Dict:
+        """
+        Rule-based fallback when all LLM providers fail.
+        
+        Uses simple technical analysis rules to detect obvious breakout patterns
+        without requiring LLM analysis. Conservative approach - only triggers
+        on very clear signals.
+        
+        Args:
+            payload: Market data payload
+            
+        Returns:
+            Dict with decision, confidence, and reason
+        """
+        try:
+            # Extract key technical indicators from payload
+            breakout_analysis = payload.get('breakout_analysis', {})
+            current_price = breakout_analysis.get('current_price', 0)
+            resistance_levels = breakout_analysis.get('resistance_levels', [])
+            support_levels = breakout_analysis.get('support_levels', [])
+            volume_surge = breakout_analysis.get('volume_surge', False)
+            
+            # Get price movement data
+            price_change_pct = breakout_analysis.get('price_change_pct', 0)
+            candle_body_pct = breakout_analysis.get('candle_body_pct', 0)
+            
+            # Rule 1: Strong bearish breakout (PUT signal)
+            if (price_change_pct < -0.5 and  # >0.5% drop
+                candle_body_pct > 0.3 and     # Strong candle body
+                volume_surge and              # Volume confirmation
+                support_levels and            # Support level exists
+                current_price < min(support_levels[:3])):  # Below recent support
+                
+                logger.info("[ENSEMBLE] Rule-based fallback: Strong bearish breakout detected")
+                return {
+                    "decision": "PUT",
+                    "confidence": 0.70,  # Conservative but actionable
+                    "reason": "Rule-based fallback: Strong bearish breakout with volume confirmation and support break"
+                }
+            
+            # Rule 2: Strong bullish breakout (CALL signal)
+            elif (price_change_pct > 0.5 and   # >0.5% gain
+                  candle_body_pct > 0.3 and    # Strong candle body
+                  volume_surge and             # Volume confirmation
+                  resistance_levels and        # Resistance level exists
+                  current_price > max(resistance_levels[:3])):  # Above recent resistance
+                
+                logger.info("[ENSEMBLE] Rule-based fallback: Strong bullish breakout detected")
+                return {
+                    "decision": "CALL",
+                    "confidence": 0.70,  # Conservative but actionable
+                    "reason": "Rule-based fallback: Strong bullish breakout with volume confirmation and resistance break"
+                }
+            
+            # Rule 3: No clear signal - stay safe
+            else:
+                logger.info("[ENSEMBLE] Rule-based fallback: No clear breakout pattern")
+                return {
+                    "decision": "NO_TRADE",
+                    "confidence": 0.0,
+                    "reason": "Rule-based fallback: No clear breakout pattern detected"
+                }
+                
+        except Exception as e:
+            logger.error(f"[ENSEMBLE] Rule-based fallback failed: {e}")
+            return {
+                "decision": "NO_TRADE",
+                "confidence": 0.0,
+                "reason": f"Rule-based fallback error: {e}"
+            }
     
     def _apply_ensemble_voting(self, decisions: List[Dict], failed_models: List[str]) -> Dict:
         """
