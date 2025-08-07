@@ -350,12 +350,12 @@ class MultiSymbolScanner:
                         )
 
                 # Check if ensemble is enabled (v0.6.0)
-                from ..llm import load_config
+                from utils.llm import load_config
                 config = load_config()
                 if config.get("ENSEMBLE_ENABLED", True):
                     logger.debug(f"[MULTI-SYMBOL] {symbol}: Using ensemble decision making")
-                    from ..ensemble_llm import choose_trade
-                    from ..llm import TradeDecision
+                    from utils.ensemble_llm import choose_trade
+                    from utils.llm import TradeDecision
                     ensemble_result = choose_trade(market_data)
                     # Convert ensemble result to TradeDecision format
                     result = TradeDecision(
