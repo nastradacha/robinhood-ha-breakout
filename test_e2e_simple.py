@@ -32,11 +32,9 @@ from utils.llm import LLMClient
 from utils.browser import RobinhoodBot
 import logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/test_e2e_simple.log")
 logger = logging.getLogger(__name__)
 
 

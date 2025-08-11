@@ -39,15 +39,9 @@ from utils.browser import RobinhoodBot
 from utils.portfolio import PortfolioManager
 from utils.bankroll import BankrollManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('logs/full_e2e_test.log')
-    ]
-)
+# Configure centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file='logs/full_e2e_test.log')
 logger = logging.getLogger(__name__)
 
 class FullE2ETest:

@@ -357,7 +357,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
+    # Centralized logging
+    from utils.logging_utils import setup_logging
+    setup_logging(log_level="INFO", log_file="logs/monitor_launcher.log")
     launcher = get_monitor_launcher()
 
     if args.action == "start":

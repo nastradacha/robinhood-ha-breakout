@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.2.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-SPY%20%7C%20QQQ%20%7C%20IWM-orange.svg)](#-multi-symbol-trading-new)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20%7C%20Yahoo-blue.svg)](#-real-time-market-data)
 
@@ -25,21 +25,24 @@
 
 **Think of it as your trading co-pilot** - it does all the heavy lifting, but you're always in the driver's seat for the final decision.
 
-### 🆕 **Latest Features (v2.2.0)**
-- ✅ **Enhanced LLM Decision Engine**: 4 new professional-grade features for smarter trades
+### 🆕 **Latest Features (v0.9.0)**
+- ✅ **Alpaca Paper/Live Trading**: First-class support for Alpaca paper and live environments
+  - 🔒 **Environment Isolation**: Separate bankroll ledgers and trade logs per broker/environment
+  - 🛡️ **Safety Interlocks**: Explicit `--i-understand-live-risk` flag required for live trading
+  - 📊 **Environment Tagging**: All Slack notifications tagged with [PAPER]/[LIVE]/[RH]
+  - 🔄 **Backward Compatibility**: Existing Robinhood workflows remain unchanged
+- ✅ **Enhanced LLM Decision Engine**: 4 professional-grade features for smarter trades
   - 📊 **VWAP Deviation**: Real-time deviation from 5-minute volume-weighted average price
   - 🎯 **ATM Delta**: Black-Scholes calculated option sensitivity for optimal timing
   - 💧 **ATM Open Interest**: Liquidity assessment for better trade execution
   - 🏛️ **Dealer Gamma**: Market maker positioning data for volatility prediction
 - ✅ **Context Memory System**: LLM learns from recent trades for improved decisions
-- ✅ **Robust Data Fallback**: Automatic Yahoo Finance backup when Alpaca is unavailable
-- ✅ **Full E2E Testing**: Comprehensive validation including browser automation
 - ✅ **Multi-Symbol Trading**: Scan SPY, QQQ, and IWM simultaneously
 - ✅ **Real-Time Market Data**: Alpaca integration with professional data feeds
 - ✅ **Enhanced Position Monitoring**: Automated P&L tracking with Slack alerts
 - ✅ **Advanced Exit Strategies**: Trailing stops and time-based exits
 - ✅ **Performance Analytics**: Comprehensive trading statistics and reports
-- ✅ **Slack Integration**: Rich charts and mobile-optimized notifications
+- ✅ **Mobile-First Slack Integration**: Rich charts and mobile-optimized notifications
 
 ---
 
@@ -565,6 +568,148 @@ pip install -r requirements.txt
 2. **Run in debug mode**: Use `--log-level DEBUG` for more information
 3. **Test in dry-run**: Use `--dry-run` to isolate issues
 4. **Check your configuration**: Verify all settings in `config.yaml` and `.env`
+
+---
+
+## 🏦 Broker & Environment (v0.9.0)
+
+**Safe Paper Trading & Live Trading Support** - Test strategies without risk!
+
+### 🎯 Trading Environments
+
+The system now supports multiple broker/environment combinations with completely isolated ledgers:
+
+#### 📊 **Alpaca Paper Trading** (Recommended for Testing)
+```bash
+# Paper trading with virtual money
+python main.py --broker alpaca --alpaca-env paper --loop --interval 5
+```
+- ✅ **Risk-free testing** with virtual $100,000 account
+- ✅ **Real market data** and conditions
+- ✅ **Full system validation** without financial risk
+- ✅ **Separate ledger files** for isolated tracking
+
+#### 💰 **Alpaca Live Trading** (Real Money)
+```bash
+# Live trading with real money (requires safety flag)
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --loop
+```
+- ⚠️ **Real money at risk** - use with extreme caution
+- ✅ **Professional execution** with institutional-grade infrastructure
+- ✅ **Separate ledger files** for isolated tracking
+- 🛡️ **Safety interlocks** require explicit acknowledgment
+
+#### 🤖 **Robinhood Trading** (Browser Automation)
+```bash
+# Traditional Robinhood browser automation
+python main.py --broker robinhood
+```
+- ✅ **Manual confirmation** required for every trade
+- ✅ **Browser automation** with human oversight
+- ✅ **Separate ledger files** for isolated tracking
+
+### 🗂️ Separate Ledger Files
+
+Each broker/environment combination maintains completely isolated files:
+
+```
+# Alpaca Paper Trading
+bankroll_alpaca_paper.json
+logs/trade_history_alpaca_paper.csv
+positions_alpaca_paper.csv
+
+# Alpaca Live Trading
+bankroll_alpaca_live.json
+logs/trade_history_alpaca_live.csv
+positions_alpaca_live.csv
+
+# Robinhood Trading
+bankroll_robinhood_live.json
+logs/trade_history_robinhood_live.csv
+positions_robinhood_live.csv
+```
+
+### 🔧 Configuration
+
+Add to your `config.yaml`:
+```yaml
+# Broker & Environment Configuration
+BROKER: "robinhood"            # "alpaca" | "robinhood"
+ALPACA_ENV: "paper"             # "paper" | "live"
+ALPACA_PAPER_BASE_URL: "https://paper-api.alpaca.markets"
+ALPACA_LIVE_BASE_URL: "https://api.alpaca.markets"
+START_CAPITAL_DEFAULT: 500      # seed for new ledgers
+```
+
+Add to your `.env` file:
+```bash
+# Alpaca API Credentials
+ALPACA_KEY_ID=your_alpaca_key_id
+ALPACA_SECRET_KEY=your_alpaca_secret_key
+```
+
+### 🛡️ Safety Features
+
+#### Live Trading Protection
+- **Explicit flag required**: `--i-understand-live-risk` must be provided
+- **Automatic fallback**: Defaults to paper trading if flag missing
+- **Clear warnings**: Loud alerts when live trading is active
+- **Separate ledgers**: No risk of contaminating paper trading data
+
+#### Dry Run Override
+```bash
+# Test full pipeline without placing orders
+python main.py --broker alpaca --alpaca-env paper --dry-run
+```
+
+### 📊 Usage Examples
+
+#### Start with Paper Trading
+```bash
+# Test the system safely
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --loop --interval 5 --end-at 11:00
+```
+
+#### Graduate to Live Trading
+```bash
+# When ready for real money (use with caution!)
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --symbols SPY --loop
+```
+
+#### Monitor Paper Positions
+```bash
+# Monitor paper trading positions
+python main.py --broker alpaca --alpaca-env paper --monitor-positions --interval 15
+```
+
+### 🔄 Switching Between Environments
+
+You can safely switch between environments without affecting other ledgers:
+
+```bash
+# Morning: Test strategy in paper
+python main.py --broker alpaca --alpaca-env paper --loop --end-at 10:00
+
+# Afternoon: Execute in live (if confident)
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --loop --end-at 15:45
+```
+
+Each environment maintains its own:
+- 💰 **Bankroll tracking**
+- 📈 **Trade history**
+- 📊 **Position monitoring**
+- 📱 **Slack notifications** (tagged with [PAPER]/[LIVE]/[RH])
+
+### 🏷️ Slack Environment Tags
+
+All Slack messages are tagged with the current environment:
+
+```
+🚀 [PAPER] Submitted CALL SPY 580 x1 @ MKT
+⏳ 09:42 · SPY · no breakout · [ALPACA:PAPER]
+🟢 [LIVE] Monitor started for QQQ
+📊 [RH] Daily Summary: 3 trades, +$45.50
+```
 
 ---
 

@@ -73,36 +73,44 @@ class EnhancedSlackChartSender:
         logger.info(f"[ENHANCED-CHARTS] Initialized (enabled: {self.enabled})")
     
     def setup_chart_styling(self):
-        """Setup professional chart styling for maximum clarity."""
-        # Use professional dark theme
+        """Setup professional chart styling for maximum clarity and mobile optimization."""
+        # Use professional dark theme optimized for mobile
         plt.style.use("dark_background")
         
-        # Enhanced configuration for mobile clarity
+        # Ultra-high quality configuration for crystal-clear mobile viewing
         self.chart_config = {
-            "figsize": (16, 12),  # Large size for detail
-            "dpi": 200,  # High DPI for crisp images
+            "figsize": (20, 14),  # Larger canvas for more detail
+            "dpi": 300,  # Ultra-high DPI for razor-sharp images
             "facecolor": "#0d1117",  # GitHub dark background
             "edgecolor": "#f0f6fc",  # Light text
-            "title_size": 20,  # Large, readable titles
-            "label_size": 16,  # Large axis labels
-            "tick_size": 14,  # Large tick labels
-            "legend_size": 14,  # Large legend
-            "line_width": 3.0,  # Thick lines for visibility
-            "marker_size": 10,  # Large markers
-            "grid_alpha": 0.3,  # Subtle grid
-            "text_color": "#f0f6fc",  # Light text color
+            "title_size": 24,  # Extra large, bold titles
+            "subtitle_size": 18,  # Subtitle for additional context
+            "label_size": 18,  # Large axis labels
+            "tick_size": 16,  # Large tick labels
+            "legend_size": 16,  # Large legend
+            "annotation_size": 14,  # Clear annotations
+            "line_width": 4.0,  # Extra thick lines for mobile visibility
+            "marker_size": 12,  # Large markers
+            "grid_alpha": 0.25,  # Subtle but visible grid
+            "text_color": "#f0f6fc",  # High-contrast light text
+            "spine_width": 2.0,  # Thicker chart borders
+            "candle_width": 0.8,  # Wider candles for clarity
         }
         
-        # Professional color palette
+        # Enhanced professional color palette with better contrast
         self.colors = {
-            "bullish": "#00d4aa",  # Bright green
-            "bearish": "#f85149",  # Bright red
-            "neutral": "#7c3aed",  # Purple
-            "volume": "#6e7681",  # Gray
-            "sma": "#ffa657",  # Orange
-            "support": "#1f6feb",  # Blue
-            "resistance": "#da3633",  # Red
-            "current": "#f0f6fc",  # White
+            "bullish": "#00ff88",  # Brighter green for better visibility
+            "bearish": "#ff4757",  # Brighter red for better visibility
+            "neutral": "#a55eea",  # Enhanced purple
+            "volume": "#8395a7",  # Improved gray contrast
+            "sma": "#ffa502",  # Enhanced orange
+            "ema": "#ff6b6b",  # EMA line color
+            "support": "#3742fa",  # Brighter blue
+            "resistance": "#ff3838",  # Brighter red
+            "current": "#ffffff",  # Pure white for maximum contrast
+            "breakout": "#ffd700",  # Gold for breakout highlights
+            "background": "#0d1117",  # Consistent background
+            "grid": "#30363d",  # Grid color
         }
     
     def send_breakout_chart_to_slack(
@@ -158,7 +166,7 @@ class EnhancedSlackChartSender:
         symbol: str
     ) -> str:
         """
-        Create professional-quality breakout chart with enhanced clarity.
+        Create ultra-high-quality breakout chart with enhanced clarity and mobile optimization.
         
         Args:
             market_data: Historical OHLCV data
@@ -168,31 +176,38 @@ class EnhancedSlackChartSender:
         Returns:
             Path to generated chart file
         """
-        # Prepare data (last 50 bars for mobile viewing)
-        data = market_data.tail(50).copy()
+        # Prepare data (last 60 bars for better context)
+        data = market_data.tail(60).copy()
         
-        # Create figure with enhanced settings
+        # Create figure with ultra-high quality settings
         fig, (ax1, ax2) = plt.subplots(
             2, 1, 
             figsize=self.chart_config["figsize"],
             facecolor=self.chart_config["facecolor"],
-            gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.3}
+            gridspec_kw={'height_ratios': [4, 1], 'hspace': 0.35}
         )
         
-        # Main price chart
+        # Set consistent background
+        ax1.set_facecolor(self.colors["background"])
+        ax2.set_facecolor(self.colors["background"])
+        
+        # Main price chart with enhanced elements
         self._plot_enhanced_price_action(ax1, data, analysis, symbol)
         
-        # Volume chart
+        # Volume chart with improved styling
         self._plot_enhanced_volume(ax2, data)
         
-        # Professional formatting
+        # Professional formatting with enhanced labels
         self._format_chart_professionally(fig, ax1, ax2, symbol, analysis)
         
-        # Save with high quality
+        # Add comprehensive chart annotations
+        self._add_chart_annotations(ax1, analysis, symbol)
+        
+        # Save with ultra-high quality settings
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         chart_path = os.path.join(
             self.chart_dir, 
-            f"{symbol}_enhanced_breakout_{timestamp}.png"
+            f"{symbol}_ultra_hq_breakout_{timestamp}.png"
         )
         
         plt.savefig(
@@ -200,12 +215,14 @@ class EnhancedSlackChartSender:
             dpi=self.chart_config["dpi"],
             facecolor=self.chart_config["facecolor"],
             bbox_inches="tight",
-            pad_inches=0.4,
+            pad_inches=0.5,  # More padding for mobile
             format='png',
+            optimize=True,  # Optimize file size
+            quality=95,  # High quality compression
         )
         plt.close()
         
-        logger.info(f"[ENHANCED-CHARTS] Created chart: {chart_path}")
+        logger.info(f"[ENHANCED-CHARTS] Created ultra-HQ chart: {chart_path}")
         return chart_path
     
     def _plot_enhanced_price_action(
@@ -215,100 +232,144 @@ class EnhancedSlackChartSender:
         analysis: Dict, 
         symbol: str
     ):
-        """Plot enhanced price action with clear visual elements."""
+        """Plot ultra-enhanced price action with crystal-clear visual elements."""
         # Calculate Heikin-Ashi for smoother visualization
         ha_data = self._calculate_heikin_ashi(data)
         
-        # Plot Heikin-Ashi candles with enhanced visibility
+        # Plot enhanced Heikin-Ashi candles with maximum mobile visibility
         for i, (idx, row) in enumerate(ha_data.iterrows()):
-            color = self.colors["bullish"] if row["HA_Close"] >= row["HA_Open"] else self.colors["bearish"]
+            is_bullish = row["HA_Close"] >= row["HA_Open"]
+            color = self.colors["bullish"] if is_bullish else self.colors["bearish"]
             
-            # Thick candle bodies for mobile visibility
+            # Enhanced candle bodies with better proportions
             body_height = abs(row["HA_Close"] - row["HA_Open"])
             body_bottom = min(row["HA_Open"], row["HA_Close"])
             
-            # Candle body
+            # Ultra-wide candle bodies for mobile clarity
+            candle_width = self.chart_config["candle_width"]
             ax.add_patch(Rectangle(
-                (i - 0.4, body_bottom), 0.8, body_height,
-                facecolor=color, alpha=0.8, linewidth=1
+                (i - candle_width/2, body_bottom), candle_width, body_height,
+                facecolor=color, alpha=0.9, linewidth=2, edgecolor=color
             ))
             
-            # Wicks
+            # Thicker, more visible wicks
             ax.plot([i, i], [row["HA_Low"], row["HA_High"]], 
-                   color=color, linewidth=2, alpha=0.7)
+                   color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
         
-        # Add moving averages with enhanced visibility
+        # Add multiple moving averages for better analysis
         if len(data) >= 20:
             sma_20 = data["Close"].rolling(20).mean()
             ax.plot(range(len(sma_20)), sma_20, 
                    color=self.colors["sma"], 
                    linewidth=self.chart_config["line_width"],
-                   alpha=0.9, label="SMA(20)")
+                   alpha=0.9, label="SMA(20)", linestyle='-')
         
-        # Highlight current price and trend
+        if len(data) >= 50:
+            sma_50 = data["Close"].rolling(50).mean()
+            ax.plot(range(len(sma_50)), sma_50, 
+                   color=self.colors["ema"], 
+                   linewidth=self.chart_config["line_width"] - 1,
+                   alpha=0.8, label="SMA(50)", linestyle='--')
+        
+        # Enhanced current price visualization
         current_price = analysis.get("current_price", data["Close"].iloc[-1])
         trend = analysis.get("trend_direction", "NEUTRAL")
         
-        # Current price line
+        # Prominent current price line with glow effect
         ax.axhline(y=current_price, color=self.colors["current"], 
-                  linewidth=2, linestyle="--", alpha=0.8)
+                  linewidth=4, linestyle="-", alpha=1.0, zorder=10)
+        ax.axhline(y=current_price, color=self.colors["current"], 
+                  linewidth=8, linestyle="-", alpha=0.3, zorder=9)  # Glow effect
         
-        # Trend annotation with enhanced visibility
+        # Enhanced trend annotations with better positioning
         if trend == "BULLISH":
             ax.annotate(
-                f"BULLISH BREAKOUT\n${current_price:.2f}",
-                xy=(len(data) * 0.7, current_price),
-                xytext=(10, 30),
+                f"🚀 BULLISH BREAKOUT\n${current_price:.2f}",
+                xy=(len(data) * 0.75, current_price),
+                xytext=(15, 40),
                 textcoords="offset points",
-                fontsize=self.chart_config["label_size"],
+                fontsize=self.chart_config["annotation_size"],
                 color=self.colors["bullish"],
                 weight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor=self.colors["bullish"], alpha=0.2),
-                arrowprops=dict(arrowstyle="->", color=self.colors["bullish"], lw=2)
+                bbox=dict(boxstyle="round,pad=0.5", facecolor=self.colors["bullish"], 
+                         alpha=0.25, edgecolor=self.colors["bullish"], linewidth=2),
+                arrowprops=dict(arrowstyle="->", color=self.colors["bullish"], 
+                               lw=3, alpha=0.9)
             )
         elif trend == "BEARISH":
             ax.annotate(
-                f"BEARISH SIGNAL\n${current_price:.2f}",
-                xy=(len(data) * 0.7, current_price),
-                xytext=(10, -40),
+                f"📉 BEARISH SIGNAL\n${current_price:.2f}",
+                xy=(len(data) * 0.75, current_price),
+                xytext=(15, -50),
                 textcoords="offset points",
-                fontsize=self.chart_config["label_size"],
+                fontsize=self.chart_config["annotation_size"],
                 color=self.colors["bearish"],
                 weight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor=self.colors["bearish"], alpha=0.2),
-                arrowprops=dict(arrowstyle="->", color=self.colors["bearish"], lw=2)
+                bbox=dict(boxstyle="round,pad=0.5", facecolor=self.colors["bearish"], 
+                         alpha=0.25, edgecolor=self.colors["bearish"], linewidth=2),
+                arrowprops=dict(arrowstyle="->", color=self.colors["bearish"], 
+                               lw=3, alpha=0.9)
             )
         
-        # Add support/resistance levels if available
-        if "support_level" in analysis:
-            ax.axhline(y=analysis["support_level"], 
+        # Enhanced support/resistance levels with labels
+        if "support_level" in analysis and analysis["support_level"]:
+            support_price = analysis["support_level"]
+            ax.axhline(y=support_price, 
                       color=self.colors["support"], 
-                      linewidth=2, linestyle=":", alpha=0.7,
-                      label=f"Support ${analysis['support_level']:.2f}")
+                      linewidth=3, linestyle=":", alpha=0.8, zorder=5)
+            ax.text(len(data) * 0.02, support_price, f"Support: ${support_price:.2f}",
+                   color=self.colors["support"], fontsize=self.chart_config["annotation_size"],
+                   weight="bold", verticalalignment='bottom')
         
-        if "resistance_level" in analysis:
-            ax.axhline(y=analysis["resistance_level"], 
+        if "resistance_level" in analysis and analysis["resistance_level"]:
+            resistance_price = analysis["resistance_level"]
+            ax.axhline(y=resistance_price, 
                       color=self.colors["resistance"], 
-                      linewidth=2, linestyle=":", alpha=0.7,
-                      label=f"Resistance ${analysis['resistance_level']:.2f}")
+                      linewidth=3, linestyle=":", alpha=0.8, zorder=5)
+            ax.text(len(data) * 0.02, resistance_price, f"Resistance: ${resistance_price:.2f}",
+                   color=self.colors["resistance"], fontsize=self.chart_config["annotation_size"],
+                   weight="bold", verticalalignment='top')
     
     def _plot_enhanced_volume(self, ax, data: pd.DataFrame):
-        """Plot enhanced volume chart with clear visualization."""
+        """Plot ultra-enhanced volume chart with crystal-clear visualization."""
         volume = data["Volume"].values
+        
+        # Enhanced color coding for volume bars
         colors = [
             self.colors["bullish"] if data.iloc[i]["Close"] >= data.iloc[i]["Open"] 
             else self.colors["bearish"] for i in range(len(data))
         ]
         
-        # Volume bars with enhanced visibility
-        bars = ax.bar(range(len(volume)), volume, color=colors, alpha=0.7, width=0.8)
+        # Ultra-enhanced volume bars with better visibility
+        bars = ax.bar(range(len(volume)), volume, color=colors, alpha=0.8, width=0.9, 
+                     edgecolor='none', linewidth=0)
         
-        # Volume moving average
+        # Highlight high volume bars
+        avg_volume = np.mean(volume)
+        for i, (bar, vol) in enumerate(zip(bars, volume)):
+            if vol > avg_volume * 1.5:  # High volume threshold
+                bar.set_alpha(1.0)
+                bar.set_edgecolor(colors[i])
+                bar.set_linewidth(2)
+        
+        # Enhanced volume moving average
         if len(volume) >= 10:
             vol_ma = pd.Series(volume).rolling(10).mean()
             ax.plot(range(len(vol_ma)), vol_ma, 
                    color=self.colors["neutral"], 
-                   linewidth=2, alpha=0.8, label="Vol MA(10)")
+                   linewidth=3, alpha=0.9, label="Vol MA(10)", linestyle='-')
+        
+        # Add volume statistics annotation
+        current_vol = volume[-1]
+        avg_vol_text = f"Avg: {avg_volume/1000000:.1f}M" if avg_volume > 1000000 else f"Avg: {avg_volume/1000:.0f}K"
+        current_vol_text = f"Current: {current_vol/1000000:.1f}M" if current_vol > 1000000 else f"Current: {current_vol/1000:.0f}K"
+        
+        ax.text(0.02, 0.95, f"{current_vol_text}\n{avg_vol_text}", 
+               transform=ax.transAxes, fontsize=self.chart_config["annotation_size"],
+               color=self.colors["current"], weight="bold", 
+               verticalalignment='top', 
+               bbox=dict(boxstyle="round,pad=0.3", facecolor=self.colors["background"], 
+                        alpha=0.8, edgecolor=self.colors["current"], linewidth=1))
     
     def _calculate_heikin_ashi(self, data: pd.DataFrame) -> pd.DataFrame:
         """Calculate Heikin-Ashi values for smoother visualization."""
@@ -348,6 +409,41 @@ class EnhancedSlackChartSender:
         
         return ha_data
     
+    def _add_chart_annotations(self, ax, analysis: Dict, symbol: str):
+        """Add comprehensive chart annotations for enhanced clarity."""
+        # Add timestamp watermark
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S EST')
+        ax.text(0.98, 0.02, f"Generated: {timestamp}", 
+               transform=ax.transAxes, fontsize=10,
+               color=self.colors["volume"], alpha=0.7,
+               horizontalalignment='right', verticalalignment='bottom')
+        
+        # Add confidence meter visualization
+        confidence = analysis.get("confidence", 0)
+        if confidence > 0:
+            # Create confidence bar in top-right corner
+            conf_color = (self.colors["bullish"] if confidence >= 65 
+                         else self.colors["neutral"] if confidence >= 50 
+                         else self.colors["bearish"])
+            
+            ax.text(0.98, 0.98, f"🎯 Confidence\n{confidence:.1f}%", 
+                   transform=ax.transAxes, fontsize=self.chart_config["annotation_size"],
+                   color=conf_color, weight="bold",
+                   horizontalalignment='right', verticalalignment='top',
+                   bbox=dict(boxstyle="round,pad=0.4", facecolor=conf_color, 
+                            alpha=0.15, edgecolor=conf_color, linewidth=2))
+        
+        # Add volatility indicator
+        if "atr_percentage" in analysis:
+            atr_pct = analysis["atr_percentage"]
+            volatility_emoji = "🔥" if atr_pct > 2.0 else "📊" if atr_pct > 1.0 else "😴"
+            ax.text(0.02, 0.02, f"{volatility_emoji} ATR: {atr_pct:.2f}%", 
+                   transform=ax.transAxes, fontsize=self.chart_config["annotation_size"],
+                   color=self.colors["current"], weight="bold",
+                   verticalalignment='bottom',
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor=self.colors["background"], 
+                            alpha=0.8, edgecolor=self.colors["current"], linewidth=1))
+    
     def _format_chart_professionally(
         self, 
         fig, 
@@ -356,50 +452,68 @@ class EnhancedSlackChartSender:
         symbol: str, 
         analysis: Dict
     ):
-        """Apply professional formatting to the chart."""
-        # Main chart formatting
-        ax1.set_title(
-            f"{symbol} - Breakout Analysis ({datetime.now().strftime('%Y-%m-%d %H:%M')})",
-            fontsize=self.chart_config["title_size"],
-            color=self.chart_config["text_color"],
-            weight="bold",
-            pad=20
-        )
+        """Apply ultra-professional formatting to the chart for maximum mobile clarity."""
+        # Enhanced main chart title with subtitle
+        trend = analysis.get("trend_direction", "NEUTRAL")
+        confidence = analysis.get("confidence", 0)
         
-        ax1.set_ylabel("Price ($)", 
-                      fontsize=self.chart_config["label_size"],
-                      color=self.chart_config["text_color"])
+        main_title = f"{symbol} • {trend} Signal"
+        subtitle = f"Confidence: {confidence:.1f}% • {datetime.now().strftime('%Y-%m-%d %H:%M EST')}"
         
-        ax1.grid(True, alpha=self.chart_config["grid_alpha"])
-        ax1.legend(loc="upper left", fontsize=self.chart_config["legend_size"])
+        ax1.set_title(main_title, fontsize=self.chart_config["title_size"],
+                     color=self.chart_config["text_color"], weight="bold", pad=25)
+        ax1.text(0.5, 0.96, subtitle, transform=ax1.transAxes, 
+                fontsize=self.chart_config["subtitle_size"],
+                color=self.colors["volume"], horizontalalignment='center')
         
-        # Volume chart formatting
-        ax2.set_ylabel("Volume", 
-                      fontsize=self.chart_config["label_size"],
-                      color=self.chart_config["text_color"])
-        ax2.set_xlabel("Time", 
-                      fontsize=self.chart_config["label_size"],
-                      color=self.chart_config["text_color"])
+        # Enhanced axis labels with better spacing
+        ax1.set_ylabel("Price ($)", fontsize=self.chart_config["label_size"],
+                      color=self.chart_config["text_color"], weight="bold", labelpad=15)
         
-        ax2.grid(True, alpha=self.chart_config["grid_alpha"])
+        # Professional grid styling
+        ax1.grid(True, alpha=self.chart_config["grid_alpha"], 
+                color=self.colors["grid"], linewidth=1, linestyle='-')
+        ax1.set_axisbelow(True)
         
-        # Enhanced tick formatting
+        # Enhanced legend with better positioning
+        if ax1.get_legend_handles_labels()[0]:  # Check if legend exists
+            legend = ax1.legend(loc="upper left", fontsize=self.chart_config["legend_size"],
+                              frameon=True, fancybox=True, shadow=True, 
+                              facecolor=self.colors["background"], 
+                              edgecolor=self.colors["current"], framealpha=0.9)
+            legend.get_frame().set_linewidth(2)
+        
+        # Enhanced volume chart formatting
+        ax2.set_ylabel("Volume", fontsize=self.chart_config["label_size"],
+                      color=self.chart_config["text_color"], weight="bold", labelpad=15)
+        ax2.set_xlabel("Time Periods (5min bars)", fontsize=self.chart_config["label_size"],
+                      color=self.chart_config["text_color"], weight="bold", labelpad=15)
+        
+        ax2.grid(True, alpha=self.chart_config["grid_alpha"], 
+                color=self.colors["grid"], linewidth=1, linestyle='-')
+        ax2.set_axisbelow(True)
+        
+        # Ultra-enhanced tick formatting with better visibility
         for ax in [ax1, ax2]:
-            ax.tick_params(
-                labelsize=self.chart_config["tick_size"],
-                colors=self.chart_config["text_color"]
-            )
+            ax.tick_params(labelsize=self.chart_config["tick_size"],
+                          colors=self.chart_config["text_color"],
+                          width=self.chart_config["spine_width"],
+                          length=8, pad=8)
+            
+            # Enhanced spine styling
+            for spine in ax.spines.values():
+                spine.set_color(self.colors["current"])
+                spine.set_linewidth(self.chart_config["spine_width"])
+                spine.set_alpha(0.8)
         
-        # Add analysis summary box
-        analysis_text = self._create_analysis_summary(analysis)
-        ax1.text(
-            0.02, 0.98, analysis_text,
-            transform=ax1.transAxes,
-            fontsize=12,
-            verticalalignment='top',
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="#1c2128", alpha=0.8),
-            color=self.chart_config["text_color"]
-        )
+        # Professional layout optimization
+        fig.suptitle("", fontsize=1)  # Remove default title
+        plt.tight_layout()
+        
+        # Add professional branding watermark
+        fig.text(0.99, 0.01, "📈 RobinhoodBot Pro • Enhanced Analysis", 
+                fontsize=10, color=self.colors["volume"], alpha=0.6,
+                horizontalalignment='right', verticalalignment='bottom')
     
     def _create_analysis_summary(self, analysis: Dict) -> str:
         """Create analysis summary text for chart."""

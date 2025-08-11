@@ -1,10 +1,28 @@
 # 🚀 Robinhood HA Breakout - Command Reference Guide
 
-**Complete reference for all CLI commands and usage patterns**
+**Complete reference for all CLI commands and usage patterns (v0.9.0)**
 
 ---
 
 ## 📋 Quick Reference
+
+### 🏦 **Multi-Broker Trading (NEW v0.9.0)**
+```bash
+# Alpaca Paper Trading (Safe Testing)
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --loop
+
+# Alpaca Live Trading (Real Money - Requires Safety Flag)
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --symbols SPY
+
+# Robinhood Trading (Browser Automation)
+python main.py --broker robinhood
+
+# Monitor Alpaca Paper Positions
+python main.py --broker alpaca --alpaca-env paper --monitor-positions --interval 15
+
+# Monitor Alpaca Live Positions
+python main.py --broker alpaca --alpaca-env live --monitor-positions --interval 15
+```
 
 ### 🧪 **Testing & Development**
 ```bash
@@ -13,6 +31,9 @@ python main.py --dry-run
 
 # Multi-symbol dry run
 python main.py --multi-symbol --symbols SPY QQQ IWM --dry-run
+
+# Alpaca paper trading dry run
+python main.py --broker alpaca --alpaca-env paper --dry-run
 
 # Debug mode with verbose logging
 python main.py --dry-run --log-level DEBUG
@@ -128,6 +149,13 @@ python test_multi_symbol.py
 | `--log-level` | Logging verbosity | `--log-level DEBUG` |
 | `--slack-notify` | Enable Slack notifications | `--slack-notify` |
 
+### **Broker & Environment (NEW v0.9.0)**
+| Argument | Description | Example |
+|----------|-------------|---------|
+| `--broker` | Trading broker selection | `--broker alpaca` or `--broker robinhood` |
+| `--alpaca-env` | Alpaca environment | `--alpaca-env paper` or `--alpaca-env live` |
+| `--i-understand-live-risk` | Required for live trading | `--i-understand-live-risk` |
+
 ### **Symbol Selection**
 | Argument | Description | Example |
 |----------|-------------|---------|
@@ -154,11 +182,17 @@ python test_multi_symbol.py
 
 ### **Morning Scanner Setup**
 ```bash
-# Conservative approach - single symbol with alerts
+# Conservative approach - single symbol with alerts (Robinhood)
 python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 
-# Aggressive approach - multi-symbol scanning
+# Aggressive approach - multi-symbol scanning (Robinhood)
 python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 3 --end-at 15:45 --slack-notify
+
+# Safe paper trading approach - multi-symbol (Alpaca Paper)
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --symbols SPY QQQ IWM --loop --interval 3 --end-at 15:45 --slack-notify
+
+# Live trading approach - single symbol (Alpaca Live)
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --symbols SPY --loop --interval 5 --end-at 15:45 --slack-notify
 ```
 
 ### **Position Management Workflow**

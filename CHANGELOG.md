@@ -2,6 +2,146 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [0.9.0] - 2025-08-10
+
+### 🏦 Alpaca Paper/Live Trading & Scoped Ledgers
+
+**Major Enhancement**: Complete broker/environment separation with isolated ledger systems for safe paper trading and live trading support.
+
+#### 🎯 Multi-Broker Support
+- **Alpaca Integration**: Full paper and live trading support via Alpaca API
+- **Environment Switching**: Seamless switching between paper and live environments
+- **Robinhood Compatibility**: Existing browser automation preserved
+- **Isolated Ledgers**: Complete separation between broker/environment combinations
+
+#### 📊 Alpaca Paper Trading
+- **Risk-free testing** with virtual $100,000 account
+- **Real market data** and conditions for accurate strategy validation
+- **Full system validation** without financial risk
+- **Professional execution** infrastructure for realistic testing
+
+#### 💰 Alpaca Live Trading
+- **Real money trading** with institutional-grade infrastructure
+- **Safety interlocks** requiring explicit `--i-understand-live-risk` flag
+- **Automatic fallback** to paper trading if safety flag not provided
+- **Clear warnings** and alerts when live trading is active
+
+#### 🗂️ Scoped Ledger System
+- **Separate bankroll files**: `bankroll_{broker}_{env}.json`
+- **Separate trade history**: `logs/trade_history_{broker}_{env}.csv`
+- **Separate positions**: `positions_{broker}_{env}.csv`
+- **Complete isolation**: No cross-contamination between environments
+- **Backward compatibility**: Existing files preserved
+
+### 🔧 Technical Implementation
+
+#### Enhanced AlpacaClient
+- **Environment parameter**: Accept `env: Literal["paper", "live"]`
+- **Base URL selection**: Automatic paper/live URL configuration
+- **is_paper property**: Easy environment detection for tagging
+- **API key flexibility**: Support for both legacy and new environment variables
+
+#### Enhanced BankrollManager
+- **Scoped ledgers**: Automatic broker/environment file naming
+- **ledger_id() method**: Returns "broker:env" identifier
+- **Backward compatibility**: Custom file names still supported
+- **Automatic seeding**: New ledgers created with START_CAPITAL_DEFAULT
+
+#### Enhanced Main Integration
+- **CLI arguments**: `--broker`, `--alpaca-env`, `--i-understand-live-risk`
+- **Safety interlocks**: Automatic paper fallback for live trading without flag
+- **Scoped file management**: Automatic creation and management
+- **Environment logging**: Clear identification of active broker/environment
+
+### 🛡️ Safety Features
+
+#### Live Trading Protection
+- **Explicit acknowledgment**: `--i-understand-live-risk` flag required
+- **Automatic fallback**: Defaults to paper if flag missing
+- **Clear warnings**: Loud alerts when live trading is active
+- **Separate ledgers**: No risk of contaminating paper data
+
+#### Environment Isolation
+- **Complete separation**: Each broker/env has its own files
+- **No cross-contamination**: Trades logged to correct environment only
+- **Independent bankrolls**: Separate capital tracking per environment
+- **Isolated positions**: Position monitoring per environment
+
+### 📱 Enhanced Slack Integration
+
+#### Environment Tags
+- **[PAPER]** tags for Alpaca paper trading
+- **[LIVE]** tags for Alpaca live trading
+- **[RH]** tags for Robinhood trading
+- **Heartbeat tagging**: "⏳ 09:42 · SPY · no breakout · [ALPACA:PAPER]"
+- **Trade notifications**: "🚀 [PAPER] Submitted CALL SPY 580 x1 @ MKT"
+
+### 🧪 Comprehensive Testing
+
+#### New Unit Test Suite
+- **test_scoped_bankrolls.py**: Ledger isolation and scoping
+- **test_scoped_history_paths.py**: File path isolation verification
+- **test_alpaca_env_switch.py**: Environment switching and safety
+- **test_scoped_files_writes.py**: Cross-contamination prevention
+
+#### Test Coverage
+- **Ledger isolation**: Verify separate files for each broker/env
+- **Environment switching**: Paper to live transition safety
+- **Safety interlocks**: Live trading flag requirements
+- **File operations**: No cross-contamination between environments
+
+### 📚 Documentation Updates
+
+#### README.md Enhancements
+- **Broker & Environment section**: Complete usage guide
+- **Configuration examples**: YAML and .env setup
+- **Safety guidelines**: Live trading best practices
+- **Usage examples**: Paper testing to live trading workflow
+
+#### Configuration Updates
+- **config.yaml**: New broker/environment keys
+- **Environment variables**: Alpaca API credentials
+- **CLI documentation**: New argument explanations
+
+### 🔄 Migration Support
+
+#### Legacy File Handling
+- **Automatic migration**: Legacy files moved to scoped format
+- **Backward compatibility**: Existing workflows preserved
+- **Migration utilities**: Helper functions for file management
+- **Ledger summary**: Overview of all existing ledgers
+
+### 📊 Usage Examples
+
+#### Paper Trading Workflow
+```bash
+# Start with safe paper trading
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --loop
+```
+
+#### Live Trading Workflow
+```bash
+# Graduate to live trading (with safety flag)
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --symbols SPY
+```
+
+#### Environment Monitoring
+```bash
+# Monitor paper positions
+python main.py --broker alpaca --alpaca-env paper --monitor-positions
+```
+
+### 🎯 Benefits
+
+- **Risk-free testing**: Validate strategies without financial risk
+- **Professional execution**: Institutional-grade trading infrastructure
+- **Complete isolation**: No risk of mixing paper and live data
+- **Seamless transition**: Easy progression from paper to live trading
+- **Enhanced safety**: Multiple layers of protection for live trading
+- **Mobile integration**: Environment-tagged Slack notifications
+
+---
+
 ## [0.7.0] - 2025-01-10
 
 ### 📱 Slack UX Improvements - Zero Manual Terminal Watching

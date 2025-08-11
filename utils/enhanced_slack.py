@@ -382,6 +382,23 @@ class EnhancedSlackIntegration:
         """Delegate browser status to basic notifier."""
         return self.basic_notifier.send_browser_status(status, message)
 
+    def send_end_of_day_warning(self, minutes_to_close: int) -> bool:
+        """Delegate end-of-day warning to basic notifier.
+
+        Args:
+            minutes_to_close: Minutes remaining until market close.
+
+        Returns:
+            bool: True if Slack send succeeded, False otherwise.
+        """
+        try:
+            return self.basic_notifier.send_end_of_day_warning(minutes_to_close)
+        except Exception as e:
+            logger.error(
+                f"[ENHANCED-SLACK] Failed to send end-of-day warning: {e}"
+            )
+            return False
+
     def send_trade_decision(
         self,
         symbol: str = None,

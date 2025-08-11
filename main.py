@@ -67,44 +67,10 @@ from utils.portfolio import PortfolioManager, Position
 
 # Load environment variables
 load_dotenv()
+logger = logging.getLogger(__name__)
 
-
-# Configure logging
-def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log"):
-    """
-    Setup comprehensive logging configuration for the trading system.
-
-    Creates both file and console logging handlers with detailed formatting.
-    Automatically creates the logs directory if it doesn't exist.
-
-    Args:
-        log_level (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file (str): Path to the log file (default: "logs/app.log")
-
-    Returns:
-        None
-
-    Note:
-        All trading activities, errors, and system events are logged for audit trails.
-    """
-    Path(log_file).parent.mkdir(exist_ok=True)
-
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-
-    # Fix Windows console encoding issues
-    if sys.platform == "win32":
-        try:
-            # Try to set console to UTF-8 mode
-            os.system("chcp 65001 > nul 2>&1")
-        except:
-            pass
+# Configure logging via shared utility
+from utils.logging_utils import setup_logging
 
 
 def load_config(config_path: str = "config.yaml") -> Dict:
@@ -136,7 +102,7 @@ def load_config(config_path: str = "config.yaml") -> Dict:
             config = yaml.safe_load(f)
         return config
     except Exception as e:
-        logging.error(f"Failed to load config: {e}")
+        logger.error(f"Failed to load config: {e}")
         sys.exit(1)
 
 
@@ -176,13 +142,13 @@ def validate_environment() -> Dict[str, str]:
     deepseek_key = os.getenv("DEEPSEEK_API_KEY")
 
     if not openai_key and not deepseek_key:
-        logging.error("Either OPENAI_API_KEY or DEEPSEEK_API_KEY must be set")
+        logger.error("Either OPENAI_API_KEY or DEEPSEEK_API_KEY must be set")
         sys.exit(1)
 
     # Check Robinhood credentials
     for var, value in required_vars.items():
         if not value:
-            logging.error(f"Required environment variable {var} not set")
+            logger.error(f"Required environment variable {var} not set")
             sys.exit(1)
 
     return required_vars
@@ -194,62 +160,70 @@ def initialize_trade_log(log_file: str):
     log_path.parent.mkdir(exist_ok=True)
 
     if not log_path.exists():
+        # Use the scoped 15-field ledger schema
         headers = [
             "timestamp",
             "symbol",
             "decision",
             "confidence",
-            "reason",
             "current_price",
             "strike",
-            "expiry",
-            "direction",
-            "quantity",
             "premium",
+            "quantity",
             "total_cost",
-            "llm_tokens",
-            "bankroll_before",
-            "bankroll_after",
-            "realized_pnl",
+            "reason",
             "status",
+            "fill_price",
+            "pnl_pct",
+            "pnl_amount",
+            "exit_reason",
         ]
 
         with open(log_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(headers)
 
-        logging.info(f"Initialized trade log: {log_file}")
+        logger.info(f"Initialized trade log: {log_file}")
 
 
 # Import shared logging utility
 from utils.logging_utils import log_trade_decision
 
 
-def parse_end_time(end_time_str: str) -> Optional[datetime]:
-    """Parse end time string (HH:MM) to datetime object in local timezone."""
+def parse_end_time(end_time_str: Optional[str]) -> Optional[datetime]:
+    """Parse end time string (HH:MM) to a timezone-aware datetime in local timezone.
+
+    Returns None when input is None or empty. Raises ValueError on invalid format.
+    """
+    if not end_time_str:
+        return None
+
     try:
         tz = ZoneInfo("America/New_York")
         now = datetime.now(tz)
-        
+
         # Parse the time string
         time_parts = end_time_str.split(":")
         if len(time_parts) != 2:
             raise ValueError("Time must be in HH:MM format")
-        
+
         hour = int(time_parts[0])
         minute = int(time_parts[1])
-        
+
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("Hour or minute out of range")
+
         # Create end time for today
         end_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        
+
         # If end time has already passed today, set it for tomorrow
         if end_time <= now:
             end_time += timedelta(days=1)
-        
+
         return end_time
     except (ValueError, IndexError) as e:
         logger.error(f"Invalid end time format '{end_time_str}': {e}")
-        sys.exit(1)
+        raise
 
 
 def generate_daily_summary(config: Dict, end_time: datetime) -> str:
@@ -269,13 +243,13 @@ def generate_daily_summary(config: Dict, end_time: datetime) -> str:
         
         today = date.today()
         trade_log_file = config.get('TRADE_LOG_FILE', 'logs/trade_history.csv')
-        
+
         # Initialize counters
         n_trades = 0
         wins = 0
         losses = 0
         total_pl = 0.0
-        
+
         # Read today's trades from trade log
         if Path(trade_log_file).exists():
             with open(trade_log_file, 'r', newline='') as f:
@@ -283,31 +257,59 @@ def generate_daily_summary(config: Dict, end_time: datetime) -> str:
                 for row in reader:
                     try:
                         # Parse trade date
-                        trade_date = datetime.fromisoformat(row.get('timestamp', '')).date()
-                        if trade_date == today and row.get('status') == 'SUBMITTED':
+                        ts = row.get('timestamp', '').strip()
+                        trade_date = datetime.fromisoformat(ts).date()
+                        if trade_date != today:
+                            continue
+
+                        status_val = (row.get('status') or '').strip().upper()
+
+                        # Count submitted trades (exclude CANCELLED), matching legacy behavior
+                        if status_val == 'SUBMITTED':
                             n_trades += 1
-                            
-                            # Calculate P&L if available
-                            entry_premium = float(row.get('actual_premium', row.get('premium', 0)))
-                            exit_premium = float(row.get('exit_premium', 0))
-                            contracts = int(row.get('quantity', 1))
-                            
-                            if exit_premium > 0:  # Position closed
-                                pl = (exit_premium - entry_premium) * contracts * 100
-                                total_pl += pl
-                                
-                                if pl > 0:
-                                    wins += 1
-                                else:
-                                    losses += 1
-                                    
-                    except (ValueError, KeyError) as e:
-                        continue  # Skip malformed rows
+
+                        # Determine realized P&L for closed trades
+                        # Prefer new schema's pnl_amount when available
+                        pnl_field = row.get('pnl_amount', '').strip()
+                        pl_val: Optional[float] = None
+                        if pnl_field not in (None, ''):
+                            try:
+                                pl_val = float(pnl_field)
+                            except ValueError:
+                                pl_val = None
+
+                        # Fallback to legacy premium math when exit_premium present on SUBMITTED rows
+                        if pl_val is None:
+                            entry_str = (row.get('actual_premium') or row.get('premium') or '').strip()
+                            exit_str = (row.get('exit_premium') or '').strip()
+                            qty_str = (row.get('quantity') or '1').strip()
+                            if exit_str not in ('', '0', '0.0') and entry_str not in ('',):
+                                try:
+                                    entry_premium = float(entry_str)
+                                    exit_premium = float(exit_str)
+                                    contracts = int(qty_str)
+                                    pl_val = (exit_premium - entry_premium) * contracts * 100
+                                except ValueError:
+                                    pl_val = None
+
+                        # Accumulate wins/losses only when we have realized P&L
+                        if pl_val is not None:
+                            total_pl += pl_val
+                            if pl_val > 0:
+                                wins += 1
+                            elif pl_val < 0:
+                                losses += 1
+                    except Exception:
+                        # Skip malformed rows entirely
+                        continue
         
         # Get current bankroll
         try:
             from utils.bankroll import BankrollManager
-            bankroll_manager = BankrollManager(config.get('BANKROLL_FILE', 'bankroll.json'))
+            broker = config.get('BROKER', 'robinhood')
+            env = config.get('ALPACA_ENV', 'live') if broker == 'alpaca' else 'live'
+            start_capital = config.get('START_CAPITAL_DEFAULT', config.get('START_CAPITAL', 500.0))
+            bankroll_manager = BankrollManager(start_capital=start_capital, broker=broker, env=env)
             current_bankroll = bankroll_manager.get_current_bankroll()
             peak_bankroll = getattr(bankroll_manager, 'peak_bankroll', current_bankroll)
         except Exception:
@@ -362,11 +364,9 @@ def execute_multi_symbol_trade(
     Returns:
         Dict: Execution result with bot instance
     """
-    import logging
     from utils.browser import RobinhoodBot
     from utils.trade_confirmation import TradeConfirmationManager
-
-    logger = logging.getLogger(__name__)
+    
 
     symbol = opportunity["symbol"]
     decision = opportunity["decision"]
@@ -490,11 +490,14 @@ def execute_multi_symbol_trade(
                             trade_type=decision,
                             strike=str(atm_option["strike"]),
                             expiry="Today",
-                            position_size=str(quantity),
+                            position_size=total_cost,
                             action=trade_action,
                             confidence=confidence,
                             reason=reason,
                             current_price=current_price,
+                            premium=actual_premium,
+                            quantity=quantity,
+                            total_cost=total_cost,
                         )
                     else:
                         # Fallback for EnhancedSlackIntegration - use basic heartbeat
@@ -628,7 +631,6 @@ def run_once(
         - Applies risk fraction limits
         - Logs all activities for audit
     """
-    logger = logging.getLogger(__name__)
 
     # Get current bankroll
     current_bankroll = bankroll_manager.get_current_bankroll()
@@ -685,7 +687,6 @@ def run_once(
     win_history = enhanced_context.get("win_history", [])  # Backward compatibility
     
     # Check if ensemble is enabled (v0.6.0)
-    config = load_config()
     if config.get("ENSEMBLE_ENABLED", True):
         logger.info("[ENSEMBLE] Using two-model ensemble decision making")
         from utils.ensemble_llm import choose_trade
@@ -714,8 +715,13 @@ def run_once(
     # Calculate position size for notification
     position_size = 0
     if decision.decision in ["CALL", "PUT"]:
+        # Estimate premium using a simple heuristic for notification purposes
+        estimated_premium = analysis["current_price"] * 0.02
         position_size = bankroll_manager.calculate_position_size(
-            current_bankroll, decision.confidence
+            premium=estimated_premium,
+            risk_fraction=config["RISK_FRACTION"],
+            size_rule=config["SIZE_RULE"],
+            fixed_qty=config["CONTRACT_QTY"],
         )
 
     # Return trade result data
@@ -758,16 +764,22 @@ def main_loop(
                 logger.info(
                     f"[LOOP] Reached end time {end_time.strftime('%H:%M %Z')} - exiting"
                 )
-                
-                # S4: Send daily summary block at --end-at cutoff
-                if slack_notifier:
+
+                # S4: Send daily summary only when an --end-at argument was provided as a real string
+                end_at_val = getattr(args, "end_at", None)
+                send_summary = (
+                    config.get('ENABLE_DAILY_SUMMARY', True)
+                    and isinstance(end_at_val, str)
+                    and bool(end_at_val.strip())
+                )
+                if slack_notifier and send_summary:
                     try:
                         daily_summary = generate_daily_summary(config, end_time)
                         slack_notifier.send_heartbeat(daily_summary)
                         logger.info("[S4-DAILY-SUMMARY] Sent end-of-day summary")
                     except Exception as e:
                         logger.error(f"[S4-DAILY-SUMMARY] Failed to send daily summary: {e}")
-                
+
                 break
 
             logger.info(
@@ -797,14 +809,22 @@ def main_loop(
                     # S2: Send throttled heartbeat one-liner to Slack
                     heartbeat_counter += 1
                     heartbeat_every = config.get('HEARTBEAT_EVERY', 3)
-                    
-                    if slack_notifier and (heartbeat_counter % heartbeat_every == 0):
-                        # Format: ⏳ 09:45 · SPY · no breakout (body 0.03%)
-                        symbol = config.get('SYMBOL', 'SPY')
-                        body_pct = analysis.get('candle_body_pct', 0.0)
-                        heartbeat_msg = f"⏳ {cycle_start.strftime('%H:%M')} · {symbol} · no breakout (body {body_pct:.02f}%)"
-                        slack_notifier.send_heartbeat(heartbeat_msg)
-                        logger.info(f"[S2-HEARTBEAT] Sent throttled heartbeat ({heartbeat_counter}/{heartbeat_every})")
+
+                    if slack_notifier:
+                        # Send on first NO_TRADE cycle, then throttle by HEARTBEAT_EVERY; guard zero
+                        if heartbeat_every > 0 and (
+                            heartbeat_counter == 1 or heartbeat_counter % heartbeat_every == 0
+                        ):
+                            # Format: ⏳ 09:45 · SPY · No breakout (body 0.03%)
+                            symbol = config.get('SYMBOL', 'SPY')
+                            body_pct = analysis.get('candle_body_pct', 0.0)
+                            heartbeat_msg = (
+                                f"⏳ {cycle_start.strftime('%H:%M')} · {symbol} · No breakout (body {body_pct:.02f}%)"
+                            )
+                            slack_notifier.send_heartbeat(heartbeat_msg)
+                            logger.info(
+                                f"[S2-HEARTBEAT] Sent throttled heartbeat ({heartbeat_counter}/{heartbeat_every})"
+                            )
 
                     # Log the no-trade decision
                     trade_data = {
@@ -919,16 +939,19 @@ def main_loop(
                                     if bot.click_option_and_buy(atm_option, quantity):
                                         # Send rich Slack notification
                                         if slack_notifier:
+                                            est_total = estimated_premium * quantity * 100
                                             slack_notifier.send_order_ready_alert(
                                                 trade_type=decision.decision,
                                                 strike=str(atm_option["strike"]),
                                                 expiry="Today",  # Adjust as needed
-                                                position_size=str(position_size),
+                                                position_size=est_total,
                                                 action="OPEN",
                                                 confidence=decision.confidence,
                                                 reason=decision.reason or "",
                                                 current_price=analysis["current_price"],
+                                                premium=estimated_premium,
                                                 quantity=quantity,
+                                                total_cost=est_total,
                                             )
 
                                         logger.info(
@@ -992,16 +1015,21 @@ def main_loop(
                         else:
                             # Dry run mode - just send notification
                             if slack_notifier:
+                                est_prem = analysis["current_price"] * 0.02
+                                qty = 1
+                                est_total = est_prem * qty * 100
                                 slack_notifier.send_order_ready_alert(
                                     trade_type=decision.decision,
                                     strike=str(analysis["current_price"]),
                                     expiry="Today",
-                                    position_size=position_size,
+                                    position_size=est_total,
                                     action="OPEN",
                                     confidence=decision.confidence,
                                     reason=decision.reason or "",
                                     current_price=analysis["current_price"],
-                                    quantity=1,
+                                    premium=est_prem,
+                                    quantity=qty,
+                                    total_cost=est_total,
                                 )
 
             except Exception as e:
@@ -1247,7 +1275,6 @@ def run_multi_symbol_loop(
         slack_notifier: Slack notification instance
         end_time: Optional end time for the loop
     """
-    logger = logging.getLogger(__name__)
 
     # Initialize multi-symbol scanner
     scanner = MultiSymbolScanner(config, llm_client, slack_notifier)
@@ -1396,6 +1423,108 @@ def run_multi_symbol_loop(
             )
 
 
+def monitor_positions_mode(
+    config: Dict,
+    args,
+    env_vars: Dict,
+    bankroll_manager,
+    portfolio_manager,
+    llm_client,
+    slack_notifier,
+    end_time: Optional[datetime],
+):
+    """Run position monitoring mode using EnhancedPositionMonitor.
+
+    Integrates the standalone monitor (monitor_alpaca.py) with main.py CLI.
+    Respects --interval (minutes), --slack-notify, and optional --end-at.
+    """
+    logger = logging.getLogger(__name__)
+
+    # Determine monitoring interval in minutes
+    interval_minutes = getattr(args, "interval", None)
+    if not interval_minutes:
+        interval_minutes = config.get("MONITOR_INTERVAL", 2)
+
+    logger.info(
+        f"[MONITOR] Starting position monitoring (interval: {interval_minutes}m)"
+    )
+
+    # Lazy import to avoid circular imports
+    try:
+        from monitor_alpaca import EnhancedPositionMonitor
+    except Exception as e:
+        logger.error(f"[MONITOR] Failed to import monitor: {e}")
+        return
+
+    monitor = EnhancedPositionMonitor()
+
+    # Respect --slack-notify flag: disable Slack if not requested
+    try:
+        if not getattr(args, "slack_notify", False) and hasattr(monitor, "slack"):
+            monitor.slack.enabled = False
+            logger.info("[MONITOR] Slack notifications disabled by CLI flag")
+    except Exception as e:
+        logger.debug(f"[MONITOR] Could not adjust Slack setting: {e}")
+
+    # Optional startup breadcrumb via main's slack_notifier
+    if slack_notifier:
+        try:
+            msg = (
+                f"🟢 Position monitor started\n"
+                f"⏱️ Interval: {interval_minutes} minutes\n"
+                + (f"🕒 End at: {end_time.strftime('%H:%M %Z')}\n" if end_time else "")
+            )
+            slack_notifier.send_message(msg.strip())
+        except Exception:
+            pass
+
+    # If no end_time provided, use monitor's own run loop
+    if not end_time:
+        try:
+            monitor.run(interval_minutes=interval_minutes)
+        except KeyboardInterrupt:
+            logger.info("[MONITOR] Stopped by user")
+        finally:
+            if slack_notifier:
+                try:
+                    slack_notifier.send_message("🔴 Position monitor stopped")
+                except Exception:
+                    pass
+        return
+
+    # Timed monitoring loop honoring --end-at
+    try:
+        tz = end_time.tzinfo
+        while True:
+            now = datetime.now(tz) if tz else datetime.now()
+            if now >= end_time:
+                logger.info(
+                    f"[MONITOR] Reached end time {end_time.strftime('%H:%M %Z')}, exiting"
+                )
+                break
+
+            monitor.run_monitoring_cycle()
+
+            # Sleep until next cycle or until end_time, whichever is sooner
+            now = datetime.now(tz) if tz else datetime.now()
+            remaining = (end_time - now).total_seconds()
+            sleep_s = max(0, min(remaining, interval_minutes * 60))
+            if sleep_s == 0:
+                break
+            time.sleep(sleep_s)
+
+    except KeyboardInterrupt:
+        logger.info("[MONITOR] Stopped by user")
+    except Exception as e:
+        logger.error(f"[MONITOR] Error in monitoring loop: {e}")
+    finally:
+        if slack_notifier:
+            try:
+                slack_notifier.send_message("🔴 Position monitor stopped")
+            except Exception:
+                pass
+
+
 def main():
     """Main trading script execution."""
     parser = argparse.ArgumentParser(
@@ -1461,6 +1590,21 @@ def main():
         action="store_false",
         help="Disable auto-start of position monitoring",
     )
+    parser.add_argument(
+        "--broker",
+        choices=["alpaca", "robinhood"],
+        help="Override broker selection (overrides config)",
+    )
+    parser.add_argument(
+        "--alpaca-env",
+        choices=["paper", "live"],
+        help="Override Alpaca environment (overrides config)",
+    )
+    parser.add_argument(
+        "--i-understand-live-risk",
+        action="store_true",
+        help="Required flag when using Alpaca live trading",
+    )
 
     args = parser.parse_args()
 
@@ -1478,7 +1622,7 @@ def main():
 
     # Setup logging early so we can use logger in CLI overrides
     setup_logging(args.log_level, config["LOG_FILE"])
-    logger = logging.getLogger(__name__)
+    
 
     # Handle multi-symbol CLI overrides
     if args.symbols:
@@ -1493,6 +1637,34 @@ def main():
         config["multi_symbol"]["max_concurrent_trades"] = args.max_trades
         logger.info(f"CLI override: Max concurrent trades set to {args.max_trades}")
 
+    # Handle broker/environment CLI overrides
+    if args.broker:
+        config["BROKER"] = args.broker
+        logger.info(f"CLI override: Using broker {args.broker}")
+
+    if args.alpaca_env:
+        config["ALPACA_ENV"] = args.alpaca_env
+        logger.info(f"CLI override: Using Alpaca environment {args.alpaca_env}")
+
+    # Safety interlocks for live trading
+    if config["BROKER"] == "alpaca" and config["ALPACA_ENV"] == "live":
+        if not args.i_understand_live_risk:
+            logger.error(
+                "⚠️  LIVE TRADING BLOCKED: --i-understand-live-risk flag required for Alpaca live trading"
+            )
+            print("\n⚠️  SAFETY INTERLOCK ACTIVATED")
+            print("Live trading with real money requires explicit acknowledgment.")
+            print("Add --i-understand-live-risk flag to proceed with live trading.")
+            print("Defaulting to paper trading for safety.\n")
+            config["ALPACA_ENV"] = "paper"
+            logger.info("Safety override: Switched to paper trading")
+        else:
+            logger.warning(
+                "⚠️  LIVE TRADING ENABLED (Alpaca). Proceeding because --i-understand-live-risk was provided."
+            )
+            print("\n⚠️  LIVE TRADING MODE ACTIVE")
+            print("Real money will be at risk. Ensure you understand the consequences.\n")
+
     logger.info("[START] Starting Robinhood HA Breakout Assistant")
     logger.info(f"Dry run mode: {args.dry_run}")
     if args.loop:
@@ -1504,14 +1676,32 @@ def main():
         # Validate environment
         env_vars = validate_environment()
 
-        # Initialize components
+        # Initialize components with broker/environment scoping (v0.9.0)
+        broker = config.get("BROKER", "robinhood")
+        env = config.get("ALPACA_ENV", "live") if broker == "alpaca" else "live"
+        
+        # Use scoped ledger files
+        from utils.scoped_files import get_scoped_paths, ensure_scoped_files
+        scoped_paths = get_scoped_paths(broker, env)
+        ensure_scoped_files(scoped_paths)
+        
+        # Use scoped trade history path throughout the app
+        config["TRADE_LOG_FILE"] = scoped_paths["trade_history"]
+        
         bankroll_manager = BankrollManager(
-            config["BANKROLL_FILE"], config["START_CAPITAL"]
+            start_capital=config.get("START_CAPITAL_DEFAULT", config["START_CAPITAL"]),
+            broker=broker,
+            env=env
         )
-
+        
         portfolio_manager = PortfolioManager(
-            config.get("POSITIONS_FILE", "positions.csv")
+            scoped_paths["positions"]
         )
+        
+        logger.info(f"[SCOPED] Using ledger: {bankroll_manager.ledger_id()}")
+        logger.info(f"[SCOPED] Bankroll file: {bankroll_manager.bankroll_file}")
+        logger.info(f"[SCOPED] Positions file: {scoped_paths['positions']}")
+        logger.info(f"[SCOPED] Trade history: {scoped_paths['trade_history']}")
 
         llm_client = LLMClient(config["MODEL"])
 
@@ -1522,7 +1712,7 @@ def main():
             slack_notifier = slack
             slack_notifier.send_startup_notification(dry_run=args.dry_run)
 
-        # Initialize trade log
+        # Initialize scoped trade log
         initialize_trade_log(config["TRADE_LOG_FILE"])
 
         # Choose execution mode
@@ -1539,6 +1729,7 @@ def main():
                 slack_notifier,
                 end_time,
             )
+            return
         elif config.get("multi_symbol", {}).get("enabled", False) or args.multi_symbol:
             # Run multi-symbol scanning mode
             logger.info("[MODE] Running in multi-symbol scanning mode")
@@ -1553,6 +1744,7 @@ def main():
                     slack_notifier,
                     end_time,
                 )
+                return
             else:
                 run_multi_symbol_once(
                     config,
@@ -1563,6 +1755,7 @@ def main():
                     llm_client,
                     slack_notifier,
                 )
+                return
         elif args.loop:
             # Run in continuous loop mode (single symbol)
             logger.info("[MODE] Running in continuous loop mode")
@@ -1576,6 +1769,7 @@ def main():
                 slack_notifier,
                 end_time,
             )
+            return
         else:
             # Run once (original behavior)
             logger.info("[MODE] Running in one-shot mode")
@@ -1588,6 +1782,7 @@ def main():
                 llm_client,
                 slack_notifier,
             )
+            return
 
         # Get current bankroll
         current_bankroll = bankroll_manager.get_current_bankroll()
@@ -1643,8 +1838,13 @@ def main():
         # Calculate position size for notification
         position_size = 0
         if decision.decision in ["CALL", "PUT"]:
+            # Estimate premium for sizing prior to opening a ticket
+            estimated_premium = analysis["current_price"] * 0.02
             position_size = bankroll_manager.calculate_position_size(
-                current_bankroll, decision.confidence
+                premium=estimated_premium,
+                risk_fraction=config["RISK_FRACTION"],
+                size_rule=config["SIZE_RULE"],
+                fixed_qty=config["CONTRACT_QTY"],
             )
 
         # Send trade decision to Slack
@@ -1745,7 +1945,7 @@ def main():
                 "direction": decision.decision,
                 "quantity": quantity,
                 "premium": estimated_premium,
-                "total_cost": estimated_premium * quantity,
+                "total_cost": estimated_premium * quantity * 100,
                 "llm_tokens": decision.tokens_used,
                 "bankroll_before": current_bankroll,
                 "bankroll_after": current_bankroll,
@@ -1872,7 +2072,7 @@ def main():
 
                 # Validate trade risk - only for OPEN trades
                 if not bankroll_manager.validate_trade_risk(
-                    premium, quantity, config.get("MAX_PREMIUM_PCT", 50) * 100
+                    premium, quantity, config.get("MAX_PREMIUM_PCT", 0.5) * 100
                 ):
                     logger.error("[ERROR] Trade blocked by risk management")
                     return
@@ -1959,7 +2159,7 @@ def main():
                         "direction": decision.decision,
                         "quantity": quantity,
                         "premium": fill_price,
-                        "total_cost": fill_price * quantity,
+                        "total_cost": fill_price * quantity * 100,
                         "llm_tokens": decision.tokens_used,
                         "bankroll_before": current_bankroll,
                         "bankroll_after": current_bankroll,  # Will be updated by bankroll manager
@@ -1987,7 +2187,7 @@ def main():
                         analysis["current_price"] * 0.02
                     )  # Rough estimate
                     estimated_total_proceeds = (
-                        estimated_exit_premium * position_to_close.contracts
+                        estimated_exit_premium * position_to_close.contracts * 100
                     )
 
                     slack_notifier.send_order_ready_alert(

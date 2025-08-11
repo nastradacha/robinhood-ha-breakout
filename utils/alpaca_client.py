@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ✅ Alpaca paper/live & scoped ledgers verified – 2025-08-10
 """
 Alpaca API Integration for Real-Time Market Data
 
@@ -9,21 +10,26 @@ led to missed profit opportunities.
 Key Features:
 - Real-time stock quotes and options data
 - Professional-grade market data feeds
-- Paper trading support for safe testing
+- Paper/live environment switching (v0.9.0)
 - Fallback to Yahoo Finance if Alpaca unavailable
 - Rate limiting and error handling
 
 Usage:
     from utils.alpaca_client import AlpacaClient
 
-    alpaca = AlpacaClient()
+    # Paper trading (default)
+    alpaca = AlpacaClient(env="paper")
+    
+    # Live trading
+    alpaca = AlpacaClient(env="live")
+    
     current_price = alpaca.get_current_price('SPY')
     option_data = alpaca.get_option_chain('SPY', '2025-08-04')
 """
 
 import os
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 from datetime import datetime, timedelta
 import pandas as pd
 from alpaca.data.historical import StockHistoricalDataClient
@@ -42,11 +48,29 @@ class AlpacaClient:
     and position monitoring accuracy.
     """
 
-    def __init__(self):
-        """Initialize Alpaca client with API credentials."""
-        self.api_key = os.getenv("ALPACA_API_KEY")
+    def __init__(self, env: Literal["paper", "live"] = "paper", config: Optional[Dict] = None):
+        """Initialize Alpaca client with API credentials and environment.
+        
+        Args:
+            env: Trading environment - "paper" or "live" (default: "paper")
+            config: Optional configuration dict with base URLs
+        """
+        self.env = env
+        self.api_key = os.getenv("ALPACA_KEY_ID") or os.getenv("ALPACA_API_KEY")
         self.secret_key = os.getenv("ALPACA_SECRET_KEY")
-        self.base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+        
+        # Configure base URL based on environment
+        if config:
+            if env == "paper":
+                self.base_url = config.get("ALPACA_PAPER_BASE_URL", "https://paper-api.alpaca.markets")
+            else:
+                self.base_url = config.get("ALPACA_LIVE_BASE_URL", "https://api.alpaca.markets")
+        else:
+            # Fallback to environment variables or defaults
+            if env == "paper":
+                self.base_url = os.getenv("ALPACA_PAPER_BASE_URL", "https://paper-api.alpaca.markets")
+            else:
+                self.base_url = os.getenv("ALPACA_LIVE_BASE_URL", "https://api.alpaca.markets")
 
         self.enabled = bool(self.api_key and self.secret_key)
 
@@ -60,15 +84,14 @@ class AlpacaClient:
                 self.trading_client = TradingClient(
                     api_key=self.api_key,
                     secret_key=self.secret_key,
-                    paper=True if "paper" in self.base_url else False,
+                    paper=self.is_paper,
                 )
 
                 # Test connection
                 account = self.trading_client.get_account()
                 logger.info(
-                    f"[ALPACA] Connected successfully - Account: {account.account_number}"
-                )
-                logger.info(f"[ALPACA] Paper trading: {'paper' in self.base_url}")
+                    f"[ALPACA] Connected successfully - Account: {account.account_number} ({env.upper()})")
+                logger.info(f"[ALPACA] Environment: {env}, Paper trading: {self.is_paper}")
 
             except Exception as e:
                 logger.error(f"[ALPACA] Failed to initialize: {e}")
@@ -77,6 +100,15 @@ class AlpacaClient:
             logger.warning(
                 "[ALPACA] API keys not configured - falling back to Yahoo Finance"
             )
+
+    @property
+    def is_paper(self) -> bool:
+        """Check if client is configured for paper trading.
+        
+        Returns:
+            True if using paper trading environment, False for live trading
+        """
+        return self.env == "paper"
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         """

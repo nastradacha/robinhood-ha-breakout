@@ -25,11 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils.browser import RobinhoodBot
 from utils.llm import load_config
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Set up centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/test_chrome_fixed.log")
 logger = logging.getLogger(__name__)
 
 

@@ -570,7 +570,8 @@ if __name__ == "__main__":
     # Example usage
 
     # Setup logging
-    logging.basicConfig(level=logging.INFO)
+    from utils.logging_utils import setup_logging
+    setup_logging(log_level="INFO", log_file="logs/backtest.log")
 
     # Run quick backtest
     print("Running 30-day backtest...")

@@ -85,8 +85,37 @@ def load_config(config_path: str = "config.yaml") -> dict:
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
 
-    # Add derived fields
-    config["TRADE_LOG_FILE"] = config.get("TRADE_LOG_FILE", "logs/trade_log.csv")
+    # Add derived fields with broker/env scoping (v0.9.0)
+    # Import here to avoid circular imports at module load time
+    try:
+        from utils.scoped_files import get_scoped_paths, ensure_scoped_files  # type: ignore
+    except Exception:
+        # Fallback: leave legacy paths if scoped utilities unavailable
+        get_scoped_paths = None  # type: ignore
+        ensure_scoped_files = None  # type: ignore
+
+    broker = config.get("BROKER", "robinhood")
+    # For non-Alpaca brokers, default to 'live' to match main.py behavior
+    if broker == "alpaca":
+        env = config.get("ALPACA_ENV", "paper")
+    else:
+        env = "live"
+
+    if get_scoped_paths is not None:
+        paths = get_scoped_paths(broker, env)
+        try:
+            ensure_scoped_files(paths)
+        except Exception:
+            # Non-fatal if file creation fails at this point
+            pass
+
+        # Always prefer scoped paths; preserves backward compatibility by only
+        # overriding defaults, not explicit user-provided overrides.
+        config["TRADE_LOG_FILE"] = config.get("TRADE_LOG_FILE", paths["trade_history"]) 
+        config["POSITIONS_FILE"] = config.get("POSITIONS_FILE", paths["positions"]) 
+        config["BANKROLL_FILE"] = config.get("BANKROLL_FILE", paths["bankroll"]) 
+
+    # Logging file default (unchanged)
     config["LOG_FILE"] = config.get("LOG_FILE", "logs/app.log")
 
     return config

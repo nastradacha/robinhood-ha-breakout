@@ -26,10 +26,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Set up centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/analytics_dashboard.log")
 logger = logging.getLogger(__name__)
 
 

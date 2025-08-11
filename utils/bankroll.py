@@ -1,3 +1,4 @@
+# ✅ Alpaca paper/live & scoped ledgers verified – 2025-08-10
 """
 Bankroll Management Module
 
@@ -76,11 +77,32 @@ class BankrollManager:
     """Manages trading bankroll with risk controls and persistence."""
 
     def __init__(
-        self, bankroll_file: str = "bankroll.json", start_capital: float = 40.0
+        self, 
+        bankroll_file: str = "bankroll.json", 
+        start_capital: float = 40.0,
+        broker: str = "robinhood",
+        env: str = "live"
     ):
-        self.bankroll_file = Path(bankroll_file)
+        # Support scoped ledgers for v0.9.0 broker/environment separation
+        if bankroll_file == "bankroll.json":
+            # Use scoped filename: bankroll_{broker}_{env}.json
+            self.bankroll_file = Path(f"bankroll_{broker}_{env}.json")
+        else:
+            # Use provided filename (for backward compatibility)
+            self.bankroll_file = Path(bankroll_file)
+        
         self.start_capital = start_capital
+        self.broker = broker
+        self.env = env
         self._ensure_bankroll_file()
+
+    def ledger_id(self) -> str:
+        """Get ledger identifier for this broker/environment combination.
+        
+        Returns:
+            String identifier like "alpaca:paper" or "robinhood:live"
+        """
+        return f"{self.broker}:{self.env}"
 
     def _ensure_bankroll_file(self):
         """Create bankroll file if it doesn't exist."""
@@ -448,7 +470,17 @@ class BankrollManager:
             import csv
             from pathlib import Path
 
-            trade_log_path = Path("logs/trade_log.csv")
+            # Resolve scoped trade log file from config; fallback to default scoped path
+            try:
+                from utils.llm import load_config  # type: ignore
+
+                trade_log_file = load_config().get(
+                    "TRADE_LOG_FILE", "logs/trade_history_robinhood_live.csv"
+                )
+            except Exception:
+                trade_log_file = "logs/trade_history_robinhood_live.csv"
+
+            trade_log_path = Path(trade_log_file)
             if not trade_log_path.exists():
                 return []
 
@@ -457,23 +489,45 @@ class BankrollManager:
                 reader = csv.DictReader(f)
                 trades = list(reader)
 
-                # Get last N completed trades (those with PnL data)
-                recent_trades = [
-                    t for t in trades if t.get("pnl") and t.get("pnl") != ""
-                ][-last_n:]
+                # Get last N completed trades (those with any PnL data)
+                def has_pnl(t: dict) -> bool:
+                    return any(
+                        (t.get(k) is not None and str(t.get(k)).strip() != "")
+                        for k in ("pnl_amount", "pnl", "pnl_dollars")
+                    )
+
+                recent_trades = [t for t in trades if has_pnl(t)][-last_n:]
 
                 for trade in recent_trades:
                     try:
-                        pnl = float(trade.get("pnl", 0))
-                        pnl_pct = (
-                            float(trade.get("pnl_pct", 0))
-                            if trade.get("pnl_pct")
-                            else 0
+                        pnl = float(
+                            trade.get("pnl_amount")
+                            or trade.get("pnl")
+                            or trade.get("pnl_dollars")
+                            or 0
                         )
+                        pnl_pct = 0.0
+                        if trade.get("pnl_pct") not in (None, ""):
+                            pnl_pct = float(trade.get("pnl_pct", 0))
+                        elif trade.get("pnl_percent") not in (None, ""):
+                            pnl_pct = float(trade.get("pnl_percent", 0))
 
                         pattern = {
                             "symbol": trade.get("symbol", "UNKNOWN"),
-                            "option_type": trade.get("option_type", "UNKNOWN"),
+                            "option_type": (
+                                trade.get("option_type")
+                                or (
+                                    "CALL"
+                                    if "CALL"
+                                    in str(trade.get("decision", "")).upper()
+                                    else (
+                                        "PUT"
+                                        if "PUT"
+                                        in str(trade.get("decision", "")).upper()
+                                        else "UNKNOWN"
+                                    )
+                                )
+                            ),
                             "outcome": "WIN" if pnl > 0 else "LOSS",
                             "pnl_pct": pnl_pct,
                             "reason": trade.get("reason", ""),
@@ -503,7 +557,17 @@ class BankrollManager:
             from pathlib import Path
             from collections import defaultdict
 
-            trade_log_path = Path("logs/trade_log.csv")
+            # Resolve scoped trade log file from config; fallback to default scoped path
+            try:
+                from utils.llm import load_config  # type: ignore
+
+                trade_log_file = load_config().get(
+                    "TRADE_LOG_FILE", "logs/trade_history_robinhood_live.csv"
+                )
+            except Exception:
+                trade_log_file = "logs/trade_history_robinhood_live.csv"
+
+            trade_log_path = Path(trade_log_file)
             if not trade_log_path.exists():
                 return {}
 
@@ -514,10 +578,16 @@ class BankrollManager:
             with open(trade_log_path, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 for trade in reader:
-                    if trade.get("pnl") and trade.get("pnl") != "":
+                    # Consider row if any PnL field present
+                    pnl_field = (
+                        trade.get("pnl_amount")
+                        or trade.get("pnl")
+                        or trade.get("pnl_dollars")
+                    )
+                    if pnl_field not in (None, ""):
                         try:
                             symbol = trade.get("symbol", "UNKNOWN")
-                            pnl = float(trade.get("pnl", 0))
+                            pnl = float(pnl_field)
 
                             symbol_stats[symbol]["total"] += 1
                             symbol_stats[symbol]["total_pnl"] += pnl

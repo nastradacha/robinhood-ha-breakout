@@ -795,9 +795,30 @@ class MultiSymbolScanner:
                 "llm_tokens": 0,
             }
 
-            log_trade_decision(
-                self.config.get("TRADE_LOG_FILE", "logs/trade_log.csv"), trade_data
-            )
+            # Resolve broker/env-scoped trade history path robustly
+            log_file = self.config.get("TRADE_LOG_FILE")
+            if not log_file:
+                try:
+                    from utils.llm import load_config  # type: ignore
+                    cfg = load_config("config.yaml")
+
+                    # Prefer TRADE_LOG_FILE if set by config/loader
+                    log_file = cfg.get("TRADE_LOG_FILE")
+                    if not log_file:
+                        broker = cfg.get("BROKER", "robinhood")
+                        env = cfg.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
+                        from utils.scoped_files import get_scoped_paths  # type: ignore
+                        log_file = get_scoped_paths(broker, env)["trade_history"]
+                except Exception:
+                    # Computed scoped fallback (legacy-safe)
+                    try:
+                        from utils.scoped_files import get_scoped_paths  # type: ignore
+                        log_file = get_scoped_paths("robinhood", "live")["trade_history"]
+                    except Exception:
+                        # Last resort legacy path
+                        log_file = "logs/trade_history_robinhood_live.csv"
+
+            log_trade_decision(log_file, trade_data)
             logger.debug(
                 f"[MULTI-SYMBOL] Logged {symbol} decision: {decision} (confidence: {confidence:.2f})"
             )

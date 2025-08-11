@@ -59,7 +59,7 @@ def list_positions(portfolio_manager: PortfolioManager):
 
     for i, pos in enumerate(positions, 1):
         entry_time = datetime.fromisoformat(pos.entry_time).strftime("%m/%d %H:%M")
-        total_cost = pos.entry_premium * pos.contracts
+        total_cost = pos.entry_premium * pos.contracts * 100
         print(
             f"{i:<3} {entry_time:<20} {pos.symbol:<6} {pos.side:<4} ${pos.strike:<7} "
             f"{pos.contracts:<3} ${pos.entry_premium:<7.2f} ${total_cost:<9.2f}"
@@ -68,8 +68,8 @@ def list_positions(portfolio_manager: PortfolioManager):
     print("-" * 80)
     print(f"Total Positions: {len(positions)}")
 
-    # Calculate total exposure
-    total_exposure = sum(pos.entry_premium * pos.contracts for pos in positions)
+    # Calculate total exposure (apply $100 multiplier per contract)
+    total_exposure = sum(pos.entry_premium * pos.contracts * 100 for pos in positions)
     print(f"Total Exposure: ${total_exposure:.2f}")
 
 
@@ -106,7 +106,7 @@ def add_position(portfolio_manager: PortfolioManager):
         print(
             f"\n[SUCCESS] Added position: {side} ${strike} x{contracts} @ ${premium:.2f}"
         )
-        print(f"Total cost: ${premium * contracts:.2f}")
+        print(f"Total cost: ${premium * contracts * 100:.2f}")
 
     except ValueError as e:
         print(f"[ERROR] Invalid input: {e}")
@@ -154,7 +154,7 @@ def show_stats(portfolio_manager: PortfolioManager):
     call_positions = len([p for p in positions if p.side == "CALL"])
     put_positions = len([p for p in positions if p.side == "PUT"])
     total_contracts = sum(p.contracts for p in positions)
-    total_exposure = sum(p.entry_premium * p.contracts for p in positions)
+    total_exposure = sum(p.entry_premium * p.contracts * 100 for p in positions)
     avg_premium = sum(p.entry_premium for p in positions) / total_positions
 
     # Group by symbol
@@ -163,7 +163,7 @@ def show_stats(portfolio_manager: PortfolioManager):
         if pos.symbol not in symbols:
             symbols[pos.symbol] = {"count": 0, "exposure": 0}
         symbols[pos.symbol]["count"] += 1
-        symbols[pos.symbol]["exposure"] += pos.entry_premium * pos.contracts
+        symbols[pos.symbol]["exposure"] += pos.entry_premium * pos.contracts * 100
 
     print("\n" + "=" * 50)
     print("POSITION STATISTICS")

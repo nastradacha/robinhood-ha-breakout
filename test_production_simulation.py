@@ -39,15 +39,9 @@ from utils.multi_symbol_scanner import MultiSymbolScanner
 from utils.portfolio import PortfolioManager
 from utils.bankroll import BankrollManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('logs/production_simulation.log')
-    ]
-)
+# Configure centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/production_simulation.log")
 logger = logging.getLogger(__name__)
 
 class ProductionSimulator:

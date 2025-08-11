@@ -26,10 +26,8 @@ from utils.browser import RobinhoodBot
 from utils.llm import load_config
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/demo_chrome_stability.log")
 logger = logging.getLogger(__name__)
 
 

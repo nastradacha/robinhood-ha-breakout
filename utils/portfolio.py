@@ -362,7 +362,7 @@ class PortfolioManager:
         position: Position,
         exit_premium: float,
         realized_pnl: float,
-        trade_log_file: str = "trade_log.csv",
+        trade_log_file: str = "logs/trade_history.csv",
     ) -> None:
         """
         Log a completed trade with realized P/L to the trade log.
@@ -374,43 +374,31 @@ class PortfolioManager:
             trade_log_file: Path to the trade log CSV file
         """
         try:
-            trade_record = {
+            from .logging_utils import log_trade_decision
+
+            # Map to 15-field scoped ledger schema
+            trade_data = {
                 "timestamp": datetime.now().isoformat(),
                 "symbol": position.symbol,
                 "decision": f"CLOSE_{position.side}",
-                "confidence": 1.0,  # Closing trades are always executed
-                "reason": f"Closing {position.side} position",
-                "current_price": 0,  # Not applicable for closes
+                "confidence": 1.0,
+                "current_price": "",
                 "strike": position.strike,
-                "expiry": position.expiry,
+                "premium": position.entry_premium,  # entry premium
                 "quantity": position.contracts,
-                "entry_premium": position.entry_premium,
-                "exit_premium": exit_premium,
                 "total_cost": position.entry_premium * position.contracts * 100,
-                "total_proceeds": exit_premium * position.contracts * 100,
-                "realized_pnl": realized_pnl,
-                "llm_tokens": 0,  # Not applicable for closes
-                "bankroll_before": 0,  # Will be filled by caller
-                "bankroll_after": 0,  # Will be filled by caller
+                "reason": f"Closing {position.side} position",
                 "status": "CLOSED",
+                "fill_price": exit_premium,  # exit premium
+                "pnl_pct": "",
+                "pnl_amount": realized_pnl,
+                "exit_reason": "",
             }
 
-            # Check if trade log exists, create with headers if not
-            trade_log_path = Path(trade_log_file)
-            file_exists = trade_log_path.exists()
-
-            with open(trade_log_file, "a", newline="") as f:
-                fieldnames = list(trade_record.keys())
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-
-                if not file_exists:
-                    writer.writeheader()
-
-                writer.writerow(trade_record)
+            log_trade_decision(trade_log_file, trade_data)
 
             logger.info(
-                f"Logged realized trade: {position.symbol} {position.side} "
-                f"P/L: ${realized_pnl:.2f}"
+                f"Logged realized trade: {position.symbol} {position.side} P/L: ${realized_pnl:.2f}"
             )
 
         except Exception as e:

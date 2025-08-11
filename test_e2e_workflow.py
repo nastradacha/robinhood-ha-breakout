@@ -43,11 +43,9 @@ def load_config():
         return yaml.safe_load(f)
 import logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/test_e2e_workflow.log")
 logger = logging.getLogger(__name__)
 
 

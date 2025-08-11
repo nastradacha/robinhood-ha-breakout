@@ -3,8 +3,8 @@
 Functions
 ---------
 load_recent(n: int) -> list[dict]
-    Return a list of the last *n* trades from ``trade_history.csv`` (or
-    ``TRADE_LOG_FILE`` configured in *config.yaml*).  The function is
+    Return a list of the last *n* trades from the scoped trade history CSV
+    (``TRADE_LOG_FILE`` resolved from config via broker/env). The function is
     purposely lightweight and avoids pandas for performance.
 
 Returned dict schema::
@@ -23,21 +23,41 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict
+import csv
 
 # NOTE: Avoid circular import by not importing utils.llm at module load time.
-DEFAULT_TRADE_FILE = Path("logs/trade_log.csv")
+# Default to scoped robinhood/live path if config is unavailable.
+DEFAULT_TRADE_FILE = Path("logs/trade_history_robinhood_live.csv")
 
 
-def _classify_result(pnl_pct: str) -> str:
-    """Return WIN / LOSS / FLAT given the PnL percent string."""
-    try:
-        pnl = float(pnl_pct)
-    except (TypeError, ValueError):
-        return "FLAT"
-    if pnl > 0.1:
-        return "WIN"
-    if pnl < -0.1:
-        return "LOSS"
+def _classify_from_row(row: Dict[str, str]) -> str:
+    """Return WIN / LOSS / FLAT using pnl_pct, then pnl_amount as fallback."""
+    # Prefer explicit percent if present
+    pnl_pct_val = row.get("pnl_pct")
+    if pnl_pct_val not in (None, ""):
+        try:
+            pnl = float(pnl_pct_val)
+            if pnl > 0.1:
+                return "WIN"
+            if pnl < -0.1:
+                return "LOSS"
+            return "FLAT"
+        except (TypeError, ValueError):
+            pass
+
+    # Fallback to absolute P&L amount sign
+    pnl_amt_val = row.get("pnl_amount") or row.get("pnl")
+    if pnl_amt_val not in (None, ""):
+        try:
+            pnl_amt = float(pnl_amt_val)
+            if pnl_amt > 0:
+                return "WIN"
+            if pnl_amt < 0:
+                return "LOSS"
+            return "FLAT"
+        except (TypeError, ValueError):
+            pass
+
     return "FLAT"
 
 
@@ -65,37 +85,52 @@ def load_recent(
     if not tf_path.exists():
         return []
 
-    # Read file backwards efficiently
-    rows: List[List[str]] = []
+    # Read CSV using DictReader for schema-robust parsing
+    records: List[Dict[str, str]] = []
     with tf_path.open(newline="", encoding="utf-8") as fh:
-        for line in fh:
-            rows.append(line.rstrip("\n").split(","))
+        reader = csv.DictReader(fh)
+        for row in reader:
+            # Skip completely malformed rows
+            if not row:
+                continue
+            records.append(row)
 
-    recent_rows = rows[-n:]
+    recent_rows = records[-n:]
     results: List[Dict[str, str]] = []
-    for r in recent_rows:
-        if len(r) < 11:
-            # malformed legacy row
-            continue
-        ts_raw, symbol, action, *_rest, pnl_pct, _status, _reason = r + [""] * (
-            12 - len(r)
+    for row in recent_rows:
+        ts_raw = (row.get("timestamp") or "").strip()
+        # Decision normalization across schemas
+        raw_decision = (
+            row.get("decision")
+            or row.get("action")
+            or row.get("direction")
+            or "NO_TRADE"
         )
+        decision = "NO_TRADE"
+        if isinstance(raw_decision, str):
+            rd = raw_decision.upper()
+            if "NO_TRADE" in rd:
+                decision = "NO_TRADE"
+            elif "CALL" in rd:
+                decision = "CALL"
+            elif "PUT" in rd:
+                decision = "PUT"
+            else:
+                decision = rd
+
+        # Timestamp -> HH:MM
         stamp = ""
-        try:
-            stamp = datetime.fromisoformat(ts_raw).strftime("%H:%M")
-        except ValueError:
-            # fallback – try space‐separated datetime
+        if ts_raw:
             try:
-                stamp = datetime.strptime(ts_raw[:19], "%Y-%m-%d %H:%M:%S").strftime(
-                    "%H:%M"
-                )
-            except Exception:
-                stamp = ts_raw[-5:]
-        decision = (
-            "NO_TRADE"
-            if action == "NO_TRADE"
-            else ("CALL" if "CALL" in action else "PUT")
-        )
-        result = _classify_result(pnl_pct)
+                stamp = datetime.fromisoformat(ts_raw).strftime("%H:%M")
+            except ValueError:
+                try:
+                    stamp = datetime.strptime(ts_raw[:19], "%Y-%m-%d %H:%M:%S").strftime(
+                        "%H:%M"
+                    )
+                except Exception:
+                    stamp = ts_raw[-5:]
+
+        result = _classify_from_row(row)
         results.append({"stamp": stamp, "decision": decision, "result": result})
     return results

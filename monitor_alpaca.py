@@ -41,12 +41,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("logs/monitor_alpaca.log"), logging.StreamHandler()],
-)
+# Configure centralized logging
+from utils.logging_utils import setup_logging
+setup_logging(log_level="INFO", log_file="logs/monitor_alpaca.log")
 logger = logging.getLogger(__name__)
 
 
@@ -62,6 +59,26 @@ class EnhancedPositionMonitor:
         """Initialize monitor with Alpaca and fallback data sources."""
         self.alpaca = AlpacaClient()
         self.slack = EnhancedSlackIntegration()
+
+        # Load config and resolve broker/env-scoped positions file
+        try:
+            from utils.llm import load_config  # lazy import to avoid cycles
+            config = load_config("config.yaml")
+
+            broker = config.get("BROKER", "robinhood")
+            env = config.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
+
+            # Prefer explicit POSITIONS_FILE from config (populated by load_config)
+            positions_file = config.get("POSITIONS_FILE")
+            if not positions_file:
+                # Fallback to scoped resolver if needed
+                from utils.scoped_files import get_scoped_paths  # type: ignore
+                positions_file = get_scoped_paths(broker, env)["positions"]
+        except Exception:
+            # Ultimate fallback to legacy filename
+            positions_file = "positions.csv"
+
+        self.positions_file = positions_file
 
         # Initialize advanced exit strategies
         try:
@@ -87,6 +104,7 @@ class EnhancedPositionMonitor:
         logger.info("[MONITOR] Enhanced position monitor initialized")
         logger.info(f"[MONITOR] Alpaca enabled: {self.alpaca.enabled}")
         logger.info(f"[MONITOR] Slack enabled: {self.slack.enabled}")
+        logger.info(f"[MONITOR] Positions file: {self.positions_file}")
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         """
@@ -168,11 +186,11 @@ class EnhancedPositionMonitor:
         return estimate
 
     def load_positions(self) -> List[Dict]:
-        """Load current positions from CSV file."""
+        """Load current positions from the scoped CSV file."""
         positions = []
 
         try:
-            with open("positions.csv", "r", newline="") as file:
+            with open(self.positions_file, "r", newline="") as file:
                 reader = csv.DictReader(file)
                 for row in reader:
                     # Convert numeric fields and map CSV columns to expected fields
@@ -188,7 +206,7 @@ class EnhancedPositionMonitor:
             return positions
 
         except FileNotFoundError:
-            logger.warning("[MONITOR] No positions.csv found")
+            logger.warning(f"[MONITOR] Positions file not found: {self.positions_file}")
             return []
         except Exception as e:
             logger.error(f"[MONITOR] Error loading positions: {e}")

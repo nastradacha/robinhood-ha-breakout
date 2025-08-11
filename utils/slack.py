@@ -519,7 +519,7 @@ class SlackNotifier:
         # Add position-specific fields for CLOSE trades
         if action == "CLOSE":
             entry_premium = kwargs.get("entry_premium", 0.0)
-            entry_cost = entry_premium * quantity
+            entry_cost = entry_premium * quantity * 100
             potential_pnl = total_cost - entry_cost
             pnl_pct = (potential_pnl / entry_cost * 100) if entry_cost > 0 else 0
 

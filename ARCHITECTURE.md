@@ -15,7 +15,11 @@ Think of the Robinhood HA Breakout system like a **smart factory** that processe
      (SPY, QQQ, IWM)      (Concurrent)        (Best First)         (Conservative)        (Manual Review)
 ```
 
-**New in v2.2.0**: The system now operates like a **professional trading desk** with enhanced intelligence:
+**New in v0.9.0**: The system now operates like a **professional trading desk** with multi-broker support and enhanced intelligence:
+- **🏦 Multi-Broker Support**: Alpaca paper/live trading alongside Robinhood automation
+- **🔒 Environment Isolation**: Separate bankroll ledgers and trade logs per broker/environment
+- **🛡️ Safety Interlocks**: Explicit live trading acknowledgment with automatic paper fallback
+- **📊 Environment Tagging**: All Slack notifications tagged with [PAPER]/[LIVE]/[RH]
 - **Enhanced LLM Decision Engine** with 4 professional-grade market analysis features
 - **Context Memory System** that learns from recent trades and adapts strategy
 - **Robust Data Infrastructure** with automatic fallback for 99.9% uptime
@@ -122,20 +126,71 @@ Each step has specific "workers" (software components) that handle different par
 - `prepare_llm_payload()`: Comprehensive market context preparation
 - `load_recent_trades()`: Context memory injection for adaptive learning
 
-### 3. 💰 **Finance Department** (`utils/bankroll.py`)
-**What it does**: Manages your money and tracks performance
+### 3. 🏦 **Multi-Broker Architecture** (`utils/alpaca_client.py` + `utils/scoped_files.py`) **NEW v0.9.0!**
+**What it does**: Manages multiple trading brokers with complete environment isolation
 
-**Think of it as**: Your personal accountant and risk manager
-- Keeps track of how much money you have
-- Calculates how much to risk on each trade
-- Records all your trades and their results
-- Prevents you from risking too much money
-- Maintains your trading history for taxes
+**Think of it as**: Your multi-bank account manager with separate ledgers for each account
+- **🏦 Alpaca Integration**: Paper and live trading with institutional-grade infrastructure
+- **🤖 Robinhood Integration**: Browser automation with manual confirmation workflow
+- **🔒 Environment Isolation**: Separate bankroll ledgers per broker/environment combination
+- **🛡️ Safety Interlocks**: Explicit live trading acknowledgment with automatic paper fallback
+- **📊 Environment Tagging**: All notifications tagged with [PAPER]/[LIVE]/[RH]
+
+**Broker Support**:
+- **Alpaca Paper**: Risk-free testing with $100,000 virtual account
+- **Alpaca Live**: Real money trading with professional execution infrastructure  
+- **Robinhood**: Browser automation with human oversight and manual confirmation
+
+**File Isolation System**:
+```
+# Complete separation per broker/environment
+bankroll_alpaca_paper.json     # Alpaca paper trading ledger
+bankroll_alpaca_live.json      # Alpaca live trading ledger  
+bankroll_robinhood_live.json   # Robinhood trading ledger
+
+logs/trade_history_alpaca_paper.csv    # Paper trade history
+logs/trade_history_alpaca_live.csv     # Live trade history
+logs/trade_history_robinhood_live.csv  # Robinhood trade history
+
+positions_alpaca_paper.csv     # Paper positions
+positions_alpaca_live.csv      # Live positions
+positions_robinhood_live.csv   # Robinhood positions
+```
 
 **Key Functions**:
-- `get_current_bankroll()`: Tells you how much money you have
-- `calculate_position_size()`: Decides how much to invest
-- `update_bankroll()`: Records profits and losses
+- `AlpacaClient(env="paper"|"live")`: Environment-aware Alpaca client
+- `get_scoped_bankroll_path()`: Returns broker/environment-specific ledger path
+- `get_scoped_trade_history_path()`: Returns scoped trade history file path
+- `ensure_scoped_files_exist()`: Creates scoped files with proper headers
+- `migrate_legacy_files()`: Moves old files to scoped format
+
+**Safety Features**:
+- **Explicit Live Trading Flag**: `--i-understand-live-risk` required for live trading
+- **Automatic Paper Fallback**: Defaults to paper trading if safety flag missing
+- **Environment Validation**: Prevents accidental live trading without acknowledgment
+- **Cross-Contamination Prevention**: No mixing of paper and live data
+
+### 4. 💰 **Money Department** (`utils/bankroll.py`) **ENHANCED v0.9.0!**
+**What it does**: Manages your money with broker/environment-aware ledger tracking
+
+**Think of it as**: Your personal accountant with separate books for each trading account
+- **🔒 Scoped Ledgers**: Separate bankroll files per broker/environment
+- **📊 Environment Tracking**: Each ledger tagged with broker:environment ID
+- **🔄 Backward Compatibility**: Existing files preserved and supported
+- **💰 Risk Management**: Position sizing and capital protection per environment
+
+**Enhanced Features**:
+- **Scoped File Management**: `bankroll_{broker}_{env}.json` naming convention
+- **Ledger ID System**: Returns "broker:env" identifier for tagging
+- **Automatic Seeding**: New ledgers created with START_CAPITAL_DEFAULT
+- **Environment Isolation**: No cross-contamination between environments
+
+**Key Functions**:
+- `BankrollManager(broker, env)`: Environment-aware bankroll management
+- `ledger_id()`: Returns "alpaca:paper" or "robinhood:live" identifier
+- `get_current_bankroll()`: Environment-specific capital tracking
+- `calculate_position_size()`: Risk management per environment
+- `update_bankroll()`: Records profits/losses to correct ledger
 
 ### 4. 🌐 **Automation Department** (`utils/browser.py`)
 **What it does**: Controls your web browser to interact with Robinhood
