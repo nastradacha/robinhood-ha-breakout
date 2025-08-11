@@ -35,7 +35,7 @@ MEMORY_DEPTH: 5  # Number of recent trades to include in LLM context
 GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # Path to SpotGamma CSV cache
 
 # Market Data
-SYMBOLS: ["SPY", "QQQ", "IWM", "VIX", "UVXY"]  # Multi-symbol support for diversified trading
+SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY"]  # Multi-symbol support for diversified trading - "VIX"
 SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility
 TIMEFRAME: "5m"
 DATA_SOURCE: "yfinance"      # Options: "yfinance", "alpaca"
@@ -45,7 +45,7 @@ multi_symbol:
   enabled: true                   # Enable multi-symbol scanning
   max_concurrent_trades: 1        # Maximum trades across all symbols
   symbol_allocation: "equal"      # Options: "equal", "weighted", "priority"
-  priority_order: ["SPY", "QQQ", "IWM", "VIX", "UVXY"]  # Trading priority when multiple signals
+  priority_order: ["SPY", "QQQ", "IWM", "UVXY"]  # Trading priority when multiple signals  "VIX",
 
 # Browser Settings
 HEADLESS: false
