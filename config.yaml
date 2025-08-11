@@ -1,5 +1,14 @@
 # Robinhood HA Breakout Configuration
 
+# Broker & Environment Configuration (v0.9.0)
+BROKER: "robinhood"            # allowed: "alpaca" | "robinhood"
+ALPACA_ENV: "paper"             # allowed: "paper" | "live" (default: paper)
+ALPACA_PAPER_BASE_URL: "https://paper-api.alpaca.markets"
+ALPACA_LIVE_BASE_URL: "https://api.alpaca.markets"
+ALPACA_KEY_ID: "<env:ALPACA_KEY_ID>"
+ALPACA_SECRET_KEY: "<env:ALPACA_SECRET_KEY>"
+START_CAPITAL_DEFAULT: 500      # seed for new ledgers if none exist
+
 # Trading Parameters
 CONTRACT_QTY: 1
 LOOKBACK_BARS: 20
@@ -26,7 +35,7 @@ MEMORY_DEPTH: 5  # Number of recent trades to include in LLM context
 GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # Path to SpotGamma CSV cache
 
 # Market Data
-SYMBOLS: ["SPY", "QQQ", "IWM"]  # Multi-symbol support for diversified trading
+SYMBOLS: ["SPY", "QQQ", "IWM", "VIX", "UVXY"]  # Multi-symbol support for diversified trading
 SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility
 TIMEFRAME: "5m"
 DATA_SOURCE: "yfinance"      # Options: "yfinance", "alpaca"
@@ -36,7 +45,7 @@ multi_symbol:
   enabled: true                   # Enable multi-symbol scanning
   max_concurrent_trades: 1        # Maximum trades across all symbols
   symbol_allocation: "equal"      # Options: "equal", "weighted", "priority"
-  priority_order: ["SPY", "QQQ", "IWM"]  # Trading priority when multiple signals
+  priority_order: ["SPY", "QQQ", "IWM", "VIX", "UVXY"]  # Trading priority when multiple signals
 
 # Browser Settings
 HEADLESS: false

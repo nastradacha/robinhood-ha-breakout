@@ -47,13 +47,17 @@ logs/*.csv
 *.log
 
 # Bankroll and trading data
-bankroll.json
-trade_log.csv
+bankroll*.json
+trade_log*.csv
+positions_*.csv
 
 # Screenshots
 *.png
 *.jpg
 *.jpeg
+
+# Temporarily allow positions.csv access for fixes
+# positions.csv
 
 # Test coverage
 htmlcov/
@@ -94,3 +98,9 @@ Thumbs.db
 *.temp
 temp/
 tmp/
+
+# Backups and reports
+backups/
+reports/
+positions_backup_*.csv
+logs/trade_log_backup_*.csv
