@@ -438,7 +438,7 @@ graph TD
     OO -->|Approved| PP[🚀 Submit Order to Alpaca]
     OO -->|Rejected| QQ[❌ Cancel Order]
     PP --> RR[⏱️ Poll for Fill Status 90s]
-    RR --> SS[📱 Slack: [ALPACA:PAPER/LIVE] Fill Confirmation]
+    RR --> SS[📱 Slack: ALPACA Fill Confirmation]
     
     %% Trade Confirmation Workflow
     II --> TT{User Choice?}
