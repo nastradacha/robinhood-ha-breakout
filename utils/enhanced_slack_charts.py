@@ -233,17 +233,30 @@ class EnhancedSlackChartSender:
         symbol: str
     ):
         """Plot ultra-enhanced price action with crystal-clear visual elements."""
-        # Calculate Heikin-Ashi for smoother visualization
-        ha_data = self._calculate_heikin_ashi(data)
+        # Generate Heikin Ashi data for smoother visualization
+        try:
+            ha_data = self._prepare_heikin_ashi_data(data)
+            # Verify HA columns exist
+            required_ha_cols = ["HA_Open", "HA_High", "HA_Low", "HA_Close"]
+            if not all(col in ha_data.columns for col in required_ha_cols):
+                logger.warning("[ENHANCED-CHARTS] HA columns missing, using regular OHLC")
+                ha_data = data.copy()
+        except Exception as e:
+            logger.warning(f"[ENHANCED-CHARTS] HA data preparation failed: {e}, using regular OHLC")
+            ha_data = data.copy()
         
         # Plot enhanced Heikin-Ashi candles with maximum mobile visibility
         for i, (idx, row) in enumerate(ha_data.iterrows()):
-            is_bullish = row["HA_Close"] >= row["HA_Open"]
+            # Use HA columns if available, otherwise fall back to regular OHLC
+            open_val = row.get("HA_Open", row.get("Open", row["open"]))
+            close_val = row.get("HA_Close", row.get("Close", row["close"]))
+            
+            is_bullish = close_val >= open_val
             color = self.colors["bullish"] if is_bullish else self.colors["bearish"]
             
             # Enhanced candle bodies with better proportions
-            body_height = abs(row["HA_Close"] - row["HA_Open"])
-            body_bottom = min(row["HA_Open"], row["HA_Close"])
+            body_height = abs(close_val - open_val)
+            body_bottom = min(open_val, close_val)
             
             # Ultra-wide candle bodies for mobile clarity
             candle_width = self.chart_config["candle_width"]
@@ -252,9 +265,16 @@ class EnhancedSlackChartSender:
                 facecolor=color, alpha=0.9, linewidth=2, edgecolor=color
             ))
             
-            # Thicker, more visible wicks
-            ax.plot([i, i], [row["HA_Low"], row["HA_High"]], 
-                   color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
+            # Thicker, more visible wicks - with fallback to regular OHLC
+            try:
+                low_val = row["HA_Low"] if "HA_Low" in row else row["Low"]
+                high_val = row["HA_High"] if "HA_High" in row else row["High"]
+                ax.plot([i, i], [low_val, high_val], 
+                       color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
+            except KeyError as e:
+                logger.warning(f"[ENHANCED-CHARTS] Missing column {e}, using regular OHLC")
+                ax.plot([i, i], [row["Low"], row["High"]], 
+                       color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
         
         # Add multiple moving averages for better analysis
         if len(data) >= 20:
