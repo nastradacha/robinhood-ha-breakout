@@ -223,9 +223,9 @@ class AlpacaOptionsTrader:
                 # High-liquidity symbols (SPY, QQQ, IWM)
                 if symbol in ['SPY', 'QQQ', 'IWM']:
                     if is_0dte:
-                        min_oi = min_oi or 1000  # Much lower for 0DTE
-                        min_vol = min_vol or 50   # Much lower for 0DTE
-                        max_spread_pct = max_spread_pct or 12.0
+                        min_oi = min_oi or 500   # Very low for 0DTE - many have 1000-4000
+                        min_vol = min_vol or 0    # Allow zero volume for 0DTE
+                        max_spread_pct = max_spread_pct or 15.0
                     else:
                         min_oi = min_oi or 5000
                         min_vol = min_vol or 500
