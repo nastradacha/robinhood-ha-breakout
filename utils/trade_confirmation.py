@@ -292,8 +292,9 @@ class TradeConfirmationManager:
                 }
             )
 
+            used_premium = actual_premium if actual_premium is not None else trade_details.get("premium", 0)
             logger.info(
-                f"[OK] Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${actual_premium:.2f}"
+                f"[OK] Recorded SUBMITTED trade: {trade_details.get('direction')} ${trade_details.get('strike')} @ ${used_premium:.2f}"
             )
 
             # Auto-start position monitoring if enabled
@@ -388,8 +389,9 @@ class TradeConfirmationManager:
             logger.warning(f"Unrecognized Slack message: {message}")
             return False
 
-        # Record the trade outcome
-        self.record_trade_outcome(self.pending_trade, decision, actual_premium)
+        # Record the trade outcome (copy pending trade before clearing)
+        trade_copy = self.pending_trade.copy()
+        self.record_trade_outcome(trade_copy, decision, actual_premium)
 
         # Clear pending trade
         self.pending_trade = None
@@ -397,7 +399,7 @@ class TradeConfirmationManager:
         # Send confirmation back to Slack
         if self.slack_notifier:
             if decision == "SUBMITTED":
-                confirm_msg = f"[OK] Confirmed via Slack: {self.pending_trade.get('direction')} ${self.pending_trade.get('strike')} @ ${actual_premium:.2f}"
+                confirm_msg = f"[OK] Confirmed via Slack: {trade_copy.get('direction')} ${trade_copy.get('strike')} @ ${actual_premium:.2f}"
             else:
                 confirm_msg = "❌ Confirmed via Slack: Trade cancelled"
             self.slack_notifier.send_heartbeat(confirm_msg)

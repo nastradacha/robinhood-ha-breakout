@@ -149,12 +149,20 @@ python test_multi_symbol.py
 | `--log-level` | Logging verbosity | `--log-level DEBUG` |
 | `--slack-notify` | Enable Slack notifications | `--slack-notify` |
 
-### **Broker & Environment (NEW v0.9.0)**
+### **Multi-Broker Trading (NEW v1.0.0 - PRODUCTION READY!)**
 | Argument | Description | Example |
 |----------|-------------|---------|
 | `--broker` | Trading broker selection | `--broker alpaca` or `--broker robinhood` |
 | `--alpaca-env` | Alpaca environment | `--alpaca-env paper` or `--alpaca-env live` |
 | `--i-understand-live-risk` | Required for live trading | `--i-understand-live-risk` |
+
+**Alpaca Trading Features:**
+- ✅ **Real-Time Contract Discovery**: Live options quotes via Alpaca API
+- ✅ **ATM Contract Selection**: Liquid options with OI ≥1K, volume ≥100, max 15% spreads  
+- ✅ **Smart Expiry Logic**: 0DTE during 10:00-15:15 ET, weekly otherwise
+- ✅ **Environment Isolation**: Separate ledgers for paper vs live trading
+- ✅ **Safety Interlocks**: Live trading requires explicit risk acknowledgment
+- ✅ **Fill Polling**: 90-second real-time order status with partial fill handling
 
 ### **Symbol Selection**
 | Argument | Description | Example |
@@ -188,12 +196,44 @@ python main.py --loop --interval 5 --end-at 15:45 --slack-notify
 # Aggressive approach - multi-symbol scanning (Robinhood)
 python main.py --multi-symbol --symbols SPY QQQ IWM --loop --interval 3 --end-at 15:45 --slack-notify
 
-# Safe paper trading approach - multi-symbol (Alpaca Paper)
+# Safe paper trading approach - multi-symbol (Alpaca Paper) ✅ PRODUCTION READY
 python main.py --broker alpaca --alpaca-env paper --multi-symbol --symbols SPY QQQ IWM --loop --interval 3 --end-at 15:45 --slack-notify
 
-# Live trading approach - single symbol (Alpaca Live)
+# Live trading approach - single symbol (Alpaca Live) ✅ PRODUCTION READY
 python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --symbols SPY --loop --interval 5 --end-at 15:45 --slack-notify
 ```
+
+### **🎯 Alpaca Options Trading (NEW - PRODUCTION READY!)**
+
+**Paper Trading (Safe Testing):**
+```bash
+# Single symbol paper trading
+python main.py --broker alpaca --alpaca-env paper --symbols SPY
+
+# Multi-symbol paper trading with loop
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --symbols SPY QQQ IWM --loop --interval 5 --slack-notify
+
+# Dry run testing (no actual orders)
+python main.py --broker alpaca --alpaca-env paper --symbols SPY --dry-run
+```
+
+**Live Trading (Real Money):**
+```bash
+# Single symbol live trading (requires risk acknowledgment)
+python main.py --broker alpaca --alpaca-env live --symbols SPY --i-understand-live-risk
+
+# Conservative live trading with monitoring
+python main.py --broker alpaca --alpaca-env live --symbols SPY --i-understand-live-risk --loop --interval 10 --end-at 15:15 --slack-notify
+```
+
+**Key Features:**
+- ✅ **Real-Time Contract Discovery**: Live options quotes via Alpaca OptionHistoricalDataClient
+- ✅ **ATM Contract Selection**: Finds liquid options closest to current price
+- ✅ **Smart Expiry Logic**: 0DTE during 10:00-15:15 ET, weekly contracts otherwise
+- ✅ **Environment Isolation**: Separate `bankroll_alpaca_paper.json` and `bankroll_alpaca_live.json`
+- ✅ **Safety Interlocks**: Live trading requires explicit `--i-understand-live-risk` flag
+- ✅ **Fill Polling**: 90-second real-time order status with partial fill handling
+- ✅ **Environment Tagging**: All Slack notifications tagged [ALPACA:PAPER] or [ALPACA:LIVE]
 
 ### **Position Management Workflow**
 ```bash

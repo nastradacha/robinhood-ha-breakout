@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-SPY%20%7C%20QQQ%20%7C%20IWM-orange.svg)](#-multi-symbol-trading-new)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20%7C%20Yahoo-blue.svg)](#-real-time-market-data)
 
@@ -25,12 +25,18 @@
 
 **Think of it as your trading co-pilot** - it does all the heavy lifting, but you're always in the driver's seat for the final decision.
 
-### 🆕 **Latest Features (v0.9.0)**
-- ✅ **Alpaca Paper/Live Trading**: First-class support for Alpaca paper and live environments
-  - 🔒 **Environment Isolation**: Separate bankroll ledgers and trade logs per broker/environment
-  - 🛡️ **Safety Interlocks**: Explicit `--i-understand-live-risk` flag required for live trading
-  - 📊 **Environment Tagging**: All Slack notifications tagged with [PAPER]/[LIVE]/[RH]
-  - 🔄 **Backward Compatibility**: Existing Robinhood workflows remain unchanged
+### 🆕 **Latest Features (v1.0.0 - PRODUCTION READY!)**
+- 🎉 **COMPLETE Alpaca Options Trading Integration**: Fully functional paper & live options trading
+  - ✅ **Real-Time Contract Discovery**: Live options quotes via Alpaca OptionHistoricalDataClient
+  - ✅ **ATM Contract Selection**: Liquid options with OI ≥1K, volume ≥100, max 15% spreads
+  - ✅ **Smart Expiry Logic**: 0DTE during 10:00-15:15 ET, weekly otherwise
+  - ✅ **Environment Isolation**: Separate bankroll ledgers per broker/environment  
+  - ✅ **Safety Interlocks**: `--i-understand-live-risk` flag required for live trading
+  - ✅ **Environment Tagging**: All Slack notifications tagged [ALPACA:PAPER]/[ALPACA:LIVE]
+  - ✅ **Proper Risk Sizing**: Correct 100× options multiplier for position sizing
+  - ✅ **Fill Polling**: Real-time order status with 90s timeout and partial fill handling
+  - ✅ **End-to-End Workflow**: Market analysis → LLM decision → Contract lookup → Order execution
+  - ✅ **Production Testing**: Comprehensive E2E validation confirms full functionality
 - ✅ **Enhanced LLM Decision Engine**: 4 professional-grade features for smarter trades
   - 📊 **VWAP Deviation**: Real-time deviation from 5-minute volume-weighted average price
   - 🎯 **ATM Delta**: Black-Scholes calculated option sensitivity for optimal timing
@@ -197,6 +203,41 @@ python main.py --multi-symbol --symbols SPY QQQ IWM
 4. Navigates to the options page for the best opportunity
 5. Fills out the trade details
 6. **Stops at the Review screen** - you decide whether to submit!
+
+### 🎯 Alpaca Options Trading (NEW - PRODUCTION READY!)
+
+**For professional-grade options trading with real-time data:**
+
+```bash
+# Paper trading (safe testing environment)
+python main.py --broker alpaca --alpaca-env paper --symbols SPY
+
+# Multi-symbol paper trading
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --symbols SPY QQQ IWM
+
+# Live trading (requires explicit risk acknowledgment)
+python main.py --broker alpaca --alpaca-env live --symbols SPY --i-understand-live-risk
+
+# Dry run testing (no actual orders)
+python main.py --broker alpaca --alpaca-env paper --symbols SPY --dry-run
+```
+
+**What happens with Alpaca trading:**
+1. **Real-Time Market Analysis**: Uses Alpaca's professional data feeds for accurate market conditions
+2. **Smart Contract Discovery**: Finds liquid ATM options with proper volume/OI requirements
+3. **Intelligent Expiry Selection**: 0DTE during 10:00-15:15 ET, weekly contracts otherwise
+4. **Risk-Managed Sizing**: Proper 100× options multiplier for accurate position sizing
+5. **Live Order Execution**: Places actual paper/live orders with real-time fill polling
+6. **Environment Isolation**: Separate ledgers for paper vs live trading
+7. **Enhanced Slack Alerts**: All notifications tagged with [ALPACA:PAPER] or [ALPACA:LIVE]
+
+**Key Features:**
+- ✅ **ATM Contract Selection**: Finds strikes closest to current price with tight spreads
+- ✅ **Liquidity Filtering**: Minimum 1K open interest, 100 volume, max 15% spread
+- ✅ **Market Hours Protection**: Blocks new entries after 15:15 ET
+- ✅ **Fill Confirmation**: 90-second polling with partial fill handling
+- ✅ **Scoped Ledgers**: Isolated bankroll tracking per broker/environment
+- ✅ **Safety Interlocks**: Live trading requires explicit `--i-understand-live-risk` flag
 
 ### 🔄 Continuous Loop Mode (NEW!)
 

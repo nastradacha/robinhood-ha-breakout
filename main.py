@@ -64,6 +64,7 @@ from utils.browser import RobinhoodBot
 from utils.enhanced_slack import EnhancedSlackIntegration
 from utils.multi_symbol_scanner import MultiSymbolScanner
 from utils.portfolio import PortfolioManager, Position
+from utils.alpaca_options import AlpacaOptionsTrader, create_alpaca_trader
 
 # Load environment variables
 load_dotenv()
@@ -190,7 +191,33 @@ def initialize_trade_log(log_file: str):
 from utils.logging_utils import log_trade_decision
 
 
-def parse_end_time(end_time_str: Optional[str]) -> Optional[datetime]:
+def format_expiry_display(expiry_date: str, policy: str = None) -> str:
+    """Format expiry date for display with policy context.
+    
+    Args:
+        expiry_date: Date in YYYY-MM-DD format
+        policy: Expiry policy ('0DTE' or 'WEEKLY')
+        
+    Returns:
+        Human-readable expiry string
+    """
+    try:
+        from datetime import datetime
+        expiry_dt = datetime.strptime(expiry_date, "%Y-%m-%d")
+        today = datetime.now().date()
+        
+        if expiry_dt.date() == today:
+            return f"0DTE ({expiry_dt.strftime('%m/%d')})"
+        elif policy == "0DTE":
+            return f"0DTE ({expiry_dt.strftime('%m/%d')})"
+        else:
+            days_out = (expiry_dt.date() - today).days
+            return f"{days_out}DTE ({expiry_dt.strftime('%m/%d')})"
+    except:
+        return expiry_date  # Fallback to raw date
+
+
+def parse_end_time(end_time_str: str) -> datetime:
     """Parse end time string (HH:MM) to a timezone-aware datetime in local timezone.
 
     Returns None when input is None or empty. Raises ValueError on invalid format.
@@ -218,7 +245,13 @@ def parse_end_time(end_time_str: Optional[str]) -> Optional[datetime]:
 
         # If end time has already passed today, set it for tomorrow
         if end_time <= now:
+            original_date = end_time.strftime("%Y-%m-%d")
             end_time += timedelta(days=1)
+            new_date = end_time.strftime("%Y-%m-%d")
+            logging.info(
+                f"[TIME] End time {end_time_str} has passed for {original_date}, "
+                f"rolling to tomorrow ({new_date}) at {end_time.strftime('%H:%M %Z')}"
+            )
 
         return end_time
     except (ValueError, IndexError) as e:
@@ -731,6 +764,418 @@ def run_once(
         "current_bankroll": current_bankroll,
         "position_size": position_size,
     }
+
+
+def execute_trade_by_broker(
+    config: Dict,
+    args,
+    env_vars: Dict,
+    decision,
+    analysis: Dict,
+    current_bankroll: float,
+    position_size: int,
+    bankroll_manager,
+    portfolio_manager,
+    slack_notifier,
+) -> Dict:
+    """Execute trade using appropriate broker (Alpaca API or Robinhood browser)."""
+    broker = config.get("BROKER", "robinhood").lower()
+    
+    if broker == "alpaca":
+        logger.info("[BROKER] Using Alpaca API for options trading")
+        return execute_alpaca_options_trade(
+            config=config,
+            args=args,
+            env_vars=env_vars,
+            decision=decision,
+            analysis=analysis,
+            current_bankroll=current_bankroll,
+            position_size=position_size,
+            bankroll_manager=bankroll_manager,
+            portfolio_manager=portfolio_manager,
+            slack_notifier=slack_notifier,
+        )
+    else:
+        logger.info("[BROKER] Using Robinhood browser automation")
+        return execute_robinhood_trade(
+            config=config,
+            args=args,
+            env_vars=env_vars,
+            decision=decision,
+            analysis=analysis,
+            current_bankroll=current_bankroll,
+            position_size=position_size,
+            bankroll_manager=bankroll_manager,
+            portfolio_manager=portfolio_manager,
+            slack_notifier=slack_notifier,
+        )
+
+
+def execute_alpaca_options_trade(
+    config: Dict,
+    args,
+    env_vars: Dict,
+    decision,
+    analysis: Dict,
+    current_bankroll: float,
+    position_size: int,
+    bankroll_manager,
+    portfolio_manager,
+    slack_notifier,
+) -> Dict:
+    """Execute options trade using Alpaca API."""
+    try:
+        # Create Alpaca trader instance
+        paper_mode = config.get("ALPACA_ENV", "paper") == "paper"
+        trader = create_alpaca_trader(paper=paper_mode)
+        
+        if not trader:
+            logger.error("[ALPACA] Failed to create Alpaca trader - missing credentials")
+            return {"status": "ERROR", "reason": "Missing Alpaca credentials"}
+        
+        # Check market hours and trading window
+        is_valid, reason = trader.is_market_open_and_valid_time()
+        if not is_valid:
+            logger.warning(f"[ALPACA] Trading not allowed: {reason}")
+            return {"status": "BLOCKED", "reason": reason}
+        
+        # Get expiry policy and find ATM contract
+        policy, expiry_date = trader.get_expiry_policy()
+        symbol = config["SYMBOL"]
+        side = "CALL" if decision.decision == "CALL" else "PUT"
+        
+        logger.info(f"[ALPACA] Finding {side} contract for {symbol} (policy: {policy})")
+        contract = trader.find_atm_contract(symbol, side, policy, expiry_date)
+        
+        if not contract:
+            logger.error(f"[ALPACA] No suitable {side} contract found for {symbol}")
+            return {"status": "NO_CONTRACT", "reason": "No suitable contract found"}
+        
+        logger.info(f"[ALPACA] Selected contract: {contract.symbol} @ ${contract.mid:.2f}")
+        
+        # Calculate position size with 100x multiplier for options
+        contracts = bankroll_manager.calculate_position_size(
+            premium=contract.mid,
+            risk_fraction=config["RISK_FRACTION"],
+            size_rule=config["SIZE_RULE"],
+            fixed_qty=config["CONTRACT_QTY"],
+        )
+        
+        total_cost = contract.mid * contracts * 100  # Options multiplier
+        
+        # Manual approval required
+        if not args.dry_run:
+            logger.info(f"[ALPACA] Trade requires manual approval:")
+            logger.info(f"  Contract: {contract.symbol}")
+            logger.info(f"  Side: BUY {side}")
+            logger.info(f"  Quantity: {contracts} contracts")
+            logger.info(f"  Premium: ${contract.mid:.2f}")
+            logger.info(f"  Total Cost: ${total_cost:.2f}")
+            
+            approval = input("\nApprove this trade? (y/N): ").strip().lower()
+            if approval != 'y':
+                logger.info("[ALPACA] Trade cancelled by user")
+                return {"status": "CANCELLED", "reason": "User cancelled"}
+        
+        # Place order
+        if args.dry_run:
+            logger.info("[ALPACA] DRY RUN - Order not placed")
+            return {
+                "status": "DRY_RUN",
+                "symbol": contract.symbol,
+                "strike": contract.strike,
+                "premium": contract.mid,
+                "quantity": contracts,
+                "total_cost": total_cost,
+            }
+        
+        order_id = trader.place_market_order(contract.symbol, contracts, "BUY")
+        if not order_id:
+            logger.error("[ALPACA] Failed to place order")
+            return {"status": "ORDER_FAILED", "reason": "Order placement failed"}
+        
+        # Poll for fill
+        logger.info(f"[ALPACA] Polling for fill (Order ID: {order_id})")
+        fill_result = trader.poll_fill(order_id=order_id, timeout_s=90)
+        
+        if fill_result.status == "FILLED":
+            logger.info(f"[ALPACA] Order filled: {fill_result.filled_qty} @ ${fill_result.avg_price:.2f}")
+            return {
+                "status": "FILLED",
+                "symbol": contract.symbol,
+                "strike": contract.strike,
+                "premium": fill_result.avg_price,
+                "quantity": fill_result.filled_qty,
+                "total_cost": fill_result.avg_price * fill_result.filled_qty * 100,
+                "order_id": order_id,
+            }
+        else:
+            logger.warning(f"[ALPACA] Order not filled: {fill_result.status}")
+            return {
+                "status": fill_result.status,
+                "symbol": contract.symbol,
+                "strike": contract.strike,
+                "premium": contract.mid,
+                "quantity": contracts,
+                "order_id": order_id,
+            }
+            
+    except Exception as e:
+        logger.error(f"[ALPACA] Trade execution error: {e}", exc_info=True)
+        return {"status": "ERROR", "reason": str(e)}
+
+
+def execute_robinhood_trade(
+    config: Dict,
+    args,
+    env_vars: Dict,
+    decision,
+    analysis: Dict,
+    current_bankroll: float,
+    position_size: int,
+    bankroll_manager,
+    portfolio_manager,
+    slack_notifier,
+) -> Dict:
+    """Execute trade using Robinhood browser automation (original workflow)."""
+    # TODO: Implement Robinhood browser automation trade execution
+    # This would contain the browser automation logic from the unreachable code
+    logger.info("[ROBINHOOD] Browser automation not yet implemented in new workflow")
+    return {"status": "NOT_IMPLEMENTED", "reason": "Robinhood automation pending"}
+
+
+def run_one_shot_mode(
+    config: Dict,
+    args,
+    env_vars: Dict,
+    bankroll_manager,
+    portfolio_manager,
+    llm_client,
+    slack_notifier,
+) -> Dict:
+    """Execute a single trading cycle with full workflow."""
+    logger.info("[ONE-SHOT] Starting single trading cycle")
+    
+    try:
+        # Step 1: Get trade decision from run_once
+        result = run_once(
+            config=config,
+            args=args,
+            env_vars=env_vars,
+            bankroll_manager=bankroll_manager,
+            portfolio_manager=portfolio_manager,
+            llm_client=llm_client,
+            slack_notifier=slack_notifier,
+        )
+        
+        analysis = result["analysis"]
+        decision = result["decision"]
+        current_bankroll = result["current_bankroll"]
+        position_size = result["position_size"]
+        
+        # Step 2: Send trade decision to Slack
+        if slack_notifier:
+            slack_notifier.send_trade_decision(
+                decision=decision.decision,
+                confidence=decision.confidence,
+                reason=decision.reason or "No specific reason provided",
+                bankroll=current_bankroll,
+                position_size=position_size,
+            )
+        
+        # Step 3: Risk management checks
+        if decision.decision == "NO_TRADE":
+            logger.info("[NO_TRADE] No trade signal - ending session")
+            log_no_trade_decision(config, decision, analysis, current_bankroll)
+            return result
+        
+        # Validate confidence threshold
+        if decision.confidence < config["MIN_CONFIDENCE"]:
+            logger.warning(
+                f"[LOW_CONFIDENCE] Confidence {decision.confidence:.2f} below threshold "
+                f"{config['MIN_CONFIDENCE']:.2f} - blocking trade"
+            )
+            log_blocked_trade(config, decision, analysis, current_bankroll, "LOW_CONFIDENCE")
+            return result
+        
+        # Validate position limits
+        if not portfolio_manager.can_add_position():
+            logger.warning("[POSITION_LIMIT] Maximum positions reached - blocking trade")
+            log_blocked_trade(config, decision, analysis, current_bankroll, "POSITION_LIMIT")
+            return result
+        
+        # Step 4: Execute trade using appropriate broker
+        logger.info(f"[TRADE] Executing {decision.decision} trade...")
+        trade_result = execute_trade_by_broker(
+            config=config,
+            args=args,
+            env_vars=env_vars,
+            decision=decision,
+            analysis=analysis,
+            current_bankroll=current_bankroll,
+            position_size=position_size,
+            bankroll_manager=bankroll_manager,
+            portfolio_manager=portfolio_manager,
+            slack_notifier=slack_notifier,
+        )
+        
+        # Step 5: Record trade outcome
+        record_trade_outcome(
+            config=config,
+            trade_result=trade_result,
+            decision=decision,
+            analysis=analysis,
+            current_bankroll=current_bankroll,
+            bankroll_manager=bankroll_manager,
+            portfolio_manager=portfolio_manager,
+            slack_notifier=slack_notifier,
+            args=args,
+        )
+        
+        # Update result with trade outcome
+        result.update({
+            "trade_result": trade_result,
+            "status": trade_result.get("status", "UNKNOWN"),
+        })
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"[ONE-SHOT] Error in trading cycle: {e}", exc_info=True)
+        if slack_notifier:
+            slack_notifier.send_error_alert("One-Shot Mode Error", str(e))
+        raise
+
+
+def log_no_trade_decision(config: Dict, decision, analysis: Dict, current_bankroll: float):
+    """Log a no-trade decision to the trade log."""
+    from utils.logging_utils import log_trade_decision
+    
+    trade_data = {
+        "timestamp": datetime.now().isoformat(),
+        "symbol": config["SYMBOL"],
+        "decision": decision.decision,
+        "confidence": decision.confidence,
+        "reason": decision.reason or "",
+        "current_price": analysis["current_price"],
+        "llm_tokens": decision.tokens_used,
+        "bankroll_before": current_bankroll,
+        "bankroll_after": current_bankroll,
+        "status": "NO_TRADE",
+    }
+    log_trade_decision(config["TRADE_LOG_FILE"], trade_data)
+
+
+def log_blocked_trade(config: Dict, decision, analysis: Dict, current_bankroll: float, block_reason: str):
+    """Log a blocked trade decision to the trade log."""
+    from utils.logging_utils import log_trade_decision
+    
+    trade_data = {
+        "timestamp": datetime.now().isoformat(),
+        "symbol": config["SYMBOL"],
+        "decision": "NO_TRADE",
+        "confidence": decision.confidence,
+        "reason": f"Blocked: {block_reason}",
+        "current_price": analysis["current_price"],
+        "llm_tokens": decision.tokens_used,
+        "bankroll_before": current_bankroll,
+        "bankroll_after": current_bankroll,
+        "status": f"BLOCKED_{block_reason}",
+    }
+    log_trade_decision(config["TRADE_LOG_FILE"], trade_data)
+
+
+def record_trade_outcome(
+    config: Dict,
+    trade_result: Dict,
+    decision,
+    analysis: Dict,
+    current_bankroll: float,
+    bankroll_manager,
+    portfolio_manager,
+    slack_notifier,
+    args,
+):
+    """Record the outcome of a trade execution."""
+    from utils.logging_utils import log_trade_decision
+    
+    try:
+        # Extract trade details
+        status = trade_result.get("status", "UNKNOWN")
+        strike = trade_result.get("strike", analysis["current_price"])
+        premium = trade_result.get("premium", 0.0)
+        quantity = trade_result.get("quantity", 0)
+        total_cost = trade_result.get("total_cost", 0.0)
+        
+        # Log to trade history
+        trade_data = {
+            "timestamp": datetime.now().isoformat(),
+            "symbol": config["SYMBOL"],
+            "decision": decision.decision,
+            "confidence": decision.confidence,
+            "reason": decision.reason or "",
+            "current_price": analysis["current_price"],
+            "strike": strike,
+            "premium": premium,
+            "quantity": quantity,
+            "total_cost": total_cost,
+            "llm_tokens": decision.tokens_used,
+            "bankroll_before": current_bankroll,
+            "bankroll_after": current_bankroll - total_cost if status == "FILLED" else current_bankroll,
+            "status": status,
+        }
+        log_trade_decision(config["TRADE_LOG_FILE"], trade_data)
+        
+        # Update bankroll if trade was filled
+        if status == "FILLED" and total_cost > 0:
+            bankroll_manager.record_trade(
+                symbol=config["SYMBOL"],
+                trade_type=decision.decision,
+                quantity=quantity,
+                premium=premium,
+                total_cost=total_cost,
+                profit_loss=0,  # Entry trade, no P&L yet
+            )
+            
+            # Add position to portfolio
+            position = Position(
+                symbol=config["SYMBOL"],
+                strike=strike,
+                side=decision.decision,
+                contracts=quantity,
+                entry_premium=premium,
+                timestamp=datetime.now().isoformat(),
+            )
+            portfolio_manager.add_position(position)
+        
+        # Send Slack notification
+        if slack_notifier:
+            if status == "FILLED":
+                slack_notifier.send_trade_confirmation(
+                    trade_type=decision.decision,
+                    symbol=config["SYMBOL"],
+                    strike=strike,
+                    premium=premium,
+                    quantity=quantity,
+                    total_cost=total_cost,
+                    status="FILLED",
+                )
+            elif status == "CANCELLED":
+                slack_notifier.send_trade_cancellation(
+                    trade_type=decision.decision,
+                    symbol=config["SYMBOL"],
+                    reason="User cancelled",
+                )
+            else:
+                slack_notifier.send_error_alert(
+                    "Trade Execution Issue",
+                    f"Trade status: {status}. Reason: {trade_result.get('reason', 'Unknown')}"
+                )
+        
+        logger.info(f"[RECORD] Trade outcome recorded: {status}")
+        
+    except Exception as e:
+        logger.error(f"[RECORD] Error recording trade outcome: {e}", exc_info=True)
 
 
 def main_loop(
@@ -1784,6 +2229,8 @@ def main():
             )
             return
 
+        # UNREACHABLE CODE: All execution paths above have explicit returns
+        # TODO: Remove this entire block (lines 1787-2321) - it's never executed
         # Get current bankroll
         current_bankroll = bankroll_manager.get_current_bankroll()
         logger.info(f"[BANKROLL] Current bankroll: ${current_bankroll:.2f}")

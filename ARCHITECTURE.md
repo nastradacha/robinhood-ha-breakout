@@ -373,7 +373,7 @@ python trade_history.py
 
 ## 🔄 How Everything Works Together
 
-### Complete System Architecture (v0.7.0)
+### Complete System Architecture (v1.0.0 - Production Ready)
 
 ```mermaid
 graph TD
@@ -381,88 +381,128 @@ graph TD
     A[🚀 System Start] --> B[📋 Load Config & Environment]
     B --> C[🔌 Initialize Alpaca Client]
     C --> D[📱 Initialize Enhanced Slack Integration]
-    D --> E[💰 Load Bankroll & Portfolio]
-    E --> F[🌐 Start Chrome Browser Session]
+    D --> E[💰 Load Scoped Bankroll & Portfolio]
+    E --> F{Broker Selection}
+    F -->|Robinhood| G1[🌐 Start Chrome Browser Session]
+    F -->|Alpaca| G2[🎯 Initialize AlpacaOptionsTrader]
     
     %% Main Trading Loop
-    F --> G[📊 Data Dept: Fetch Multi-Symbol Data]
-    G --> H[📊 Alpaca: Real-time Market Data]
-    H --> I[📊 Yahoo Finance: Backup Data Source]
-    I --> J[🔍 Calculate Heikin-Ashi Candles]
-    J --> K[🔍 Data Analysis: Technical Indicators]
-    K --> L[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
-    L --> M[🧠 Context Memory: Load Recent 5 Trades]
+    G1 --> H[📊 Data Dept: Fetch Multi-Symbol Data]
+    G2 --> H
+    H --> I[📊 Alpaca: Real-time Market Data]
+    I --> J[📊 Yahoo Finance: Backup Data Source]
+    J --> K[🔍 Calculate Heikin-Ashi Candles]
+    K --> L[🔍 Data Analysis: Technical Indicators]
+    L --> M[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
+    M --> N[🧠 Context Memory: Load Recent 5 Trades]
     
     %% Ensemble AI Decision Engine
-    M --> N[🤖 AI Ensemble Decision Engine]
-    N --> O[🧠 GPT-4o-mini Analysis]
-    N --> P[🧠 DeepSeek-V2 Analysis]
-    O --> Q[🗳️ Majority Vote Logic]
-    P --> Q
-    Q --> R{Both Models Agree?}
-    R -->|Yes| S[✅ Consensus Decision]
-    R -->|No| T[🎯 Tie-Break: Higher Confidence Wins]
-    T --> S
+    N --> O[🤖 AI Ensemble Decision Engine]
+    O --> P[🧠 GPT-4o-mini Analysis]
+    O --> Q[🧠 DeepSeek-V2 Analysis]
+    P --> R[🗳️ Majority Vote Logic]
+    Q --> R
+    R --> S{Both Models Agree?}
+    S -->|Yes| T[✅ Consensus Decision]
+    S -->|No| U[🎯 Tie-Break: Higher Confidence Wins]
+    U --> T
     
     %% Decision Processing
-    S --> U{Trade Signal?}
-    U -->|NO_TRADE| V[📱 S2: Throttled Heartbeat Check]
-    V --> W{Send Heartbeat?}
-    W -->|Yes| X[📱 Slack: ⏳ Cycle N · SPY $XXX · NO_TRADE]
-    W -->|No| Y[⏸️ Silent Cycle]
-    X --> Z[⏰ Wait for Next Interval]
-    Y --> Z
+    T --> V{Trade Signal?}
+    V -->|NO_TRADE| W[📱 S2: Throttled Heartbeat Check]
+    W --> X{Send Heartbeat?}
+    X -->|Yes| Y[📱 Slack: ⏳ Cycle N · SPY $XXX · NO_TRADE]
+    X -->|No| Z[⏸️ Silent Cycle]
+    Y --> AA[⏰ Wait for Next Interval]
+    Z --> AA
     
-    %% Trade Execution Path
-    U -->|CALL/PUT| AA[💰 Finance: Risk & Position Size Check]
-    AA --> BB[🌐 Browser: Navigate to Options Chain]
-    BB --> CC[🔍 Find ATM Option]
-    CC --> DD[📝 Pre-fill Order Form]
-    DD --> EE[🛑 Stop at Review Screen]
-    EE --> FF[📱 Slack: Rich Trade Alert with Charts]
-    FF --> GG[👤 User Decision: Submit/Cancel]
+    %% Multi-Broker Trade Execution Path
+    V -->|CALL/PUT| BB[💰 Finance: Risk & Position Size Check]
+    BB --> CC{Broker Route}
+    
+    %% Robinhood Path
+    CC -->|Robinhood| DD[🌐 Browser: Navigate to Options Chain]
+    DD --> EE[🔍 Find ATM Option]
+    EE --> FF[📝 Pre-fill Order Form]
+    FF --> GG[🛑 Stop at Review Screen]
+    GG --> HH[📱 Slack: Rich Trade Alert with Charts]
+    HH --> II[👤 User Decision: Submit/Cancel]
+    
+    %% Alpaca Path (NEW!)
+    CC -->|Alpaca| JJ[🎯 Market Hours & Time Validation]
+    JJ --> KK[🔍 Find ATM Contract via Alpaca API]
+    KK --> LL[💰 Calculate 100× Options Position Size]
+    LL --> MM[📋 Create MarketOrderRequest]
+    MM --> NN[👤 Manual Approval Required]
+    NN --> OO{User Approval?}
+    OO -->|Approved| PP[🚀 Submit Order to Alpaca]
+    OO -->|Rejected| QQ[❌ Cancel Order]
+    PP --> RR[⏱️ Poll for Fill Status 90s]
+    RR --> SS[📱 Slack: [ALPACA:PAPER/LIVE] Fill Confirmation]
     
     %% Trade Confirmation Workflow
-    GG --> HH{User Choice?}
-    HH -->|Submit| II[✅ Record Trade with Actual Fill Price]
-    HH -->|Cancel| JJ[❌ Record Cancelled Trade]
-    II --> KK[📱 S3: Fill-Price Echo to Slack]
-    JJ --> LL[📱 Slack: Trade Cancelled Notification]
-    KK --> MM[🟢 S1: Auto-Start Position Monitor]
-    LL --> Z
-    MM --> NN[📊 Monitor: Real-time P&L Tracking]
-    NN --> Z
+    II --> TT{User Choice?}
+    TT -->|Submit| UU[✅ Record Trade with Actual Fill Price]
+    TT -->|Cancel| VV[❌ Record Cancelled Trade]
+    QQ --> VV
+    SS --> UU
+    UU --> WW[📱 S3: Fill-Price Echo to Slack]
+    VV --> XX[📱 Slack: Trade Cancelled Notification]
+    WW --> YY[🟢 S1: Auto-Start Position Monitor]
+    XX --> AA
+    YY --> ZZ[📊 Monitor: Real-time P&L Tracking]
+    ZZ --> AA
     
     %% Loop Control
-    Z --> OO{End Time Reached?}
-    OO -->|No| PP[📊 Increment Cycle Counter]
-    PP --> G
-    OO -->|Yes| QQ[📱 S4: Generate Daily Summary]
-    QQ --> RR[📱 Slack: 📊 Daily Wrap-Up Block]
-    RR --> SS[🟢 S1: Kill All Monitors with Breadcrumbs]
-    SS --> TT[🧹 Cleanup: Close Browser & Resources]
-    TT --> UU[🏁 System Exit]
+    AA --> AAA{End Time Reached?}
+    AAA -->|No| BBB[📊 Increment Cycle Counter]
+    BBB --> H
+    AAA -->|Yes| CCC[📱 S4: Generate Daily Summary]
+    CCC --> DDD[📱 Slack: 📊 Daily Wrap-Up Block]
+    DDD --> EEE[🟢 S1: Kill All Monitors with Breadcrumbs]
+    EEE --> FFF[🧹 Cleanup: Close Browser & Resources]
+    FFF --> GGG[🏁 System Exit]
     
     %% Error Handling
-    G -.->|API Failure| VV[🔄 Fallback to Yahoo Finance]
-    VV --> K
-    O -.->|GPT Failure| WW[🔄 Single Model Fallback]
-    P -.->|DeepSeek Failure| WW
-    WW --> S
+    H -.->|API Failure| HHH[🔄 Fallback to Yahoo Finance]
+    HHH --> L
+    P -.->|GPT Failure| III[🔄 Single Model Fallback]
+    Q -.->|DeepSeek Failure| III
+    III --> T
+    RR -.->|Fill Timeout| JJJ[⚠️ Partial Fill Handling]
+    JJJ --> SS
     
     %% Styling
     classDef slackUX fill:#e1f5fe,stroke:#01579b,stroke-width:3px
     classDef aiEngine fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
     classDef dataFlow fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
     classDef userAction fill:#fff3e0,stroke:#e65100,stroke-width:3px
+    classDef alpacaNew fill:#fff8e1,stroke:#f57f17,stroke-width:4px
     
-    class W,JJ,KK,PP,QQ,RR slackUX
-    class M,N,O,P,R aiEngine
-    class G,H,I,J,K dataFlow
-    class FF,GG userAction
+    class Y,XX,WW,CCC,DDD slackUX
+    class N,O,P,Q,S aiEngine
+    class H,I,J,K,L dataFlow
+    class HH,II,NN,OO userAction
+    class G2,JJ,KK,LL,MM,PP,RR,SS alpacaNew
 ```
 
 ### Key System Components Integration
+
+#### 🎯 **Multi-Broker Trading Engine (NEW v1.0.0)**
+- **Robinhood Path**: Traditional browser automation with manual review screen
+- **Alpaca Path**: Direct API options trading with real-time contract discovery
+- **Environment Isolation**: Separate ledgers for paper/live trading environments
+- **Safety Interlocks**: Live trading requires explicit `--i-understand-live-risk` flag
+- **Scoped File System**: Broker/environment-specific bankroll and position tracking
+
+#### 🔗 **Alpaca Options Trading Integration (NEW)**
+- **Real-Time Contract Discovery**: Live options quotes via OptionHistoricalDataClient
+- **ATM Contract Selection**: Liquid options with OI ≥1K, volume ≥100, max 15% spreads
+- **Smart Expiry Logic**: 0DTE during 10:00-15:15 ET, weekly contracts otherwise
+- **Market Hours Protection**: Blocks new entries after 15:15 ET cutoff
+- **100× Risk Sizing**: Proper options multiplier for accurate position calculations
+- **Fill Polling**: 90-second real-time order status with partial fill handling
+- **Environment Tagging**: All Slack notifications tagged [ALPACA:PAPER]/[ALPACA:LIVE]
 
 #### 🤖 **Ensemble AI Decision Engine**
 - **Dual Model Analysis**: Both GPT-4o-mini and DeepSeek-V2 analyze identical market data

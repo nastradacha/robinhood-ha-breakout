@@ -189,7 +189,24 @@ class AlpacaClient:
 
                     # Filter for the specific symbol if multi-symbol response
                     if "symbol" in df.columns:
+                        original_count = len(df)
                         df = df[df["symbol"] == symbol]
+                        filtered_count = len(df)
+                        logger.debug(
+                            f"[ALPACA] Symbol filter: {original_count} → {filtered_count} bars "
+                            f"(filtered for {symbol})"
+                        )
+                        if filtered_count == 0:
+                            available_symbols = df["symbol"].unique().tolist() if original_count > 0 else []
+                            logger.warning(
+                                f"[ALPACA] No data found for symbol '{symbol}'. "
+                                f"Available symbols in response: {available_symbols}"
+                            )
+                    else:
+                        logger.debug(
+                            f"[ALPACA] No 'symbol' column found in DataFrame. "
+                            f"Available columns: {df.columns.tolist()}"
+                        )
 
                     logger.debug(f"[ALPACA] Raw DataFrame shape: {df.shape}")
                     logger.debug(

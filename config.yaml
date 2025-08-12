@@ -1,7 +1,7 @@
 # Robinhood HA Breakout Configuration
 
 # Broker & Environment Configuration (v0.9.0)
-BROKER: "robinhood"            # allowed: "alpaca" | "robinhood"
+BROKER: "alpaca"            # allowed: "alpaca" | "robinhood"
 ALPACA_ENV: "paper"             # allowed: "paper" | "live" (default: paper)
 ALPACA_PAPER_BASE_URL: "https://paper-api.alpaca.markets"
 ALPACA_LIVE_BASE_URL: "https://api.alpaca.markets"
@@ -24,9 +24,9 @@ ENSEMBLE_MODELS:
 CHROME_MAJOR: 131            # Chrome major version; null = auto-detect
 
 # Bankroll Management
-START_CAPITAL: 500.0         # USD - Minimum realistic amount for SPY options
-RISK_FRACTION: 0.20          # max % of bankroll you may risk per trade
-SIZE_RULE: "dynamic-qty"       # Options: "fixed-qty", "dynamic-qty"
+START_CAPITAL: 150.0         # USD - Minimum realistic amount for SPY options
+RISK_FRACTION: 0.60          # max % of bankroll you may risk per trade -- default: 0.20 max ~$90 per trade
+SIZE_RULE: "fixed-qty"       # Options: "fixed-qty", "dynamic-qty"
 BANKROLL_FILE: "bankroll.json"
 POSITIONS_FILE: "positions.csv"  # Position tracking ledger
 
@@ -38,7 +38,7 @@ GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # Path to SpotGamma CSV cache
 SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY"]  # Multi-symbol support for diversified trading - "VIX"
 SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility
 TIMEFRAME: "5m"
-DATA_SOURCE: "yfinance"      # Options: "yfinance", "alpaca"
+DATA_SOURCE: "alpaca"      # Options: "yfinance", "alpaca"
 
 # Multi-Symbol Configuration
 multi_symbol:
@@ -53,7 +53,7 @@ IMPLICIT_WAIT: 10
 PAGE_LOAD_TIMEOUT: 30
 
 # Risk Management
-MAX_PREMIUM_PCT: 0.50        # Max premium as % of bankroll
+MAX_PREMIUM_PCT: .70        # Max premium as % of bankroll (conservative) -- default: 0.50,0.35
 MIN_CONFIDENCE: 0.65         # Minimum LLM confidence to trade (conservative)
 IV_THRESHOLD: 45.0           # Implied volatility threshold
 MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lowered for sensitivity)

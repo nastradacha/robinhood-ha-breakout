@@ -175,7 +175,7 @@ class BankrollManager:
 
         if size_rule == "fixed-qty":
             # Check if fixed quantity exceeds risk limits
-            total_risk = premium * fixed_qty
+            total_risk = premium * fixed_qty * 100
             if total_risk > current_bankroll * risk_fraction:
                 logger.warning(
                     f"Fixed quantity ${total_risk:.2f} exceeds risk limit ${current_bankroll * risk_fraction:.2f}"
@@ -186,7 +186,7 @@ class BankrollManager:
         elif size_rule == "dynamic-qty":
             # Calculate maximum contracts based on risk fraction
             max_risk = current_bankroll * risk_fraction
-            max_contracts = int(max_risk // premium)
+            max_contracts = int(max_risk // (premium * 100))
             return max(1, max_contracts)  # At least 1 contract
 
         else:
@@ -207,7 +207,7 @@ class BankrollManager:
             True if trade is within risk limits
         """
         current_bankroll = self.get_current_bankroll()
-        total_risk = premium * quantity
+        total_risk = premium * quantity * 100
         risk_pct = (total_risk / current_bankroll) * 100
 
         if risk_pct > max_risk_pct:
