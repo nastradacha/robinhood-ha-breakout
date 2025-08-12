@@ -720,7 +720,7 @@ def execute_alpaca_multi_symbol_trade(
             trade_details, method="prompt"
         )
         
-        if decision_result == "SUBMIT":
+        if decision_result == "SUBMITTED":
             # Submit order to Alpaca
             logger.info(f"[MULTI-SYMBOL-ALPACA] Submitting {symbol} order to Alpaca...")
             order_id = trader.place_market_order(
