@@ -433,19 +433,41 @@ def execute_multi_symbol_trade(
             f"[MULTI-SYMBOL-EXECUTE] Trade action: {trade_action} for {symbol} {decision}"
         )
 
-        # Initialize or reuse browser bot
-        if not bot:
-            bot = RobinhoodBot(
-                headless=config["HEADLESS"],
-                implicit_wait=config["IMPLICIT_WAIT"],
-                page_load_timeout=config["PAGE_LOAD_TIMEOUT"],
+        # Route to appropriate broker
+        broker = config.get("BROKER", "robinhood").lower()
+        
+        if broker == "alpaca":
+            logger.info(f"[MULTI-SYMBOL-EXECUTE] Using Alpaca API for {symbol} {decision}")
+            # Use Alpaca options trading
+            from utils.alpaca_options import create_alpaca_trader
+            
+            paper_mode = config.get("ALPACA_ENV", "paper") == "paper"
+            trader = create_alpaca_trader(paper=paper_mode)
+            
+            if not trader:
+                logger.error(f"[MULTI-SYMBOL-EXECUTE] Failed to create Alpaca trader for {symbol}")
+                return {"status": "ERROR", "reason": "Missing Alpaca credentials"}
+            
+            # Execute Alpaca trade
+            result = execute_alpaca_multi_symbol_trade(
+                trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action
             )
-            bot.start_browser()
+            return result
+        else:
+            logger.info(f"[MULTI-SYMBOL-EXECUTE] Using Robinhood browser for {symbol} {decision}")
+            # Initialize or reuse browser bot
+            if not bot:
+                bot = RobinhoodBot(
+                    headless=config["HEADLESS"],
+                    implicit_wait=config["IMPLICIT_WAIT"],
+                    page_load_timeout=config["PAGE_LOAD_TIMEOUT"],
+                )
+                bot.start_browser()
 
-            # Login to Robinhood
-            if not bot.login(env_vars["RH_USER"], env_vars["RH_PASS"]):
-                logger.error(f"[MULTI-SYMBOL-EXECUTE] Login failed for {symbol}")
-                return {"bot": bot}
+                # Login to Robinhood
+                if not bot.login(env_vars["RH_USER"], env_vars["RH_PASS"]):
+                    logger.error(f"[MULTI-SYMBOL-EXECUTE] Login failed for {symbol}")
+                    return {"bot": bot}
 
             # Navigate to options chain
             if not bot.navigate_to_options(symbol):
@@ -453,9 +475,9 @@ def execute_multi_symbol_trade(
                     f"[MULTI-SYMBOL-EXECUTE] Failed to navigate to {symbol} options"
                 )
                 return {"bot": bot}
-        else:
-            # Ensure we're on the correct symbol's options page
-            bot.ensure_open(symbol)
+            else:
+                # Ensure we're on the correct symbol's options page
+                bot.ensure_open(symbol)
 
         # Find ATM option and prepare order
         atm_option = bot.find_atm_option(current_price, decision)
@@ -607,6 +629,124 @@ def execute_multi_symbol_trade(
         logger.error(f"[MULTI-SYMBOL-EXECUTE] Error executing {symbol} trade: {e}")
 
     return {"bot": bot}
+
+
+def execute_alpaca_multi_symbol_trade(
+    trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action
+):
+    """Execute multi-symbol trade using Alpaca API."""
+    from utils.trade_confirmation import TradeConfirmationManager
+    
+    symbol = opportunity["symbol"]
+    decision = opportunity["decision"]
+    confidence = opportunity["confidence"]
+    current_price = opportunity["current_price"]
+    reason = opportunity["reason"]
+    
+    try:
+        # Check market hours and trading window
+        is_valid, reason_msg = trader.is_market_open_and_valid_time()
+        if not is_valid:
+            logger.warning(f"[MULTI-SYMBOL-ALPACA] Trading not allowed for {symbol}: {reason_msg}")
+            return {"status": "BLOCKED", "reason": reason_msg}
+        
+        # Get expiry policy and find ATM contract
+        policy, expiry_date = trader.get_expiry_policy()
+        side = "CALL" if decision == "CALL" else "PUT"
+        
+        logger.info(f"[MULTI-SYMBOL-ALPACA] Finding {side} contract for {symbol} (policy: {policy})")
+        contract = trader.find_atm_contract(symbol, side, policy, expiry_date)
+        
+        if not contract:
+            logger.error(f"[MULTI-SYMBOL-ALPACA] No suitable {side} contract found for {symbol}")
+            return {"status": "ERROR", "reason": f"No {side} contract found"}
+        
+        # Get real-time quote for the contract
+        quote = trader.get_option_quote(contract["symbol"])
+        if not quote:
+            logger.error(f"[MULTI-SYMBOL-ALPACA] Failed to get quote for {contract['symbol']}")
+            return {"status": "ERROR", "reason": "Failed to get option quote"}
+        
+        # Calculate position size with real premium
+        premium = quote["ask"]  # Use ask price for buying
+        quantity = bankroll_manager.calculate_position_size(
+            premium=premium,
+            risk_fraction=config["RISK_FRACTION"],
+            size_rule=config["SIZE_RULE"],
+            fixed_qty=config["CONTRACT_QTY"],
+        )
+        
+        # Validate position size
+        total_cost = premium * quantity * 100  # Options multiplier
+        current_bankroll = bankroll_manager.get_current_bankroll()
+        max_risk = current_bankroll * config["RISK_FRACTION"]
+        
+        if total_cost > max_risk:
+            quantity = int(max_risk / (premium * 100))
+            total_cost = premium * quantity * 100
+            logger.warning(f"[MULTI-SYMBOL-ALPACA] Position size adjusted for {symbol}: {quantity} contracts")
+        
+        if quantity <= 0:
+            logger.error(f"[MULTI-SYMBOL-ALPACA] Invalid position size for {symbol}: {quantity}")
+            return {"status": "ERROR", "reason": "Invalid position size"}
+        
+        logger.info(f"[MULTI-SYMBOL-ALPACA] {symbol} order: {quantity} x {contract['symbol']} @ ${premium:.2f}")
+        
+        # Trade confirmation workflow
+        confirmer = TradeConfirmationManager(
+            portfolio_manager=portfolio_manager,
+            bankroll_manager=bankroll_manager,
+            slack_notifier=slack_notifier,
+        )
+        
+        # Prepare trade details
+        trade_details = {
+            "symbol": symbol,
+            "direction": decision,
+            "confidence": confidence,
+            "current_price": current_price,
+            "strike": contract["strike_price"],
+            "quantity": quantity,
+            "premium": premium,
+            "action": trade_action,
+            "reason": reason,
+            "expiry": contract["expiration_date"],
+            "contract_symbol": contract["symbol"],
+        }
+        
+        # Get user confirmation
+        logger.info(f"[MULTI-SYMBOL-ALPACA] Requesting confirmation for {symbol} trade...")
+        decision_result, actual_fill_premium = confirmer.get_user_decision(
+            trade_details, method="prompt"
+        )
+        
+        if decision_result == "SUBMIT":
+            # Submit order to Alpaca
+            logger.info(f"[MULTI-SYMBOL-ALPACA] Submitting {symbol} order to Alpaca...")
+            order_result = trader.place_option_order(
+                contract_symbol=contract["symbol"],
+                quantity=quantity,
+                side="buy",  # Always buying options in this system
+            )
+            
+            if order_result and order_result.get("status") == "filled":
+                logger.info(f"[MULTI-SYMBOL-ALPACA] {symbol} order filled successfully")
+                # Use actual fill price if available
+                if "filled_avg_price" in order_result:
+                    actual_fill_premium = float(order_result["filled_avg_price"])
+            else:
+                logger.error(f"[MULTI-SYMBOL-ALPACA] {symbol} order failed: {order_result}")
+                decision_result = "FAILED"
+        
+        # Record the trade outcome
+        confirmer.record_trade_outcome(trade_details, decision_result, actual_fill_premium)
+        
+        logger.info(f"[MULTI-SYMBOL-ALPACA] {symbol} trade completed: {decision_result}")
+        return {"status": decision_result, "symbol": symbol}
+        
+    except Exception as e:
+        logger.error(f"[MULTI-SYMBOL-ALPACA] Error executing {symbol} trade: {e}")
+        return {"status": "ERROR", "reason": str(e)}
 
 
 def run_once(
