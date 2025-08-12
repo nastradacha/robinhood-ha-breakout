@@ -196,9 +196,9 @@ class AlpacaOptionsTrader:
         side: str,  # 'CALL' or 'PUT'
         policy: str,  # '0DTE' or 'WEEKLY'
         expiry_date: str,
-        min_oi: int = 10000,
-        min_vol: int = 1000,
-        max_spread_pct: float = 8.0
+        min_oi: int = None,
+        min_vol: int = None,
+        max_spread_pct: float = None
     ) -> Optional[ContractInfo]:
         """Find ATM option contract meeting liquidity requirements.
         
@@ -207,14 +207,33 @@ class AlpacaOptionsTrader:
             side: Option type ('CALL' or 'PUT')
             policy: Expiry policy ('0DTE' or 'WEEKLY')
             expiry_date: Target expiry date (YYYY-MM-DD)
-            min_oi: Minimum open interest
-            min_vol: Minimum daily volume
-            max_spread_pct: Maximum bid-ask spread as % of mid
+            min_oi: Minimum open interest (auto-determined if None)
+            min_vol: Minimum daily volume (auto-determined if None)
+            max_spread_pct: Maximum bid-ask spread as % of mid (auto-determined if None)
             
         Returns:
             ContractInfo if suitable contract found, None otherwise
         """
         try:
+            # Set symbol-aware filtering criteria
+            if min_oi is None or min_vol is None or max_spread_pct is None:
+                # High-liquidity symbols (SPY, QQQ, IWM)
+                if symbol in ['SPY', 'QQQ', 'IWM']:
+                    min_oi = min_oi or 5000
+                    min_vol = min_vol or 500
+                    max_spread_pct = max_spread_pct or 8.0
+                # Medium-liquidity symbols (UVXY, VIX, etc.)
+                elif symbol in ['UVXY', 'VIX', 'SQQQ', 'TQQQ']:
+                    min_oi = min_oi or 1000
+                    min_vol = min_vol or 100
+                    max_spread_pct = max_spread_pct or 15.0
+                # Default for other symbols
+                else:
+                    min_oi = min_oi or 2000
+                    min_vol = min_vol or 200
+                    max_spread_pct = max_spread_pct or 12.0
+            
+            logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, max_spread={max_spread_pct}%")
             # Get current stock price for ATM calculation
             from utils.alpaca_client import AlpacaClient
             alpaca_data = AlpacaClient()
@@ -275,13 +294,21 @@ class AlpacaOptionsTrader:
                     spread = ask - bid
                     spread_pct = (spread / mid) * 100 if mid > 0 else 999
                     
-                    # Apply liquidity filters (with type conversion)
-                    if int(contract.open_interest or 0) < min_oi:
+                    # Apply liquidity filters (with type conversion and debugging)
+                    oi = int(contract.open_interest or 0)
+                    vol = int(getattr(contract, 'volume', 0) or 0)
+                    
+                    if oi < min_oi:
+                        logger.debug(f"Filtered {contract.symbol}: OI {oi} < {min_oi}")
                         continue
-                    if hasattr(contract, 'volume') and int(contract.volume or 0) < min_vol:
+                    if vol < min_vol:
+                        logger.debug(f"Filtered {contract.symbol}: Vol {vol} < {min_vol}")
                         continue
                     if spread_pct > max_spread_pct and spread > 0.10:
+                        logger.debug(f"Filtered {contract.symbol}: Spread {spread_pct:.1f}% > {max_spread_pct}%")
                         continue
+                    
+                    logger.debug(f"Candidate {contract.symbol}: OI={oi}, Vol={vol}, Spread={spread_pct:.1f}%, Strike=${float(contract.strike_price):.2f}")
                     
                     # Calculate distance from ATM
                     strike = float(contract.strike_price)
