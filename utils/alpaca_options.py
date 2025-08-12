@@ -215,23 +215,41 @@ class AlpacaOptionsTrader:
             ContractInfo if suitable contract found, None otherwise
         """
         try:
-            # Set symbol-aware filtering criteria
+            # Set symbol-aware and expiry-aware filtering criteria
             if min_oi is None or min_vol is None or max_spread_pct is None:
+                # 0DTE options have different liquidity patterns
+                is_0dte = policy == '0DTE'
+                
                 # High-liquidity symbols (SPY, QQQ, IWM)
                 if symbol in ['SPY', 'QQQ', 'IWM']:
-                    min_oi = min_oi or 5000
-                    min_vol = min_vol or 500
-                    max_spread_pct = max_spread_pct or 8.0
+                    if is_0dte:
+                        min_oi = min_oi or 1000  # Much lower for 0DTE
+                        min_vol = min_vol or 50   # Much lower for 0DTE
+                        max_spread_pct = max_spread_pct or 12.0
+                    else:
+                        min_oi = min_oi or 5000
+                        min_vol = min_vol or 500
+                        max_spread_pct = max_spread_pct or 8.0
                 # Medium-liquidity symbols (UVXY, VIX, etc.)
                 elif symbol in ['UVXY', 'VIX', 'SQQQ', 'TQQQ']:
-                    min_oi = min_oi or 1000
-                    min_vol = min_vol or 100
-                    max_spread_pct = max_spread_pct or 15.0
+                    if is_0dte:
+                        min_oi = min_oi or 100   # Very low for 0DTE
+                        min_vol = min_vol or 10   # Very low for 0DTE
+                        max_spread_pct = max_spread_pct or 20.0
+                    else:
+                        min_oi = min_oi or 1000
+                        min_vol = min_vol or 100
+                        max_spread_pct = max_spread_pct or 15.0
                 # Default for other symbols
                 else:
-                    min_oi = min_oi or 2000
-                    min_vol = min_vol or 200
-                    max_spread_pct = max_spread_pct or 12.0
+                    if is_0dte:
+                        min_oi = min_oi or 500   # Lower for 0DTE
+                        min_vol = min_vol or 25   # Lower for 0DTE
+                        max_spread_pct = max_spread_pct or 15.0
+                    else:
+                        min_oi = min_oi or 2000
+                        min_vol = min_vol or 200
+                        max_spread_pct = max_spread_pct or 12.0
             
             logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, max_spread={max_spread_pct}%")
             # Get current stock price for ATM calculation
