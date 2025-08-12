@@ -277,10 +277,12 @@ class AlpacaOptionsTrader:
                     
                     # Extract quote data (response is keyed by symbol)
                     if not quote_response or contract.symbol not in quote_response:
+                        logger.info(f"Filtered {contract.symbol}: No quote response")
                         continue
                     
                     quote = quote_response[contract.symbol]
                     if not quote or not quote.bid_price or not quote.ask_price:
+                        logger.info(f"Filtered {contract.symbol}: Missing bid/ask prices")
                         continue
                     
                     bid = float(quote.bid_price)
@@ -288,6 +290,7 @@ class AlpacaOptionsTrader:
                     
                     # Skip stale or crossed quotes
                     if bid <= 0 or ask <= 0 or bid >= ask:
+                        logger.info(f"Filtered {contract.symbol}: Invalid quotes - bid=${bid:.2f}, ask=${ask:.2f}")
                         continue
                     
                     mid = (bid + ask) / 2
@@ -299,16 +302,16 @@ class AlpacaOptionsTrader:
                     vol = int(getattr(contract, 'volume', 0) or 0)
                     
                     if oi < min_oi:
-                        logger.debug(f"Filtered {contract.symbol}: OI {oi} < {min_oi}")
+                        logger.info(f"Filtered {contract.symbol}: OI {oi} < {min_oi}")
                         continue
                     if vol < min_vol:
-                        logger.debug(f"Filtered {contract.symbol}: Vol {vol} < {min_vol}")
+                        logger.info(f"Filtered {contract.symbol}: Vol {vol} < {min_vol}")
                         continue
                     if spread_pct > max_spread_pct and spread > 0.10:
-                        logger.debug(f"Filtered {contract.symbol}: Spread {spread_pct:.1f}% > {max_spread_pct}%")
+                        logger.info(f"Filtered {contract.symbol}: Spread {spread_pct:.1f}% > {max_spread_pct}%")
                         continue
                     
-                    logger.debug(f"Candidate {contract.symbol}: OI={oi}, Vol={vol}, Spread={spread_pct:.1f}%, Strike=${float(contract.strike_price):.2f}")
+                    logger.info(f"Candidate {contract.symbol}: OI={oi}, Vol={vol}, Spread={spread_pct:.1f}%, Strike=${float(contract.strike_price):.2f}")
                     
                     # Calculate distance from ATM
                     strike = float(contract.strike_price)
@@ -321,6 +324,7 @@ class AlpacaOptionsTrader:
                         if delta and not (0.45 <= abs(delta) <= 0.55):
                             # Allow some flexibility for ATM contracts
                             if atm_distance > current_price * 0.02:  # > 2% from ATM
+                                logger.info(f"Filtered {contract.symbol}: Delta {delta:.3f} not ATM (distance {atm_distance:.2f})")
                                 continue
                     
                     candidates.append({
@@ -340,8 +344,11 @@ class AlpacaOptionsTrader:
                     continue
             
             if not candidates:
-                logger.warning(f"No suitable {side} contracts found after filtering")
+                logger.warning(f"No suitable {side} contracts found after filtering {len(contract_list)} total contracts")
+                logger.info(f"Consider relaxing filtering criteria for {symbol} if this persists")
                 return None
+            
+            logger.info(f"Found {len(candidates)} suitable {side} candidates for {symbol} after filtering")
             
             # Sort by: ATM distance, then spread, then volume
             candidates.sort(key=lambda x: (
