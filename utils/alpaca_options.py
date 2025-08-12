@@ -646,6 +646,42 @@ class AlpacaOptionsTrader:
         """
         return self.place_market_order(contract_symbol, qty, side="SELL")
 
+    def get_latest_quote(self, contract_symbol: str) -> Optional[Dict]:
+        """Get latest quote for option contract.
+        
+        Args:
+            contract_symbol: OCC-formatted contract symbol
+            
+        Returns:
+            Quote dict with bid/ask prices or None if failed
+        """
+        try:
+            from alpaca.data.requests import OptionLatestQuoteRequest
+            
+            quote_request = OptionLatestQuoteRequest(symbol_or_symbols=contract_symbol)
+            quote_response = self.data_client.get_option_latest_quote(quote_request)
+            
+            if not quote_response or contract_symbol not in quote_response:
+                logger.warning(f"No quote response for {contract_symbol}")
+                return None
+            
+            quote = quote_response[contract_symbol]
+            if not quote or not quote.bid_price or not quote.ask_price:
+                logger.warning(f"Missing bid/ask prices for {contract_symbol}")
+                return None
+            
+            return {
+                "bid": float(quote.bid_price),
+                "ask": float(quote.ask_price),
+                "mid": (float(quote.bid_price) + float(quote.ask_price)) / 2,
+                "spread": float(quote.ask_price) - float(quote.bid_price),
+                "timestamp": quote.timestamp if hasattr(quote, 'timestamp') else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting quote for {contract_symbol}: {e}")
+            return None
+
 
 def create_alpaca_trader(paper: bool = True) -> Optional[AlpacaOptionsTrader]:
     """Create AlpacaOptionsTrader instance with environment credentials.

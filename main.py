@@ -662,7 +662,7 @@ def execute_alpaca_multi_symbol_trade(
             return {"status": "ERROR", "reason": f"No {side} contract found"}
         
         # Get real-time quote for the contract
-        quote = trader.get_option_quote(contract["symbol"])
+        quote = trader.get_latest_quote(contract["symbol"])
         if not quote:
             logger.error(f"[MULTI-SYMBOL-ALPACA] Failed to get quote for {contract['symbol']}")
             return {"status": "ERROR", "reason": "Failed to get option quote"}
