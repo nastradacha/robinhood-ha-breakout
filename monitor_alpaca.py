@@ -35,6 +35,7 @@ from utils.exit_strategies import (
     load_exit_config_from_file,
     ExitReason,
 )
+from utils.exit_confirmation import ExitConfirmationWorkflow
 import yfinance as yf
 from dotenv import load_dotenv
 
@@ -92,9 +93,13 @@ class EnhancedPositionMonitor:
         # Alert tracking to prevent spam
         self.last_alerts = {}
         self.alert_cooldown = 300  # 5 minutes between same alerts
+        
+        # Heartbeat tracking
+        self.heartbeat_counter = 0
+        self.heartbeat_interval = 5  # Send heartbeat every 5 monitoring cycles
 
         # Legacy profit alert levels (kept for compatibility)
-        self.profit_levels = [5, 10, 15, 20, 25, 30]  # Percentages
+        self.profit_levels = [5, 10, 15, 20, 25, 30, 50, 75, 100, 150, 200]  # Percentages
         self.stop_loss_threshold = 25  # 25% loss
 
         # Market hours (ET)
@@ -193,14 +198,28 @@ class EnhancedPositionMonitor:
             with open(self.positions_file, "r", newline="") as file:
                 reader = csv.DictReader(file)
                 for row in reader:
+                    # Skip empty rows
+                    if not any(row.values()):
+                        continue
+                        
                     # Convert numeric fields and map CSV columns to expected fields
-                    row["quantity"] = int(row["contracts"])  # Map contracts -> quantity
-                    row["entry_price"] = float(
-                        row["entry_premium"]
-                    )  # Map entry_premium -> entry_price
-                    row["strike"] = float(row["strike"])
-                    row["option_type"] = row["side"]  # Map side -> option_type
-                    positions.append(row)
+                    try:
+                        row["quantity"] = int(row.get("contracts", 1))  # Map contracts -> quantity with default
+                        row["entry_price"] = float(row.get("entry_premium", 0))  # Map entry_premium -> entry_price
+                        row["strike"] = float(row.get("strike", 0))
+                        row["option_type"] = row.get("side", "CALL")  # Map side -> option_type
+                        
+                        # Ensure required fields exist
+                        if not row.get("symbol") or not row.get("expiry"):
+                            logger.warning(f"[MONITOR] Skipping incomplete position: {row}")
+                            continue
+                            
+                        positions.append(row)
+                        logger.debug(f"[MONITOR] Loaded position: {row['symbol']} ${row['strike']} {row['option_type']}")
+                        
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[MONITOR] Skipping invalid position row: {row} - Error: {e}")
+                        continue
 
             logger.info(f"[MONITOR] Loaded {len(positions)} positions")
             return positions
@@ -324,6 +343,9 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 self.slack.send_stop_loss_alert(
                     symbol, strike, option_type, abs(pnl_pct)
                 )
+            
+            # Launch interactive exit confirmation workflow for trailing stop
+            self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
         elif exit_decision.reason == ExitReason.TIME_BASED:
             message = f"""
@@ -348,6 +370,9 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 self.slack.send_position_alert_with_chart(
                     position, current_price, pnl_pct, "time_based_exit", exit_decision
                 )
+            
+            # Launch interactive exit confirmation workflow for time-based exit
+            self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
         elif exit_decision.reason == ExitReason.STOP_LOSS:
             message = f"""
@@ -372,6 +397,9 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 self.slack.send_stop_loss_alert(
                     symbol, strike, option_type, abs(pnl_pct)
                 )
+            
+            # Launch interactive exit confirmation workflow for stop loss
+            self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
         elif exit_decision.reason == ExitReason.PROFIT_TARGET:
             # Extract profit level from message or use current P&L
@@ -399,12 +427,79 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 self.slack.send_position_alert_with_chart(
                     position, current_price, pnl_pct, "profit_target", exit_decision
                 )
+            
+            # Launch interactive exit confirmation workflow
+            self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
         # Log and print the alert
         logger.info(
             f"[EXIT-STRATEGY] {exit_decision.reason.value.upper()} for {symbol} ${strike} {option_type}"
         )
         print(message)
+
+    def _launch_interactive_exit(
+        self,
+        position: Dict,
+        exit_decision,
+        current_stock_price: float,
+        current_option_price: float,
+    ) -> None:
+        """Launch interactive exit confirmation workflow."""
+        try:
+            # Import Windows-safe exit confirmation workflow
+            from utils.exit_confirmation_safe import SafeExitConfirmationWorkflow
+            exit_workflow = SafeExitConfirmationWorkflow()
+        except ImportError as e:
+            logger.error(f"[EXIT-CONFIRM] Failed to import exit confirmation workflow: {e}")
+            exit_workflow = None
+
+        if exit_workflow is not None:
+            try:
+                # Present interactive confirmation prompt
+                result = exit_workflow.confirm_exit(
+                    position, exit_decision, current_stock_price, current_option_price
+                )
+                
+                # Handle user decision
+                if result.confirmed:
+                    logger.info(f"[EXIT-CONFIRM] User confirmed exit: {result.action} @ ${result.premium:.2f}")
+                    
+                    symbol = position["symbol"]
+                    strike = position["strike"]
+                    option_type = position["option_type"]
+                    quantity = position["quantity"]
+                    
+                    print(f"\n[EXIT CONFIRMED!]")
+                    print(f"Position: {symbol} ${strike} {option_type}")
+                    print(f"Action: SELL {quantity} contract{'s' if quantity != 1 else ''}")
+                    print(f"Price: ${result.premium:.2f}")
+                    print(f"Total Value: ${result.premium * quantity * 100:.2f}")
+                    print("\n[MANUAL ACTION REQUIRED:]")
+                    print("   Log into your broker and execute this sell order manually")
+                    print("\n[PROCESSING EXIT...]")
+                    
+                    # Process confirmed exit (remove position, log trade)
+                    success = exit_workflow.process_confirmed_exit(position, result, exit_decision)
+                    
+                    if success:
+                        print("[OK] Position removed from tracking")
+                        print("[OK] Trade logged to history")
+                        print("[OK] Monitoring will stop for this position")
+                        logger.info(f"[EXIT-CONFIRM] Exit processing completed successfully")
+                    else:
+                        print("[WARNING] Some exit processing steps failed - check logs")
+                        logger.warning(f"[EXIT-CONFIRM] Exit processing had errors")
+                    
+                else:
+                    logger.info("[EXIT-CONFIRM] User cancelled exit - position remains open")
+                    print("\n[CANCEL] Exit cancelled - position monitoring continues")
+                    
+            except Exception as e:
+                logger.error(f"[EXIT-CONFIRM] Error in interactive exit workflow: {e}")
+                print(f"\n[ERROR] Error in exit confirmation: {e}")
+                print("Please exit manually through your broker if desired")
+        else:
+            logger.warning("[EXIT-CONFIRM] Exit workflow not available - please exit manually")
 
     def check_legacy_alerts(
         self,
@@ -497,6 +592,12 @@ Consider taking profits!
         )
         print(message)
 
+    def send_heartbeat(self, message: str) -> None:
+        """Send heartbeat message to confirm system is alive."""
+        if self.slack.enabled:
+            self.slack.send_heartbeat(message)
+        logger.info(f"[HEARTBEAT] {message}")
+
     def send_stop_loss_alert(
         self,
         position: Dict,
@@ -567,12 +668,27 @@ Avoid overnight risk!
     def run_monitoring_cycle(self) -> None:
         """Run one monitoring cycle."""
         positions = self.load_positions()
+        
+        # Increment heartbeat counter
+        self.heartbeat_counter += 1
 
         if not positions:
             logger.info("[MONITOR] No positions to monitor")
+            # Send heartbeat even when no positions
+            if self.heartbeat_counter % self.heartbeat_interval == 0:
+                self.send_heartbeat("📊 Position monitor active - no positions to track")
             return
 
         logger.info(f"[MONITOR] Checking {len(positions)} positions...")
+        
+        # Send heartbeat every N cycles
+        if self.heartbeat_counter % self.heartbeat_interval == 0:
+            position_summary = []
+            for pos in positions:
+                position_summary.append(f"{pos['symbol']} ${pos['strike']} {pos['option_type']}")
+            
+            heartbeat_msg = f"💰 Position monitor active - tracking {len(positions)} position(s): {', '.join(position_summary)}"
+            self.send_heartbeat(heartbeat_msg)
 
         for position in positions:
             try:

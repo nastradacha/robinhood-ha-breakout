@@ -254,7 +254,7 @@ class AlpacaOptionsTrader:
             logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, max_spread={max_spread_pct}%")
             # Get current stock price for ATM calculation
             from utils.alpaca_client import AlpacaClient
-            alpaca_data = AlpacaClient()
+            alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
             current_price = alpaca_data.get_current_price(symbol)
             
             if not current_price:

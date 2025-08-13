@@ -9,10 +9,11 @@
 ### 🏦 **Multi-Broker Trading (NEW v0.9.0)**
 ```bash
 # Alpaca Paper Trading (Safe Testing)
-python main.py --broker alpaca --alpaca-env paper --multi-symbol --loop
+python main.py --broker alpaca --alpaca-env paper --multi-symbol --loop --interval 5 --end-at 15:45 --slack-notify
 
 # Alpaca Live Trading (Real Money - Requires Safety Flag)
 python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --symbols SPY
+python main.py --broker alpaca --alpaca-env live --i-understand-live-risk --multi-symbol --loop --interval 2 --end-at 15:45 --slack-notify
 
 # Robinhood Trading (Browser Automation)
 python main.py --broker robinhood

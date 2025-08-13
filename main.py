@@ -1785,7 +1785,8 @@ def run_multi_symbol_once(
 
     try:
         # Initialize multi-symbol scanner
-        scanner = MultiSymbolScanner(config, llm_client, slack_notifier)
+        alpaca_env = getattr(args, 'alpaca_env', 'paper')
+        scanner = MultiSymbolScanner(config, llm_client, slack_notifier, env=alpaca_env)
 
         # Scan all symbols for opportunities
         opportunities = scanner.scan_all_symbols()
@@ -1862,7 +1863,8 @@ def run_multi_symbol_loop(
     """
 
     # Initialize multi-symbol scanner
-    scanner = MultiSymbolScanner(config, llm_client, slack_notifier)
+    alpaca_env = getattr(args, 'alpaca_env', 'paper')
+    scanner = MultiSymbolScanner(config, llm_client, slack_notifier, env=alpaca_env)
 
     # Send startup notification
     symbols_str = ", ".join(config.get("SYMBOLS", ["SPY"]))

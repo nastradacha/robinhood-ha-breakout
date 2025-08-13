@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_market_data(
-    symbol: str = "SPY", period: str = "5d", interval: str = "5m"
+    symbol: str = "SPY", period: str = "5d", interval: str = "5m", env: str = "paper"
 ) -> pd.DataFrame:
     """
     Fetch market data using Alpaca (real-time) with Yahoo Finance fallback.
@@ -69,12 +69,13 @@ def fetch_market_data(
         symbol: Stock symbol (default: SPY)
         period: Data period (default: 5d for 5 days)
         interval: Data interval (default: 5m for 5 minutes)
+        env: Alpaca environment - "paper" or "live" (default: "paper")
 
     Returns:
         DataFrame with OHLCV data
     """
     # Try Alpaca first (real-time data)
-    alpaca = AlpacaClient()
+    alpaca = AlpacaClient(env=env)
     if alpaca.enabled:
         try:
             data = alpaca.get_market_data(symbol, period)
@@ -122,7 +123,7 @@ def fetch_market_data(
         raise
 
 
-def get_current_price(symbol: str = "SPY") -> float:
+def get_current_price(symbol: str = "SPY", env: str = "paper") -> float:
     """
     Get real-time current price using Alpaca with Yahoo Finance fallback.
 
@@ -131,12 +132,13 @@ def get_current_price(symbol: str = "SPY") -> float:
 
     Args:
         symbol: Stock symbol (default: SPY)
+        env: Alpaca environment - "paper" or "live" (default: "paper")
 
     Returns:
         Current stock price as float
     """
     # Try Alpaca first (real-time)
-    alpaca = AlpacaClient()
+    alpaca = AlpacaClient(env=env)
     if alpaca.enabled:
         current_price = alpaca.get_current_price(symbol)
         if current_price:

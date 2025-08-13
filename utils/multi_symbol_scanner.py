@@ -31,7 +31,7 @@ class MultiSymbolScanner:
     Multi-symbol breakout scanner for diversified trading opportunities.
     """
 
-    def __init__(self, config: Dict, llm_client, slack_notifier=None):
+    def __init__(self, config: Dict, llm_client, slack_notifier=None, env: str = "paper"):
         """
         Initialize multi-symbol scanner.
 
@@ -39,10 +39,12 @@ class MultiSymbolScanner:
             config: Trading configuration
             llm_client: LLM client for trade decisions
             slack_notifier: Slack notification client
+            env: Alpaca environment - "paper" or "live" (default: "paper")
         """
         self.config = config
         self.llm_client = llm_client
         self.slack_notifier = slack_notifier
+        self.env = env
 
         # Multi-symbol configuration
         self.symbols = config.get("SYMBOLS", ["SPY"])
@@ -133,6 +135,7 @@ class MultiSymbolScanner:
                 symbol=symbol,
                 interval=self.config["TIMEFRAME"],
                 period="5d",  # Use 5 days to get enough data for analysis
+                env=self.env
             )
 
             if df is None or df.empty:

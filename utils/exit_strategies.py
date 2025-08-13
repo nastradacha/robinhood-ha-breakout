@@ -260,16 +260,16 @@ class ExitStrategyManager:
         return ExitDecision(False, ExitReason.NO_EXIT, current_pnl_pct)
 
     def _check_profit_targets(self, current_pnl_pct: float) -> ExitDecision:
-        """Check profit targets (informational alerts)."""
+        """Check profit targets (interactive exit prompts)."""
         for target in self.config.profit_targets:
             if current_pnl_pct >= target:
-                # This is informational - not a forced exit
+                # Trigger interactive exit prompt for profit-taking decision
                 return ExitDecision(
-                    should_exit=False,  # Don't force exit, just alert
+                    should_exit=True,  # Trigger interactive exit prompt
                     reason=ExitReason.PROFIT_TARGET,
                     current_pnl_pct=current_pnl_pct,
-                    message=f"Profit target {target}% reached! Consider taking profits ({current_pnl_pct:+.1f}%)",
-                    urgency="normal",
+                    message=f"🎯 PROFIT TARGET {target}% REACHED! Current profit: {current_pnl_pct:+.1f}% - Consider taking profits!",
+                    urgency="high",  # High urgency for profit-taking opportunities
                 )
 
         return ExitDecision(False, ExitReason.NO_EXIT, current_pnl_pct)

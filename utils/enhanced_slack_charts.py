@@ -391,6 +391,10 @@ class EnhancedSlackChartSender:
                bbox=dict(boxstyle="round,pad=0.3", facecolor=self.colors["background"], 
                         alpha=0.8, edgecolor=self.colors["current"], linewidth=1))
     
+    def _prepare_heikin_ashi_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Prepare Heikin-Ashi data for enhanced chart visualization."""
+        return self._calculate_heikin_ashi(data)
+    
     def _calculate_heikin_ashi(self, data: pd.DataFrame) -> pd.DataFrame:
         """Calculate Heikin-Ashi values for smoother visualization."""
         ha_data = data.copy()

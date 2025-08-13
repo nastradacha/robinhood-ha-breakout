@@ -1,0 +1,430 @@
+#!/usr/bin/env python3
+"""
+Windows-Safe Interactive Exit Confirmation Workflow
+
+Provides user-friendly interactive prompts for position exit decisions,
+optimized for Windows console compatibility (no Unicode/emoji characters).
+
+Features:
+- Interactive terminal prompts for exit decisions
+- Support for profit targets, stop losses, and time-based exits
+- Custom premium entry for accurate fill prices
+- Automatic position removal and trade logging
+- Windows console compatible (ASCII only)
+
+Usage:
+    from utils.exit_confirmation_safe import SafeExitConfirmationWorkflow
+    
+    workflow = SafeExitConfirmationWorkflow()
+    result = workflow.confirm_exit(position, exit_decision, current_price)
+"""
+
+import logging
+import sys
+import csv
+import os
+from datetime import datetime
+from typing import Dict, Optional, Tuple, Any
+from dataclasses import dataclass
+
+from utils.exit_strategies import ExitDecision, ExitReason
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExitConfirmationResult:
+    """Result of exit confirmation workflow."""
+    
+    action: str  # "submit", "cancel", "custom_price"
+    premium: Optional[float] = None
+    confirmed: bool = False
+    timestamp: datetime = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
+
+class SafeExitConfirmationWorkflow:
+    """Windows-safe interactive exit confirmation workflow for position management."""
+    
+    def __init__(self):
+        """Initialize exit confirmation workflow."""
+        self.logger = logging.getLogger(__name__)
+        
+        # Import Slack integration if available
+        try:
+            from utils.enhanced_slack import EnhancedSlackIntegration
+            self.slack = EnhancedSlackIntegration()
+        except ImportError:
+            self.slack = None
+            self.logger.warning("[EXIT-CONFIRM] Slack integration not available")
+    
+    def confirm_exit(
+        self, 
+        position: Dict, 
+        exit_decision: ExitDecision, 
+        current_stock_price: float,
+        current_option_price: float
+    ) -> ExitConfirmationResult:
+        """
+        Present interactive exit confirmation prompt to user.
+        
+        Args:
+            position: Position data (symbol, strike, entry_price, etc.)
+            exit_decision: Exit strategy decision with reasoning
+            current_stock_price: Current underlying stock price
+            current_option_price: Current estimated option price
+            
+        Returns:
+            ExitConfirmationResult with user decision
+        """
+        symbol = position["symbol"]
+        strike = position["strike"]
+        option_type = position["option_type"]
+        entry_price = position["entry_price"]
+        quantity = position["quantity"]
+        
+        # Calculate P&L
+        current_value = current_option_price * quantity * 100
+        entry_value = entry_price * quantity * 100
+        pnl = current_value - entry_value
+        pnl_pct = (pnl / entry_value) * 100
+        
+        # Display exit prompt
+        self._display_exit_prompt(
+            position, exit_decision, current_stock_price, 
+            current_option_price, pnl, pnl_pct
+        )
+        
+        # Get user decision
+        return self._get_user_decision(current_option_price)
+    
+    def _display_exit_prompt(
+        self, 
+        position: Dict, 
+        exit_decision: ExitDecision,
+        current_stock_price: float,
+        current_option_price: float,
+        pnl: float,
+        pnl_pct: float
+    ) -> None:
+        """Display formatted exit confirmation prompt (Windows-safe)."""
+        
+        symbol = position["symbol"]
+        strike = position["strike"]
+        option_type = position["option_type"]
+        entry_price = position["entry_price"]
+        quantity = position["quantity"]
+        
+        # Choose title based on exit reason (ASCII only)
+        if exit_decision.reason == ExitReason.PROFIT_TARGET:
+            title = "PROFIT TARGET REACHED"
+            urgency = "[PROFIT]"
+        elif exit_decision.reason == ExitReason.TRAILING_STOP:
+            title = "TRAILING STOP TRIGGERED"
+            urgency = "[TRAIL]"
+        elif exit_decision.reason == ExitReason.STOP_LOSS:
+            title = "STOP LOSS TRIGGERED"
+            urgency = "[STOP]"
+        elif exit_decision.reason == ExitReason.TIME_BASED:
+            title = "TIME-BASED EXIT"
+            urgency = "[TIME]"
+        else:
+            title = "EXIT SIGNAL DETECTED"
+            urgency = "[EXIT]"
+        
+        print("\n" + "="*60)
+        print(f"{urgency} {title} {urgency}")
+        print("="*60)
+        print(f"Position: {symbol} ${strike} {option_type}")
+        print(f"Entry Price: ${entry_price:.2f}")
+        print(f"Current Price: ${current_option_price:.2f}")
+        print(f"Stock Price: ${current_stock_price:.2f}")
+        print(f"Quantity: {quantity} contract{'s' if quantity != 1 else ''}")
+        print()
+        print(f"P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)")
+        print()
+        print(f"Reason: {exit_decision.message}")
+        print()
+        print("Trade: SELL")
+        print(f"Expected Premium: ${current_option_price:.2f}")
+        print(f"Total Value: ${current_option_price * quantity * 100:.2f}")
+        print("-"*60)
+        print("TIP: Away from PC? Send Slack message: 'filled 2.15' or 'cancelled'")
+        print("-"*60)
+        print()
+    
+    def _get_user_decision(self, estimated_premium: float) -> ExitConfirmationResult:
+        """Get user decision through interactive prompt."""
+        
+        while True:
+            print("Options:")
+            print(f"  [S] Submit at expected price (${estimated_premium:.2f})")
+            print("  [C] Cancel exit (keep position open)")
+            print("  [P] Submit at different price (enter custom premium)")
+            print("  [0.XX] Enter premium directly (e.g., 2.15)")
+            print()
+            
+            try:
+                decision = input("Your choice: ").lower().strip()
+                
+                if not decision:
+                    print("[ERROR] Please enter a choice")
+                    continue
+                
+                # Direct premium entry (e.g., "2.15")
+                try:
+                    premium = float(decision)
+                    if 0.01 <= premium <= 50.0:  # Reasonable bounds
+                        print(f"[OK] Submitting SELL order at ${premium:.2f}")
+                        return ExitConfirmationResult(
+                            action="custom_price",
+                            premium=premium,
+                            confirmed=True
+                        )
+                    else:
+                        print("[ERROR] Premium must be between $0.01 and $50.00")
+                        continue
+                except ValueError:
+                    pass  # Not a number, check other options
+                
+                # Standard options
+                if decision == 's':
+                    print(f"[OK] Submitting SELL order at ${estimated_premium:.2f}")
+                    return ExitConfirmationResult(
+                        action="submit",
+                        premium=estimated_premium,
+                        confirmed=True
+                    )
+                
+                elif decision == 'c':
+                    print("[CANCEL] Exit cancelled - keeping position open")
+                    return ExitConfirmationResult(
+                        action="cancel",
+                        confirmed=False
+                    )
+                
+                elif decision == 'p':
+                    # Custom premium entry
+                    while True:
+                        try:
+                            custom_premium = input("Enter sell price: $").strip()
+                            premium = float(custom_premium)
+                            if 0.01 <= premium <= 50.0:
+                                print(f"[OK] Submitting SELL order at ${premium:.2f}")
+                                return ExitConfirmationResult(
+                                    action="custom_price",
+                                    premium=premium,
+                                    confirmed=True
+                                )
+                            else:
+                                print("[ERROR] Premium must be between $0.01 and $50.00")
+                        except ValueError:
+                            print("[ERROR] Please enter a valid number")
+                        except KeyboardInterrupt:
+                            print("\n[CANCEL] Cancelled")
+                            return ExitConfirmationResult(
+                                action="cancel",
+                                confirmed=False
+                            )
+                
+                else:
+                    print("[ERROR] Invalid choice. Please enter S, C, P, or a premium amount")
+                    continue
+                    
+            except KeyboardInterrupt:
+                print("\n[CANCEL] Exit cancelled")
+                return ExitConfirmationResult(
+                    action="cancel",
+                    confirmed=False
+                )
+            except Exception as e:
+                self.logger.error(f"[EXIT-CONFIRM] Error in user input: {e}")
+                print("[ERROR] Error processing input, please try again")
+                continue
+    
+    def remove_position_from_tracking(self, position: Dict) -> bool:
+        """Remove closed position from positions.csv tracking file."""
+        try:
+            # Get positions file path (use scoped files if available)
+            try:
+                from utils.llm import load_config
+                from utils.scoped_files import get_scoped_paths
+                
+                config = load_config("config.yaml")
+                broker = config.get("BROKER", "robinhood")
+                env = config.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
+                positions_file = get_scoped_paths(broker, env)["positions"]
+            except Exception:
+                # Fallback to default positions file
+                positions_file = "positions.csv"
+            
+            if not os.path.exists(positions_file):
+                self.logger.warning(f"[EXIT-CONFIRM] Positions file not found: {positions_file}")
+                return False
+            
+            # Read current positions
+            remaining_positions = []
+            position_found = False
+            
+            with open(positions_file, 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Check if this is the position to remove
+                    if (row.get('symbol') == position['symbol'] and
+                        float(row.get('strike', 0)) == float(position['strike']) and
+                        row.get('side') == position['option_type']):
+                        position_found = True
+                        self.logger.info(f"[EXIT-CONFIRM] Removing position: {position['symbol']} ${position['strike']} {position['option_type']}")
+                    else:
+                        remaining_positions.append(row)
+            
+            if not position_found:
+                self.logger.warning(f"[EXIT-CONFIRM] Position not found in tracking file")
+                return False
+            
+            # Write back remaining positions
+            with open(positions_file, 'w', newline='') as f:
+                if remaining_positions:
+                    fieldnames = remaining_positions[0].keys()
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(remaining_positions)
+                else:
+                    # Write empty file with header only
+                    writer = csv.writer(f)
+                    writer.writerow(['entry_time', 'symbol', 'expiry', 'strike', 'side', 'contracts', 'entry_premium'])
+            
+            self.logger.info(f"[EXIT-CONFIRM] Position removed from tracking file")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[EXIT-CONFIRM] Error removing position from tracking: {e}")
+            return False
+    
+    def log_completed_trade(
+        self, 
+        position: Dict, 
+        exit_result: ExitConfirmationResult,
+        exit_decision: ExitDecision
+    ) -> bool:
+        """Log completed exit trade to trade history."""
+        try:
+            # Get trade log file path (use scoped files if available)
+            try:
+                from utils.llm import load_config
+                from utils.scoped_files import get_scoped_paths
+                
+                config = load_config("config.yaml")
+                broker = config.get("BROKER", "robinhood")
+                env = config.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
+                trade_log_file = get_scoped_paths(broker, env)["trade_history"]
+            except Exception:
+                # Fallback to default trade log file
+                trade_log_file = "logs/trade_log.csv"
+            
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(trade_log_file), exist_ok=True)
+            
+            # Prepare trade log entry
+            symbol = position["symbol"]
+            strike = position["strike"]
+            option_type = position["option_type"]
+            entry_price = position["entry_price"]
+            exit_price = exit_result.premium
+            quantity = position["quantity"]
+            
+            # Calculate P&L
+            entry_value = entry_price * quantity * 100
+            exit_value = exit_price * quantity * 100
+            pnl = exit_value - entry_value
+            pnl_pct = (pnl / entry_value) * 100
+            
+            trade_entry = {
+                'timestamp': datetime.now().isoformat(),
+                'action': 'SELL',
+                'symbol': symbol,
+                'strike': strike,
+                'option_type': option_type,
+                'expiry': position.get('expiry', ''),
+                'quantity': quantity,
+                'premium': exit_price,
+                'total_cost': exit_value,
+                'entry_price': entry_price,
+                'pnl': pnl,
+                'pnl_pct': pnl_pct,
+                'exit_reason': exit_decision.reason.value,
+                'broker': 'manual_execution',
+                'notes': f"Interactive exit: {exit_result.action}"
+            }
+            
+            # Check if file exists and has header
+            file_exists = os.path.exists(trade_log_file)
+            
+            with open(trade_log_file, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=trade_entry.keys())
+                
+                # Write header if file is new
+                if not file_exists:
+                    writer.writeheader()
+                
+                writer.writerow(trade_entry)
+            
+            self.logger.info(f"[EXIT-CONFIRM] Trade logged: {symbol} ${strike} {option_type} SELL @ ${exit_price:.2f} (P&L: ${pnl:+.2f})")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"[EXIT-CONFIRM] Error logging completed trade: {e}")
+            return False
+    
+    def process_confirmed_exit(
+        self, 
+        position: Dict, 
+        exit_result: ExitConfirmationResult,
+        exit_decision: ExitDecision
+    ) -> bool:
+        """Process confirmed exit by removing position and logging trade."""
+        success = True
+        
+        # Remove position from tracking
+        if not self.remove_position_from_tracking(position):
+            success = False
+        
+        # Log completed trade
+        if not self.log_completed_trade(position, exit_result, exit_decision):
+            success = False
+        
+        return success
+
+
+# Example usage and testing
+if __name__ == "__main__":
+    # Test the safe exit confirmation workflow
+    from utils.exit_strategies import ExitDecision, ExitReason
+    
+    # Mock position data
+    position = {
+        "symbol": "SPY",
+        "strike": 550.0,
+        "option_type": "CALL",
+        "entry_price": 2.50,
+        "quantity": 1,
+        "expiry": "2025-08-12"
+    }
+    
+    # Mock exit decision
+    exit_decision = ExitDecision(
+        should_exit=True,
+        reason=ExitReason.PROFIT_TARGET,
+        current_pnl_pct=3547.3,
+        message="PROFIT TARGET 15.0% REACHED! Current profit: +3547.3% - Consider taking profits!",
+        urgency="high"
+    )
+    
+    # Test workflow
+    workflow = SafeExitConfirmationWorkflow()
+    result = workflow.confirm_exit(position, exit_decision, 641.13, 91.18)
+    
+    print(f"\nResult: {result}")
