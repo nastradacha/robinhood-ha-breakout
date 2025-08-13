@@ -35,7 +35,7 @@ MEMORY_DEPTH: 5  # Number of recent trades to include in LLM context
 GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # Path to SpotGamma CSV cache
 
 # Market Data
-SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY"]  # Multi-symbol support for diversified trading - "VIX"
+SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "GLD", "SMH", "XLK", "XLF", "XLE", "DIA", "AAPL", "AMD", "USO", "SLV", "F", "PLTR", "AAL", "SNAP"]  # Enhanced multi-symbol support
 SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility
 TIMEFRAME: "5m"
 DATA_SOURCE: "alpaca"      # Options: "yfinance", "alpaca"
@@ -45,7 +45,8 @@ multi_symbol:
   enabled: true                   # Enable multi-symbol scanning
   max_concurrent_trades: 1        # Maximum trades across all symbols
   symbol_allocation: "equal"      # Options: "equal", "weighted", "priority"
-  priority_order: ["SPY", "QQQ", "IWM", "UVXY"]  # Trading priority when multiple signals  "VIX",
+  # Scan priority (top gets first fill attempts when budget is tight)
+  priority_order: ["SPY", "QQQ", "AAPL", "TLT", "GLD", "IWM", "AMD", "SMH", "XLF", "XLK", "USO", "SLV", "F", "PLTR", "UVXY", "DIA", "AAL", "SNAP"]
 
 # Browser Settings
 HEADLESS: false
@@ -89,8 +90,34 @@ exit_strategies:
   # 3. Traditional stop loss (capital protection)
   # 4. Profit targets (informational alerts)
 
-
-
+# Alpaca Options Configuration
+alpaca:
+  # Global spread and liquidity guards
+  max_spread_pct: 8               # Maximum bid-ask spread as % of mid price
+  max_spread_abs: 0.10            # Maximum absolute bid-ask spread ($)
+  
+  # Symbol-specific minimum open interest requirements
+  min_open_interest:
+    default: 10000                # Default minimum for unlisted symbols
+    SPY: 20000                    # Highest liquidity ETF
+    QQQ: 15000                    # Tech ETF
+    IWM: 10000                    # Small cap ETF
+    AAPL: 10000                   # Blue chip stock
+    AMD: 8000                     # Tech stock
+    SMH: 8000                     # Semiconductor ETF
+    TLT: 8000                     # Treasury ETF
+    GLD: 8000                     # Gold ETF
+    XLK: 6000                     # Technology sector ETF
+    XLF: 6000                     # Financial sector ETF
+    XLE: 6000                     # Energy sector ETF
+    USO: 6000                     # Oil ETF
+    SLV: 6000                     # Silver ETF
+    DIA: 6000                     # Dow Jones ETF
+    F: 5000                       # Ford stock
+    PLTR: 5000                    # Palantir stock
+    UVXY: 5000                    # Volatility ETF
+    AAL: 4000                     # American Airlines stock
+    SNAP: 4000                    # Snapchat stock
 
 # Logging
 LOG_LEVEL: "INFO"
