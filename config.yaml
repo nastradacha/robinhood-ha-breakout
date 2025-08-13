@@ -45,6 +45,7 @@ multi_symbol:
   enabled: true                   # Enable multi-symbol scanning
   max_concurrent_trades: 1        # Maximum trades across all symbols
   symbol_allocation: "equal"      # Options: "equal", "weighted", "priority"
+  scan_interval_seconds: 60       # Reduced from 120s to 60s for rapid breakout detection
   # Scan priority (top gets first fill attempts when budget is tight)
   priority_order: ["SPY", "QQQ", "AAPL", "TLT", "GLD", "IWM", "AMD", "SMH", "XLF", "XLK", "USO", "SLV", "F", "PLTR", "UVXY", "DIA", "AAL", "SNAP"]
 
@@ -95,6 +96,11 @@ alpaca:
   # Global spread and liquidity guards
   max_spread_pct: 8               # Maximum bid-ask spread as % of mid price
   max_spread_abs: 0.10            # Maximum absolute bid-ask spread ($)
+  
+  # Enhanced breakout detection for rapid moves (QQQ PUT fix)
+  rapid_move_threshold: 0.5       # Trigger analysis on >0.5% moves in 5min
+  volume_spike_multiplier: 1.5    # Volume must be 1.5x average for rapid moves
+  breakout_sensitivity: "high"    # Options: "low", "medium", "high"
   
   # Symbol-specific minimum open interest requirements
   min_open_interest:
