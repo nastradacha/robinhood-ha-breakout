@@ -2,7 +2,7 @@
 
 # Broker & Environment Configuration (v0.9.0)
 BROKER: "alpaca"            # allowed: "alpaca" | "robinhood"
-ALPACA_ENV: "paper"             # allowed: "paper" | "live" (default: paper)
+ALPACA_ENV: "live"              # allowed: "paper" | "live" (default: paper)
 ALPACA_PAPER_BASE_URL: "https://paper-api.alpaca.markets"
 ALPACA_LIVE_BASE_URL: "https://api.alpaca.markets"
 ALPACA_KEY_ID: "<env:ALPACA_KEY_ID>"
@@ -28,14 +28,15 @@ START_CAPITAL: 150.0         # USD - Minimum realistic amount for SPY options
 RISK_FRACTION: 0.90          # max % of bankroll you may risk per trade -- allows up to $135 per trade for QQQ
 SIZE_RULE: "fixed-qty"       # Options: "fixed-qty", "dynamic-qty"
 BANKROLL_FILE: "bankroll.json"
-POSITIONS_FILE: "positions.csv"  # Position tracking ledger
+# POSITIONS_FILE: "positions.csv"  # Position tracking ledger (commented out to use scoped files)
 
 # Memory / Dealer Gamma
 MEMORY_DEPTH: 5  # Number of recent trades to include in LLM context
 GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"  # Path to SpotGamma CSV cache
 
 # Market Data
-SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "GLD", "SMH", "XLK", "XLF", "XLE", "DIA", "AAPL", "AMD", "USO", "SLV", "F", "PLTR", "AAL", "SNAP"]  # Enhanced multi-symbol support
+SYMBOLS: ["SPY", "QQQ", "IWM", "TLT", "GLD", "DIA", "XLK", "XLF", "XLE"]
+# SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "GLD", "SMH", "XLK", "XLF", "XLE", "DIA", "AAPL", "AMD", "USO", "SLV", "F", "PLTR", "AAL", "SNAP"]  # Enhanced multi-symbol support
 SYMBOL: "SPY"                    # Default/fallback symbol for backwards compatibility
 TIMEFRAME: "5m"
 DATA_SOURCE: "alpaca"      # Options: "yfinance", "alpaca"
@@ -110,7 +111,7 @@ alpaca:
     IWM: 10000                    # Small cap ETF
     AAPL: 10000                   # Blue chip stock
     AMD: 8000                     # Tech stock
-    SMH: 8000                     # Semiconductor ETF
+    SMH: 1500                     # Semiconductor ETF (adjusted for very low liquidity)
     TLT: 8000                     # Treasury ETF
     GLD: 8000                     # Gold ETF
     XLK: 6000                     # Technology sector ETF
@@ -124,6 +125,17 @@ alpaca:
     UVXY: 5000                    # Volatility ETF
     AAL: 4000                     # American Airlines stock
     SNAP: 4000                    # Snapchat stock
+  
+  # Options expiry policy per symbol (0DTE vs WEEKLY)
+  expiry_policy:
+    default: "WEEKLY"             # Default to weekly options for better liquidity
+    SPY: "0DTE"                   # SPY has excellent 0DTE liquidity
+    QQQ: "0DTE"                   # QQQ has good 0DTE liquidity
+    AAPL: "0DTE"                  # AAPL has decent 0DTE liquidity
+    XLE: "WEEKLY"                 # XLE better with weekly options
+    XLF: "WEEKLY"                 # Financial sector better with weekly
+    XLK: "WEEKLY"                 # Tech sector better with weekly
+    IWM: "WEEKLY"                 # Small cap better with weekly
 
 # Logging
 LOG_LEVEL: "INFO"

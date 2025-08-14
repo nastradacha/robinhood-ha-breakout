@@ -385,18 +385,83 @@ class SafeExitConfirmationWorkflow:
         exit_result: ExitConfirmationResult,
         exit_decision: ExitDecision
     ) -> bool:
-        """Process confirmed exit by removing position and logging trade."""
-        success = True
-        
-        # Remove position from tracking
-        if not self.remove_position_from_tracking(position):
-            success = False
-        
-        # Log completed trade
-        if not self.log_completed_trade(position, exit_result, exit_decision):
-            success = False
-        
-        return success
+        """Process a confirmed exit decision by submitting order, removing position and logging trade."""
+        try:
+            # Step 1: Submit automatic sell order through Alpaca (if available)
+            order_success = self.submit_automatic_sell_order(position, exit_result)
+            
+            # Step 2: Remove position from tracking
+            success_remove = self.remove_position_from_tracking(position)
+            
+            # Step 3: Log completed trade
+            success_log = self.log_completed_trade(position, exit_result, exit_decision)
+            
+            return order_success and success_remove and success_log
+            
+        except Exception as e:
+            self.logger.error(f"[EXIT-CONFIRM] Error processing confirmed exit: {e}")
+            return False
+    
+    def submit_automatic_sell_order(self, position: Dict, exit_result: ExitConfirmationResult) -> bool:
+        """Submit automatic sell order through Alpaca API."""
+        try:
+            # Check if we're using Alpaca
+            from utils.llm import load_config
+            config = load_config("config.yaml")
+            broker = config.get("BROKER", "robinhood")
+            
+            if broker != "alpaca":
+                print("[INFO] Manual execution required - not using Alpaca API")
+                return True  # Consider success for non-Alpaca brokers
+            
+            # Import and initialize Alpaca options trader
+            from utils.alpaca_options import create_alpaca_trader
+            env = config.get("ALPACA_ENV", "paper")
+            paper_mode = (env == "paper")
+            alpaca_trader = create_alpaca_trader(paper=paper_mode)
+            
+            if not alpaca_trader:
+                print("[WARNING] Alpaca API not available - manual execution required")
+                return True
+            
+            # Build contract symbol for the position
+            symbol = position["symbol"]
+            strike = position["strike"]
+            option_type = position["option_type"]
+            expiry = position["expiry"]
+            quantity = position["quantity"]
+            
+            # Format contract symbol (OCC format)
+            from datetime import datetime
+            expiry_date = datetime.strptime(expiry, "%Y-%m-%d")
+            expiry_str = expiry_date.strftime("%y%m%d")
+            strike_str = f"{int(strike * 1000):08d}"
+            contract_symbol = f"{symbol}{expiry_str}{option_type[0]}{strike_str}"
+            
+            print(f"\n[AUTOMATIC EXECUTION] Submitting sell order...")
+            print(f"Contract: {contract_symbol}")
+            print(f"Quantity: {quantity}")
+            print(f"Expected Price: ${exit_result.premium:.2f}")
+            
+            # Submit market sell order
+            order_id = alpaca_trader.close_position(contract_symbol, quantity)
+            
+            if order_id:
+                print(f"[SUCCESS] Sell order submitted! Order ID: {order_id}")
+                print(f"[INFO] Order will execute at market price")
+                self.logger.info(f"[AUTO-EXIT] Submitted sell order {order_id} for {contract_symbol}")
+                return True
+            else:
+                print(f"[ERROR] Failed to submit sell order - manual execution required")
+                print(f"[MANUAL] Please sell {quantity} contracts of {symbol} ${strike} {option_type}")
+                self.logger.error(f"[AUTO-EXIT] Failed to submit sell order for {contract_symbol}")
+                return False
+                
+        except Exception as e:
+            print(f"[ERROR] Automatic execution failed: {e}")
+            print(f"[MANUAL] Please execute sell order manually at your broker")
+            self.logger.error(f"[AUTO-EXIT] Automatic execution error: {e}")
+            return False
 
 
 # Example usage and testing

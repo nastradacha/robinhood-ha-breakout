@@ -1,54 +1,54 @@
 # 📈 Robinhood HA Breakout Trading Assistant
 
-**Your Personal AI-Powered Multi-Symbol Options Trading Assistant - Safe, Smart, and Always Under Your Control**
+**Fully Automated AI-Powered Options Trading System with Real-Time Alpaca Integration**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen.svg)](CHANGELOG.md)
-[![Multi-Symbol](https://img.shields.io/badge/multi--symbol-SPY%20%7C%20QQQ%20%7C%20IWM-orange.svg)](#-multi-symbol-trading-new)
-[![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20%7C%20Yahoo-blue.svg)](#-real-time-market-data)
+[![Version](https://img.shields.io/badge/version-2.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Multi-Symbol](https://img.shields.io/badge/multi--symbol-19%20Symbols-orange.svg)](#-multi-symbol-trading)
+[![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20API-blue.svg)](#-real-time-market-data)
+[![Automated Execution](https://img.shields.io/badge/execution-Fully%20Automated-green.svg)](#-automated-execution)
 
 ---
 
 ## 🌟 What Is This?
 
-**Robinhood HA Breakout** is like having a professional trading assistant that:
+**Robinhood HA Breakout** is a fully automated options trading system that:
 
-- 📊 **Watches multiple markets** simultaneously (SPY, QQQ, IWM) using advanced chart analysis
-- 🧠 **Makes smart decisions** using artificial intelligence (OpenAI GPT-4o-mini or DeepSeek)
-- 🤖 **Handles the boring stuff** like clicking through Robinhood's interface
-- 🛡️ **Keeps you safe** by never placing trades without your final approval
-- 💰 **Manages your money** responsibly with built-in risk controls
-- 📱 **Sends Slack alerts** with charts and analysis for mobile trading decisions
-- 📈 **Uses real-time data** from Alpaca for professional-grade market information
-- 🔄 **Monitors positions** automatically with profit/loss alerts
+- 📊 **Monitors 19 symbols** simultaneously with real-time Alpaca market data
+- 🧠 **Makes intelligent decisions** using AI (OpenAI GPT-4o-mini or DeepSeek) with advanced market indicators
+- 🚀 **Executes trades automatically** through Alpaca API (paper and live trading)
+- 🎯 **Tracks positions in real-time** with automatic profit-taking at 15% targets
+- 💰 **Manages risk intelligently** with symbol-specific liquidity requirements
+- 📱 **Sends comprehensive Slack alerts** with charts, analysis, and execution confirmations
+- 🔄 **Operates hands-free** with full automation from detection to execution
+- 📈 **Syncs transaction data** directly from Alpaca API for 100% accuracy
 
-**Think of it as your trading co-pilot** - it does all the heavy lifting, but you're always in the driver's seat for the final decision.
+**This is a complete automated trading system** - from market analysis to trade execution, position monitoring, and profit-taking, all running autonomously with your oversight.
 
-### 🆕 **Latest Features (v1.0.0 - PRODUCTION READY!)**
-- 🎉 **COMPLETE Alpaca Options Trading Integration**: Fully functional paper & live options trading
-  - ✅ **Real-Time Contract Discovery**: Live options quotes via Alpaca OptionHistoricalDataClient
-  - ✅ **ATM Contract Selection**: Liquid options with OI ≥1K, volume ≥100, max 15% spreads
-  - ✅ **Smart Expiry Logic**: 0DTE during 10:00-15:15 ET, weekly otherwise
-  - ✅ **Environment Isolation**: Separate bankroll ledgers per broker/environment  
-  - ✅ **Safety Interlocks**: `--i-understand-live-risk` flag required for live trading
-  - ✅ **Environment Tagging**: All Slack notifications tagged [ALPACA:PAPER]/[ALPACA:LIVE]
-  - ✅ **Proper Risk Sizing**: Correct 100× options multiplier for position sizing
-  - ✅ **Fill Polling**: Real-time order status with 90s timeout and partial fill handling
-  - ✅ **End-to-End Workflow**: Market analysis → LLM decision → Contract lookup → Order execution
-  - ✅ **Production Testing**: Comprehensive E2E validation confirms full functionality
-- ✅ **Enhanced LLM Decision Engine**: 4 professional-grade features for smarter trades
-  - 📊 **VWAP Deviation**: Real-time deviation from 5-minute volume-weighted average price
-  - 🎯 **ATM Delta**: Black-Scholes calculated option sensitivity for optimal timing
-  - 💧 **ATM Open Interest**: Liquidity assessment for better trade execution
-  - 🏛️ **Dealer Gamma**: Market maker positioning data for volatility prediction
-- ✅ **Context Memory System**: LLM learns from recent trades for improved decisions
-- ✅ **Multi-Symbol Trading**: Scan SPY, QQQ, and IWM simultaneously
-- ✅ **Real-Time Market Data**: Alpaca integration with professional data feeds
-- ✅ **Enhanced Position Monitoring**: Automated P&L tracking with Slack alerts
-- ✅ **Advanced Exit Strategies**: Trailing stops and time-based exits
-- ✅ **Performance Analytics**: Comprehensive trading statistics and reports
-- ✅ **Mobile-First Slack Integration**: Rich charts and mobile-optimized notifications
+### 🚀 **Current Features (v2.0.0 - FULLY AUTOMATED!)**
+- 🎯 **Complete Automation Pipeline**: End-to-end automated trading system
+  - ✅ **Multi-Symbol Scanning**: 19 symbols with symbol-specific liquidity requirements
+  - ✅ **Real-Time Alpaca Integration**: Live market data and options pricing
+  - ✅ **Automated Trade Execution**: Direct API order submission (paper & live)
+  - ✅ **Intelligent Position Monitoring**: Real-time P&L tracking with 15% profit targets
+  - ✅ **Hands-Free Exit Management**: Automatic sell orders via Alpaca API
+  - ✅ **Transaction Data Sync**: Direct Alpaca API reconciliation ensures no missed trades
+- 🧠 **Advanced AI Decision Engine**: Professional-grade market analysis
+  - 📊 **VWAP Deviation Analysis**: Volume-weighted price deviation detection
+  - 🎯 **ATM Delta Optimization**: Black-Scholes calculated option sensitivity
+  - 💧 **Liquidity Assessment**: Real-time open interest and volume analysis
+  - 🏛️ **Dealer Gamma Integration**: Market maker positioning insights
+  - 🧠 **Context Memory System**: AI learns from recent trading patterns
+- 🔒 **Enterprise-Grade Risk Management**: Multi-layered safety systems
+  - 💰 **Symbol-Specific Risk Controls**: Tailored position sizing per asset
+  - 🛡️ **Environment Isolation**: Separate paper/live bankroll tracking
+  - 🚨 **Real-Time Monitoring**: Continuous position and P&L surveillance
+  - 📊 **Comprehensive Logging**: Full audit trail of all decisions and executions
+- 📱 **Professional Notifications**: Mobile-optimized trading alerts
+  - 📈 **Rich Slack Integration**: Charts, analysis, and execution confirmations
+  - 🎯 **Real-Time Alerts**: Profit targets, stop losses, and market events
+  - 📊 **Performance Reporting**: Daily, weekly, and monthly trading summaries
 
 ---
 
@@ -204,40 +204,43 @@ python main.py --multi-symbol --symbols SPY QQQ IWM
 5. Fills out the trade details
 6. **Stops at the Review screen** - you decide whether to submit!
 
-### 🎯 Alpaca Options Trading (NEW - PRODUCTION READY!)
+### 🚀 Automated Alpaca Trading (FULLY OPERATIONAL)
 
-**For professional-grade options trading with real-time data:**
+**Complete automated trading system with real-time execution:**
 
 ```bash
 # Paper trading (safe testing environment)
-python main.py --broker alpaca --alpaca-env paper --symbols SPY
+python main.py --broker alpaca --symbols SPY
 
-# Multi-symbol paper trading
-python main.py --broker alpaca --alpaca-env paper --multi-symbol --symbols SPY QQQ IWM
+# Multi-symbol automated trading (19 symbols)
+python main.py --broker alpaca --multi-symbol
 
 # Live trading (requires explicit risk acknowledgment)
-python main.py --broker alpaca --alpaca-env live --symbols SPY --i-understand-live-risk
+python main.py --broker alpaca --symbols SPY --i-understand-live-risk
 
-# Dry run testing (no actual orders)
-python main.py --broker alpaca --alpaca-env paper --symbols SPY --dry-run
+# Continuous automated trading with monitoring
+python main.py --broker alpaca --multi-symbol --loop --interval 5 --slack-notify
+
+# Position monitoring only (track existing positions)
+python monitor_alpaca.py --interval 2 --slack-notify
 ```
 
-**What happens with Alpaca trading:**
-1. **Real-Time Market Analysis**: Uses Alpaca's professional data feeds for accurate market conditions
-2. **Smart Contract Discovery**: Finds liquid ATM options with proper volume/OI requirements
-3. **Intelligent Expiry Selection**: 0DTE during 10:00-15:15 ET, weekly contracts otherwise
-4. **Risk-Managed Sizing**: Proper 100× options multiplier for accurate position sizing
-5. **Live Order Execution**: Places actual paper/live orders with real-time fill polling
-6. **Environment Isolation**: Separate ledgers for paper vs live trading
-7. **Enhanced Slack Alerts**: All notifications tagged with [ALPACA:PAPER] or [ALPACA:LIVE]
+**Complete Automated Workflow:**
+1. **Multi-Symbol Scanning**: Monitors 19 symbols simultaneously with real-time Alpaca data
+2. **AI Decision Engine**: Advanced market analysis with VWAP, delta, and gamma indicators
+3. **Automated Execution**: Direct API order submission with no manual intervention
+4. **Real-Time Monitoring**: Continuous position tracking with 15% profit targets
+5. **Automatic Exit Management**: Hands-free sell orders when profit targets hit
+6. **Transaction Sync**: Direct Alpaca API reconciliation ensures 100% accuracy
+7. **Comprehensive Alerts**: Slack notifications for all trading events and P&L updates
 
-**Key Features:**
-- ✅ **ATM Contract Selection**: Finds strikes closest to current price with tight spreads
-- ✅ **Liquidity Filtering**: Minimum 1K open interest, 100 volume, max 15% spread
-- ✅ **Market Hours Protection**: Blocks new entries after 15:15 ET
-- ✅ **Fill Confirmation**: 90-second polling with partial fill handling
-- ✅ **Scoped Ledgers**: Isolated bankroll tracking per broker/environment
-- ✅ **Safety Interlocks**: Live trading requires explicit `--i-understand-live-risk` flag
+**Automation Features:**
+- ✅ **Symbol-Specific Risk Management**: Tailored liquidity requirements per asset
+- ✅ **Intelligent Contract Selection**: ATM options with optimal volume/OI ratios
+- ✅ **Hands-Free Execution**: Complete automation from detection to profit-taking
+- ✅ **Real-Time Data Integration**: Professional Alpaca market feeds
+- ✅ **Advanced Exit Strategies**: 15% profit targets with automatic execution
+- ✅ **Enterprise Logging**: Full audit trail of all decisions and executions
 
 ### 🔄 Continuous Loop Mode (NEW!)
 
@@ -367,29 +370,29 @@ alpaca:
 - **Batch Analysis**: Optional batching for multiple symbols to reduce API costs
 - **Graceful Degradation**: Falls back to safe NO_TRADE decisions on persistent failures
 
-### 📊 Position Monitoring Mode (NEW!)
+### 📊 Position Monitoring (FULLY AUTOMATED)
 
-**Automated real-time position tracking with profit/loss alerts:**
+**Real-time position tracking with automatic profit-taking:**
 
 ```bash
-# Enhanced monitoring with Alpaca real-time data
-python monitor_alpaca.py
+# Standard monitoring (recommended)
+python monitor_alpaca.py --interval 2 --slack-notify
 
-# Integrated monitoring mode
-python main.py --monitor-positions
+# High-frequency monitoring
+python monitor_alpaca.py --interval 1 --slack-notify
 
-# Custom monitoring intervals
-python main.py --monitor-positions --interval 1  # Every 1 minute
+# Monitoring with custom profit targets
+python monitor_alpaca.py --interval 2 --slack-notify --profit-target 20
 ```
 
-**What position monitoring does:**
-- ✅ **Real-time P&L tracking** using Alpaca professional market data
-- ✅ **Multi-level profit alerts** at 5%, 10%, 15%, 20%, 25%, 30% gains
-- ✅ **Stop-loss protection** alerts at 25% loss threshold
-- ✅ **End-of-day warnings** to close positions by 3:45 PM ET
-- ✅ **Mobile Slack notifications** for all alerts
-- ✅ **1-minute monitoring intervals** for maximum responsiveness
-- ✅ **Automatic fallback** to Yahoo Finance if Alpaca unavailable
+**Automated Position Management:**
+- ✅ **Real-Time P&L Tracking**: Live Alpaca market data with 2-minute intervals
+- ✅ **Automatic Profit-Taking**: 15% target triggers interactive exit confirmation
+- ✅ **Hands-Free Execution**: Choose [S] and system submits sell orders via API
+- ✅ **Stop-Loss Protection**: 25% loss threshold with automatic alerts
+- ✅ **End-of-Day Management**: 3:45 PM ET warnings for position closure
+- ✅ **Transaction Reconciliation**: Direct Alpaca API sync ensures accuracy
+- ✅ **Mobile Notifications**: Comprehensive Slack alerts with charts and analysis
 
 **Complete monitoring workflow:**
 

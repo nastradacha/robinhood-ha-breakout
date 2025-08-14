@@ -326,14 +326,14 @@ ANALYSIS FOCUS:
 
             # Create HTTP client with SSL handling
             http_client = httpx.Client(
-                verify=False,  # Disable SSL verification for problematic certificates
-                timeout=httpx.Timeout(30.0, read=30.0, write=10.0, connect=5.0),
+                verify=False,  # Disable SSL verification
+                timeout=httpx.Timeout(60.0, read=60.0, write=15.0, connect=10.0),
             )
 
             client = OpenAI(
                 api_key=self.openai_key,
                 http_client=http_client,
-                max_retries=0,  # We handle retries with tenacity
+                max_retries=2,  # Allow OpenAI client to retry internally
             )
 
             response = client.chat.completions.create(
@@ -348,12 +348,12 @@ ANALYSIS FOCUS:
             return {"response": response, "tokens_used": response.usage.total_tokens}
 
         except httpx.TimeoutException as e:
-            logger.error(f"OpenAI API timeout: {e}")
-            raise LLMTimeoutError(f"OpenAI API timeout: {e}") from e
+            logger.warning(f"HTTP timeout (will retry): {e}")
+            raise LLMTimeoutError(f"HTTP timeout: {e}")
 
-        except httpx.ConnectError as e:
-            logger.error(f"OpenAI API connection error: {e}")
-            raise LLMTimeoutError(f"OpenAI connection failed: {e}") from e
+        except openai.APITimeoutError as e:
+            logger.warning(f"OpenAI API timeout (will retry): {e}")
+            raise LLMTimeoutError(f"OpenAI timeout: {e}")
 
         except openai.AuthenticationError as e:
             logger.error(f"OpenAI authentication error: {e}")

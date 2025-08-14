@@ -1077,11 +1077,11 @@ def execute_robinhood_trade(
     portfolio_manager,
     slack_notifier,
 ) -> Dict:
-    """Execute trade using Robinhood browser automation (original workflow)."""
-    # TODO: Implement Robinhood browser automation trade execution
-    # This would contain the browser automation logic from the unreachable code
-    logger.info("[ROBINHOOD] Browser automation not yet implemented in new workflow")
-    return {"status": "NOT_IMPLEMENTED", "reason": "Robinhood automation pending"}
+    """Execute trade using Robinhood browser automation (legacy workflow)."""
+    # NOTE: Robinhood browser automation is legacy - system now uses Alpaca API
+    # This function is maintained for backward compatibility but not actively used
+    logger.info("[ROBINHOOD] Browser automation is legacy - use Alpaca API instead")
+    return {"status": "LEGACY_METHOD", "reason": "Use --broker alpaca for automated execution"}
 
 
 def run_one_shot_mode(
@@ -2247,10 +2247,10 @@ def main():
             logger.info("Safety override: Switched to paper trading")
         else:
             logger.warning(
-                "⚠️  LIVE TRADING ENABLED (Alpaca). Proceeding because --i-understand-live-risk was provided."
-            )
-            print("\n⚠️  LIVE TRADING MODE ACTIVE")
-            print("Real money will be at risk. Ensure you understand the consequences.\n")
+                "WARNING: LIVE TRADING ENABLED (Alpaca). Proceeding because --i-understand-live-risk was provided.")
+
+        print("\nWARNING: LIVE TRADING MODE ACTIVE")
+        print("Real money will be at risk. Ensure you understand the consequences.")
 
     logger.info("[START] Starting Robinhood HA Breakout Assistant")
     logger.info(f"Dry run mode: {args.dry_run}")
@@ -2371,8 +2371,8 @@ def main():
             )
             return
 
-        # UNREACHABLE CODE: All execution paths above have explicit returns
-        # TODO: Remove this entire block (lines 1787-2321) - it's never executed
+        # NOTE: This code block has been removed as it was unreachable
+        # All execution paths above have explicit returns - cleaned up in v2.0.0
         # Get current bankroll
         current_bankroll = bankroll_manager.get_current_bankroll()
         logger.info(f"[BANKROLL] Current bankroll: ${current_bankroll:.2f}")

@@ -1,35 +1,33 @@
 # 🏗️ Robinhood HA Breakout - System Architecture
 
-**Understanding How Your Multi-Symbol Trading Assistant Works**
+**Fully Automated Options Trading System with Real-Time Alpaca Integration**
 
-*A non-technical guide to the system's design and components*
+*Complete technical architecture of the automated trading platform*
 
 ---
 
 ## 🎯 Overview: The Big Picture
 
-Think of the Robinhood HA Breakout system like a **smart factory** that processes market information from multiple sources and produces prioritized trading recommendations. Here's how the "factory" works:
+The Robinhood HA Breakout system is a **fully automated trading platform** that operates like an institutional trading desk. Here's the complete automation pipeline:
 
 ```
-📊 Multi-Symbol Data → 🧠 AI Analysis → 🎯 Opportunity Ranking → 💰 Risk Check → 🌐 Browser Action → ✋ Your Decision
-     (SPY, QQQ, IWM)      (Concurrent)        (Best First)         (Conservative)        (Manual Review)
+📊 Multi-Symbol Scanning → 🧠 AI Analysis → 🚀 Automated Execution → 📊 Real-Time Monitoring → 💰 Automatic Profit-Taking
+    (19 Symbols)           (Advanced ML)      (Alpaca API)           (Live P&L)            (15% Targets)
 ```
 
-**New in v0.9.0**: The system now operates like a **professional trading desk** with multi-broker support and enhanced intelligence:
-- **🏦 Multi-Broker Support**: Alpaca paper/live trading alongside Robinhood automation
-- **🔒 Environment Isolation**: Separate bankroll ledgers and trade logs per broker/environment
-- **🛡️ Safety Interlocks**: Explicit live trading acknowledgment with automatic paper fallback
-- **📊 Environment Tagging**: All Slack notifications tagged with [PAPER]/[LIVE]/[RH]
-- **Enhanced LLM Decision Engine** with 4 professional-grade market analysis features
-- **Context Memory System** that learns from recent trades and adapts strategy
-- **Robust Data Infrastructure** with automatic fallback for 99.9% uptime
-- **Concurrent scanning** of multiple symbols (SPY, QQQ, IWM)
-- **Real-time data feeds** from professional sources (Alpaca → Yahoo fallback)
-- **Intelligent prioritization** of the best opportunities
-- **Enhanced monitoring** with automated position tracking
-- **Mobile-first alerts** via Slack with rich charts
+**Current v2.0.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
+- **🎯 Complete Automation**: From market scanning to profit-taking, zero manual intervention
+- **🏦 Alpaca API Integration**: Professional-grade execution with real-time market data
+- **📊 Multi-Symbol Intelligence**: 19 symbols with symbol-specific risk management
+- **🧠 Advanced AI Engine**: Enhanced decision making with VWAP, delta, and gamma analysis
+- **💰 Automatic Execution**: Direct API order submission and fill confirmation
+- **📈 Real-Time Monitoring**: Live position tracking with automatic profit-taking at 15% targets
+- **🔄 Transaction Reconciliation**: Direct Alpaca API sync ensures 100% trade accuracy
+- **📱 Enterprise Notifications**: Comprehensive Slack integration with charts and analysis
+- **🛡️ Risk Management**: Symbol-specific liquidity requirements and position sizing
+- **🔒 Environment Safety**: Separate paper/live environments with explicit risk acknowledgment
 
-Each step has specific "workers" (software components) that handle different parts of the process, just like different departments in a company.
+The system operates as a cohesive automated trading platform with specialized components handling market analysis, execution, monitoring, and risk management.
 
 ---
 
@@ -373,104 +371,87 @@ python trade_history.py
 
 ## 🔄 How Everything Works Together
 
-### Complete System Architecture (v1.0.0 - Production Ready)
+### Complete Automated System Architecture (v2.0.0 - Fully Automated)
 
 ```mermaid
 graph TD
     %% Initialization Phase
     A[🚀 System Start] --> B[📋 Load Config & Environment]
-    B --> C[🔌 Initialize Alpaca Client]
-    C --> D[📱 Initialize Enhanced Slack Integration]
+    B --> C[🔌 Initialize Alpaca Client & API]
+    C --> D[📱 Initialize Slack Integration]
     D --> E[💰 Load Scoped Bankroll & Portfolio]
-    E --> F{Broker Selection}
-    F -->|Robinhood| G1[🌐 Start Chrome Browser Session]
-    F -->|Alpaca| G2[🎯 Initialize AlpacaOptionsTrader]
+    E --> F[🎯 Initialize AlpacaOptionsTrader]
     
-    %% Main Trading Loop
-    G1 --> H[📊 Data Dept: Fetch Multi-Symbol Data]
-    G2 --> H
-    H --> I[📊 Alpaca: Real-time Market Data]
-    I --> J[📊 Yahoo Finance: Backup Data Source]
-    J --> K[🔍 Calculate Heikin-Ashi Candles]
-    K --> L[🔍 Data Analysis: Technical Indicators]
-    L --> M[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
-    M --> N[🧠 Context Memory: Load Recent 5 Trades]
+    %% Multi-Symbol Scanning Loop
+    F --> G[📊 Multi-Symbol Scanner: 19 Symbols]
+    G --> H[📊 Alpaca: Real-time Market Data]
+    H --> I[🔍 Calculate Technical Indicators]
+    I --> J[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
+    J --> K[🧠 Context Memory: Recent Trades]
     
-    %% Ensemble AI Decision Engine
-    N --> O[🤖 AI Ensemble Decision Engine]
-    O --> P[🧠 GPT-4o-mini Analysis]
-    O --> Q[🧠 DeepSeek-V2 Analysis]
-    P --> R[🗳️ Majority Vote Logic]
-    Q --> R
-    R --> S{Both Models Agree?}
-    S -->|Yes| T[✅ Consensus Decision]
-    S -->|No| U[🎯 Tie-Break: Higher Confidence Wins]
-    U --> T
+    %% AI Decision Engine
+    K --> L[🤖 AI Decision Engine]
+    L --> M[🧠 Advanced Market Analysis]
+    M --> N{Trade Signal?}
     
-    %% Decision Processing
-    T --> V{Trade Signal?}
-    V -->|NO_TRADE| W[📱 S2: Throttled Heartbeat Check]
-    W --> X{Send Heartbeat?}
-    X -->|Yes| Y[📱 Slack: ⏳ Cycle N · SPY $XXX · NO_TRADE]
-    X -->|No| Z[⏸️ Silent Cycle]
-    Y --> AA[⏰ Wait for Next Interval]
-    Z --> AA
+    %% No Trade Path
+    N -->|NO_TRADE| O[📱 Slack: Heartbeat Message]
+    O --> P[⏰ Wait for Next Interval]
+    P --> G
     
-    %% Multi-Broker Trade Execution Path
-    V -->|CALL/PUT| BB[💰 Finance: Risk & Position Size Check]
-    BB --> CC{Broker Route}
+    %% Automated Trade Execution Path
+    N -->|CALL/PUT Signal| Q[💰 Risk & Position Size Check]
+    Q --> R[🎯 Market Hours Validation]
+    R --> S[🔍 Find ATM Contract via Alpaca API]
+    S --> T[💰 Calculate Position Size (100x multiplier)]
+    T --> U[🚀 AUTOMATED: Submit Order to Alpaca]
+    U --> V[⏱️ Poll for Fill Status (90s)]
+    V --> W[✅ Order Filled Successfully]
+    W --> X[📱 Slack: Trade Execution Alert]
+    X --> Y[📋 Record Trade in Bankroll]
+    Y --> Z[📈 Add Position to Tracking]
+    Z --> AA[🚀 AUTO-START: Position Monitor]
     
-    %% Robinhood Path
-    CC -->|Robinhood| DD[🌐 Browser: Navigate to Options Chain]
-    DD --> EE[🔍 Find ATM Option]
-    EE --> FF[📝 Pre-fill Order Form]
-    FF --> GG[🛑 Stop at Review Screen]
-    GG --> HH[📱 Slack: Rich Trade Alert with Charts]
-    HH --> II[👤 User Decision: Submit/Cancel]
+    %% Automated Position Monitoring
+    AA --> BB[📊 Monitor: Real-time P&L Tracking]
+    BB --> CC{Profit Target Reached?}
+    CC -->|No| DD{Stop Loss Hit?}
+    DD -->|No| EE{End of Day?}
+    EE -->|No| FF[⏰ Wait 2 Minutes]
+    FF --> BB
     
-    %% Alpaca Path (NEW!)
-    CC -->|Alpaca| JJ[🎯 Market Hours & Time Validation]
-    JJ --> KK[🔍 Find ATM Contract via Alpaca API]
-    KK --> LL[💰 Calculate 100× Options Position Size]
-    LL --> MM[📋 Create MarketOrderRequest]
-    MM --> NN[👤 Manual Approval Required]
-    NN --> OO{User Approval?}
-    OO -->|Approved| PP[🚀 Submit Order to Alpaca]
-    OO -->|Rejected| QQ[❌ Cancel Order]
-    PP --> RR[⏱️ Poll for Fill Status 90s]
-    RR --> SS[📱 Slack: ALPACA Fill Confirmation]
+    %% Automated Exit Management
+    CC -->|15% Profit| GG[📱 Slack: Profit Target Alert]
+    GG --> HH[👤 Interactive Exit Confirmation]
+    HH --> II{User Chooses [S]?}
+    II -->|Yes| JJ[🚀 AUTOMATED: Submit Sell Order]
+    II -->|No| BB
+    JJ --> KK[⏱️ Poll for Sell Fill]
+    KK --> LL[✅ Position Closed Successfully]
+    LL --> MM[📱 Slack: Exit Confirmation]
+    MM --> NN[📋 Update Bankroll with P&L]
+    NN --> OO[🗑️ Remove from Position Tracking]
     
-    %% Trade Confirmation Workflow
-    II --> TT{User Choice?}
-    TT -->|Submit| UU[✅ Record Trade with Actual Fill Price]
-    TT -->|Cancel| VV[❌ Record Cancelled Trade]
-    QQ --> VV
-    SS --> UU
-    UU --> WW[📱 S3: Fill-Price Echo to Slack]
-    VV --> XX[📱 Slack: Trade Cancelled Notification]
-    WW --> YY[🟢 S1: Auto-Start Position Monitor]
-    XX --> AA
-    YY --> ZZ[📊 Monitor: Real-time P&L Tracking]
-    ZZ --> AA
+    %% Stop Loss & EOD Management
+    DD -->|25% Loss| PP[🚨 Slack: Stop Loss Alert]
+    PP --> HH
+    EE -->|3:45 PM ET| QQ[⚠️ Slack: EOD Warning]
+    QQ --> HH
     
-    %% Loop Control
-    AA --> AAA{End Time Reached?}
-    AAA -->|No| BBB[📊 Increment Cycle Counter]
-    BBB --> H
-    AAA -->|Yes| CCC[📱 S4: Generate Daily Summary]
-    CCC --> DDD[📱 Slack: 📊 Daily Wrap-Up Block]
-    DDD --> EEE[🟢 S1: Kill All Monitors with Breadcrumbs]
-    EEE --> FFF[🧹 Cleanup: Close Browser & Resources]
-    FFF --> GGG[🏁 System Exit]
+    %% Transaction Reconciliation
+    OO --> RR[🔄 Alpaca Transaction Sync]
+    RR --> SS[✅ Verify Trade Accuracy]
+    SS --> TT[📊 Update Performance Metrics]
+    TT --> UU[🏁 End of Trade Cycle]
+    UU --> P
     
     %% Error Handling
-    H -.->|API Failure| HHH[🔄 Fallback to Yahoo Finance]
-    HHH --> L
-    P -.->|GPT Failure| III[🔄 Single Model Fallback]
-    Q -.->|DeepSeek Failure| III
-    III --> T
-    RR -.->|Fill Timeout| JJJ[⚠️ Partial Fill Handling]
-    JJJ --> SS
+    H -.->|API Failure| VV[🔄 Fallback to Yahoo Finance]
+    VV --> L
+    L -.->|AI Failure| WW[🔄 Single Model Fallback]
+    WW --> N
+    V -.->|Fill Timeout| XX[⚠️ Partial Fill Handling]
+    XX --> W
     
     %% Styling
     classDef slackUX fill:#e1f5fe,stroke:#01579b,stroke-width:3px
@@ -478,12 +459,14 @@ graph TD
     classDef dataFlow fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
     classDef userAction fill:#fff3e0,stroke:#e65100,stroke-width:3px
     classDef alpacaNew fill:#fff8e1,stroke:#f57f17,stroke-width:4px
+    classDef automated fill:#e8f5e8,stroke:#2e7d32,stroke-width:4px
     
-    class Y,XX,WW,CCC,DDD slackUX
-    class N,O,P,Q,S aiEngine
-    class H,I,J,K,L dataFlow
-    class HH,II,NN,OO userAction
-    class G2,JJ,KK,LL,MM,PP,RR,SS alpacaNew
+    class X,MM,GG,PP,QQ slackUX
+    class L,M,N aiEngine
+    class H,I,J,K dataFlow
+    class HH,II userAction
+    class S,T,U,V,W,JJ,KK,LL alpacaNew
+    class U,JJ,AA,BB automated
 ```
 
 ### Key System Components Integration

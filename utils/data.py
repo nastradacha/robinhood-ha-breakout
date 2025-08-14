@@ -49,24 +49,34 @@ import pandas as pd
 import yfinance as yf
 from typing import Dict, List
 import logging
+from dotenv import load_dotenv
 from .alpaca_client import AlpacaClient
 from .llm import load_config  # Import config loader
 
+# Load environment variables for Alpaca API
+load_dotenv()
+
 logger = logging.getLogger(__name__)
+
+# Global Alpaca client instance to prevent concurrent connection issues
+_alpaca_client_cache = {}
+
+
+def get_alpaca_client(env: str = "paper") -> AlpacaClient:
+    """Get or create a cached Alpaca client to prevent concurrent connection issues."""
+    if env not in _alpaca_client_cache:
+        _alpaca_client_cache[env] = AlpacaClient(env=env)
+    return _alpaca_client_cache[env]
 
 
 def fetch_market_data(
     symbol: str = "SPY", period: str = "5d", interval: str = "5m", env: str = "paper"
 ) -> pd.DataFrame:
     """
-    Fetch market data using Alpaca (real-time) with Yahoo Finance fallback.
-
-    This addresses the critical data quality issue where Yahoo Finance's
-    15-20 minute delays caused missed trading opportunities. Now uses
-    professional-grade real-time data from Alpaca.
+    Fetch market data for a given symbol using Alpaca (preferred) or Yahoo Finance (fallback).
 
     Args:
-        symbol: Stock symbol (default: SPY)
+        symbol: Stock symbol to fetch data for (default: SPY)
         period: Data period (default: 5d for 5 days)
         interval: Data interval (default: 5m for 5 minutes)
         env: Alpaca environment - "paper" or "live" (default: "paper")
@@ -74,8 +84,8 @@ def fetch_market_data(
     Returns:
         DataFrame with OHLCV data
     """
-    # Try Alpaca first (real-time data)
-    alpaca = AlpacaClient(env=env)
+    # Try Alpaca first (real-time data) - use cached client to prevent concurrent connections
+    alpaca = get_alpaca_client(env=env)
     if alpaca.enabled:
         try:
             data = alpaca.get_market_data(symbol, period)

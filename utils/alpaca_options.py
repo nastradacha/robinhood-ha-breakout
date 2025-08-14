@@ -45,6 +45,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple, Any
 from dataclasses import dataclass
 from decimal import Decimal
+from .llm import load_config
 
 try:
     from alpaca.trading.client import TradingClient
@@ -215,41 +216,30 @@ class AlpacaOptionsTrader:
             ContractInfo if suitable contract found, None otherwise
         """
         try:
+            # Load config for symbol-specific liquidity requirements
+            config = load_config()
+            
             # Set symbol-aware and expiry-aware filtering criteria
             if min_oi is None or min_vol is None or max_spread_pct is None:
                 # 0DTE options have different liquidity patterns
                 is_0dte = policy == '0DTE'
                 
-                # High-liquidity symbols (SPY, QQQ, IWM)
-                if symbol in ['SPY', 'QQQ', 'IWM']:
-                    if is_0dte:
-                        min_oi = min_oi or 500   # Very low for 0DTE - many have 1000-4000
-                        min_vol = min_vol or 0    # Allow zero volume for 0DTE
-                        max_spread_pct = max_spread_pct or 15.0
-                    else:
-                        min_oi = min_oi or 5000
-                        min_vol = min_vol or 500
-                        max_spread_pct = max_spread_pct or 8.0
-                # Medium-liquidity symbols (UVXY, VIX, etc.)
-                elif symbol in ['UVXY', 'VIX', 'SQQQ', 'TQQQ']:
-                    if is_0dte:
-                        min_oi = min_oi or 100   # Very low for 0DTE
-                        min_vol = min_vol or 10   # Very low for 0DTE
-                        max_spread_pct = max_spread_pct or 20.0
-                    else:
-                        min_oi = min_oi or 1000
-                        min_vol = min_vol or 100
-                        max_spread_pct = max_spread_pct or 15.0
-                # Default for other symbols
+                # Get symbol-specific minimum OI from config
+                alpaca_config = config.get('alpaca', {})
+                min_oi_config = alpaca_config.get('min_open_interest', {})
+                symbol_min_oi = min_oi_config.get(symbol, min_oi_config.get('default', 10000))
+                
+                # Apply 0DTE adjustments to config-based values
+                if is_0dte:
+                    # 0DTE typically has lower liquidity, use 10% of weekly requirement
+                    min_oi = min_oi or max(100, int(symbol_min_oi * 0.1))
+                    min_vol = min_vol or 0    # Allow zero volume for 0DTE
+                    max_spread_pct = max_spread_pct or 15.0
                 else:
-                    if is_0dte:
-                        min_oi = min_oi or 500   # Lower for 0DTE
-                        min_vol = min_vol or 25   # Lower for 0DTE
-                        max_spread_pct = max_spread_pct or 15.0
-                    else:
-                        min_oi = min_oi or 2000
-                        min_vol = min_vol or 200
-                        max_spread_pct = max_spread_pct or 12.0
+                    # Use full config-based requirements for weekly options
+                    min_oi = min_oi or symbol_min_oi
+                    min_vol = min_vol or max(50, int(symbol_min_oi * 0.05))  # Volume = 5% of OI
+                    max_spread_pct = max_spread_pct or 12.0
             
             logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, max_spread={max_spread_pct}%")
             # Get current stock price for ATM calculation

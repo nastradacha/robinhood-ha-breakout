@@ -32,10 +32,14 @@ import logging
 from typing import Dict, Optional, Literal
 from datetime import datetime, timedelta
 import pandas as pd
+from dotenv import load_dotenv
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +59,8 @@ class AlpacaClient:
             env: Trading environment - "paper" or "live" (default: "paper")
             config: Optional configuration dict with base URLs
         """
-        self.env = env
+        # Defensive programming: ensure env is never None
+        self.env = env if env is not None else "paper"
         self.api_key = os.getenv("ALPACA_KEY_ID") or os.getenv("ALPACA_API_KEY")
         self.secret_key = os.getenv("ALPACA_SECRET_KEY")
         
@@ -73,33 +78,55 @@ class AlpacaClient:
                 self.base_url = os.getenv("ALPACA_LIVE_BASE_URL", "https://api.alpaca.markets")
 
         self.enabled = bool(self.api_key and self.secret_key)
+        self._data_client = None
+        self._trading_client = None
+        self._connection_tested = False
 
-        if self.enabled:
+        if not self.enabled:
+            logger.warning(
+                "[ALPACA] API keys not configured - falling back to Yahoo Finance"
+            )
+
+    @property
+    def data_client(self):
+        """Lazy initialization of data client to prevent concurrent connection issues."""
+        if not self.enabled:
+            return None
+        if self._data_client is None:
             try:
-                # Initialize clients
-                self.data_client = StockHistoricalDataClient(
+                self._data_client = StockHistoricalDataClient(
                     api_key=self.api_key, secret_key=self.secret_key
                 )
+            except Exception as e:
+                logger.error(f"[ALPACA] Failed to initialize data client: {e}")
+                self.enabled = False
+                return None
+        return self._data_client
 
-                self.trading_client = TradingClient(
+    @property
+    def trading_client(self):
+        """Lazy initialization of trading client to prevent concurrent connection issues."""
+        if not self.enabled:
+            return None
+        if self._trading_client is None:
+            try:
+                self._trading_client = TradingClient(
                     api_key=self.api_key,
                     secret_key=self.secret_key,
                     paper=self.is_paper,
                 )
-
-                # Test connection
-                account = self.trading_client.get_account()
-                logger.info(
-                    f"[ALPACA] Connected successfully - Account: {account.account_number} ({env.upper()})")
-                logger.info(f"[ALPACA] Environment: {env}, Paper trading: {self.is_paper}")
-
+                # Test connection only once and only when trading client is actually used
+                if not self._connection_tested:
+                    account = self._trading_client.get_account()
+                    logger.info(
+                        f"[ALPACA] Connected successfully - Account: {account.account_number} ({self.env.upper()})")
+                    logger.info(f"[ALPACA] Environment: {self.env}, Paper trading: {self.is_paper}")
+                    self._connection_tested = True
             except Exception as e:
-                logger.error(f"[ALPACA] Failed to initialize: {e}")
+                logger.error(f"[ALPACA] Failed to initialize trading client: {e}")
                 self.enabled = False
-        else:
-            logger.warning(
-                "[ALPACA] API keys not configured - falling back to Yahoo Finance"
-            )
+                return None
+        return self._trading_client
 
     @property
     def is_paper(self) -> bool:

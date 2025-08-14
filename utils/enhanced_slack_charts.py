@@ -625,10 +625,10 @@ class EnhancedSlackChartSender:
             file_id = upload_data["file_id"]
             
             # Step 2: Upload file to the URL
-            with open(chart_path, "rb") as file:
+            with open(chart_path, "rb") as chart_file:
                 upload_file_response = requests.post(
                     upload_url,
-                    files={"file": file},
+                    files={"file": chart_file},
                     timeout=30
                 )
             
