@@ -66,7 +66,7 @@ License: MIT
 
 import json
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pathlib import Path
 from datetime import datetime
 
@@ -253,6 +253,16 @@ class BankrollManager:
             data["current_bankroll"] += pnl
             data["total_pnl"] += pnl
 
+            # Track win/loss outcome for consecutive loss throttle
+            is_win = pnl > 0
+            if "win_loss_history" not in data:
+                data["win_loss_history"] = []
+            
+            data["win_loss_history"].append(is_win)
+            # Keep only last 20 trades for memory efficiency
+            if len(data["win_loss_history"]) > 20:
+                data["win_loss_history"] = data["win_loss_history"][-20:]
+
             if pnl > 0:
                 data["winning_trades"] += 1
 
@@ -274,6 +284,30 @@ class BankrollManager:
         )
 
         return data
+
+    def get_recent_outcomes(self, n: int = 2) -> List[bool]:
+        """
+        Get recent trade outcomes for consecutive loss throttle.
+        
+        Args:
+            n: Number of recent outcomes to return (default: 2)
+            
+        Returns:
+            List of boolean outcomes (True=win, False=loss) for last n trades
+        """
+        try:
+            data = self._load_bankroll()
+            win_loss_history = data.get("win_loss_history", [])
+            
+            # Return last n outcomes, or empty list if insufficient history
+            if len(win_loss_history) >= n:
+                return win_loss_history[-n:]
+            else:
+                return win_loss_history  # Return what we have
+                
+        except Exception as e:
+            logger.warning(f"Error getting recent outcomes: {e}")
+            return []  # Fail-safe: return empty list
 
     def update_bankroll(self, new_amount: float, reason: str = "Manual update") -> Dict:
         """

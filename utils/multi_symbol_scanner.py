@@ -114,6 +114,8 @@ class MultiSymbolScanner:
             logger.info(
                 "[MULTI-SYMBOL] No trading opportunities found across all symbols"
             )
+            # Send Slack heartbeat with NO_TRADE reasons summary
+            self._send_no_trade_heartbeat()
 
         return sorted_opportunities
 
@@ -149,9 +151,6 @@ class MultiSymbolScanner:
             lookback_bars = self.config.get("LOOKBACK_BARS", 20)
             breakout_analysis = analyze_breakout_pattern(ha_df, lookback_bars)
 
-            # Always proceed to LLM analysis - let LLM decide based on all market conditions
-            # The old has_breakout check was incorrect and blocking all trades
-
             # Get current price
             current_price = float(df["Close"].iloc[-1])
 
@@ -159,6 +158,22 @@ class MultiSymbolScanner:
             market_data = self._prepare_market_data(
                 symbol, df, ha_df, breakout_analysis
             )
+
+            # Pre-LLM hard gate: check for obvious NO_TRADE conditions
+            proceed, gate_reason = self._pre_llm_hard_gate(market_data, self.config)
+            if not proceed:
+                logger.info(f"[MULTI-SYMBOL] {symbol}: Pre-LLM gate blocked trade - {gate_reason}")
+                
+                # Log decision for analytics with unified format
+                formatted_reason = self._format_no_trade_reason(symbol, f"Pre-LLM gate: {gate_reason}")
+                self._log_symbol_decision(
+                    symbol,
+                    "NO_TRADE",
+                    0.0,
+                    formatted_reason,
+                    current_price,
+                )
+                return []
 
             # Get LLM trade decision with retry logic
             trade_decision_result = self._robust_llm_decision(market_data, symbol)
@@ -172,12 +187,14 @@ class MultiSymbolScanner:
             if trade_decision["decision"] == "NO_TRADE":
                 logger.info(f"[MULTI-SYMBOL] {symbol}: LLM recommends NO_TRADE")
 
-                # Log individual symbol decision for analytics
+                # Log individual symbol decision for analytics with unified format
+                raw_reason = trade_decision.get("reason", "LLM analysis completed")
+                formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     trade_decision.get("confidence", 0.0),
-                    trade_decision.get("reason", "LLM analysis completed"),
+                    formatted_reason,
                     current_price,
                 )
                 return []
@@ -191,21 +208,77 @@ class MultiSymbolScanner:
                     f"[MULTI-SYMBOL] {symbol}: Confidence {confidence:.2f} below threshold {min_confidence}"
                 )
 
-                # Log individual symbol decision for analytics
+                # Log individual symbol decision for analytics with unified format
+                raw_reason = f"Confidence {confidence:.2f} below threshold {min_confidence}"
+                formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     confidence,
-                    f"Confidence {confidence:.2f} below threshold {min_confidence}",
+                    formatted_reason,
                     current_price,
                 )
                 return []
 
-            # Create opportunity record
+            # Apply consecutive-loss throttle (stricter requirements after losses)
+            throttle_proceed, throttle_reason = self._apply_consecutive_loss_throttle(market_data, confidence)
+            if not throttle_proceed:
+                logger.info(f"[MULTI-SYMBOL] {symbol}: Consecutive loss throttle blocked - {throttle_reason}")
+                
+                # Log decision for analytics with unified format
+                raw_reason = f"Consecutive loss throttle: {throttle_reason}"
+                formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
+                self._log_symbol_decision(
+                    symbol,
+                    "NO_TRADE",
+                    confidence,
+                    formatted_reason,
+                    current_price,
+                )
+                return []
+
+            # Apply rapid flip protection (prevent churning from opposite signals)
+            flip_proceed, flip_reason = self._recent_signal_guard(symbol, trade_decision["decision"], market_data)
+            if not flip_proceed:
+                logger.info(f"[MULTI-SYMBOL] {symbol}: Rapid flip guard blocked - {flip_reason}")
+                
+                # Log decision for analytics
+                self._log_symbol_decision(
+                    symbol,
+                    "NO_TRADE",
+                    confidence,
+                    f"Rapid flip guard: {flip_reason}",
+                    current_price,
+                )
+                return []
+
+            # Map decision to strict option side
+            try:
+                option_side = self._map_decision_to_side(trade_decision["decision"])
+            except ValueError as e:
+                logger.error(f"[MULTI-SYMBOL] {symbol}: Invalid decision mapping - {e}")
+                # Log as NO_TRADE and return empty
+                formatted_reason = self._format_no_trade_reason(symbol, f"Invalid decision: {trade_decision['decision']}")
+                self._log_symbol_decision(
+                    symbol,
+                    "NO_TRADE",
+                    confidence,
+                    formatted_reason,
+                    current_price,
+                )
+                return []
+            
+            # Get expiry policy early (before execution layer)
+            expiry_policy, expiry_date = self._get_expiry_policy_early()
+            
+            # Create opportunity record with strict option-side mapping and expiry policy
             opportunity = {
                 "symbol": symbol,
                 "current_price": current_price,
                 "decision": trade_decision["decision"],
+                "option_side": option_side,  # Strict CALL/PUT mapping
+                "expiry_policy": expiry_policy,  # 0DTE or WEEKLY
+                "expiry_date": expiry_date,  # YYYY-MM-DD format
                 "confidence": confidence,
                 "reason": trade_decision.get("reason", ""),
                 "breakout_analysis": breakout_analysis,
@@ -218,6 +291,10 @@ class MultiSymbolScanner:
             logger.info(
                 f"[MULTI-SYMBOL] {symbol}: Found opportunity - {trade_decision['decision']} (confidence: {confidence:.2f})"
             )
+            
+            # Log opportunity using deterministic serialization
+            self._log_opportunity(opportunity)
+            
             return [opportunity]
 
         except Exception as e:
@@ -270,6 +347,7 @@ class MultiSymbolScanner:
                 "iv_5m": breakout_analysis.get("iv_5m", 30.0),
                 "candle_body_pct": breakout_analysis.get("candle_body_pct", 0.0),
                 "trend_direction": breakout_analysis.get("trend_direction", "NEUTRAL"),
+                "vwap_deviation_pct": breakout_analysis.get("vwap_deviation_pct", 0.0),
                 "volume_confirmation": breakout_analysis.get(
                     "volume_confirmation", False
                 ),
@@ -411,10 +489,15 @@ class MultiSymbolScanner:
 
         # All attempts failed, return safe default
         logger.error(f"[MULTI-SYMBOL] {symbol}: Returning NO_TRADE due to LLM failures")
+        
+        # Format error reason for transparency (as requested)
+        error_detail = str(last_error) if last_error else 'Unknown error'
+        transparent_reason = f"LLM_ERROR: {error_detail} (after {retries + 1} attempts)"
+        
         return TradeDecision(
             decision="NO_TRADE",
             confidence=0.0,
-            reason=f"LLM error after {retries + 1} attempts: {str(last_error) if last_error else 'Unknown error'}",
+            reason=transparent_reason,
             tokens_used=0,
         )
 
@@ -422,46 +505,74 @@ class MultiSymbolScanner:
         self, symbol: str, confidence: float, breakout_analysis: Dict
     ) -> float:
         """
-        Calculate priority score for opportunity ranking.
+        Calculate deterministic priority score for opportunity ranking.
+        
+        Uses a weighted formula to blend multiple technical factors into a normalized 0-1 score:
+        
+        score = clamp(
+           0.50 * confidence                           # 50% - LLM confidence (primary factor)
+         + 0.20 * norm_abs(vwap_deviation_pct, 1.0)   # 20% - Price momentum strength
+         + 0.15 * norm(room_to_next_pivot, 1.0)       # 15% - Room to move
+         + 0.10 * (trend in STRONG_* ? 1 : 0)         # 10% - Strong trend confirmation
+         + 0.05 * (volume_confirmation ? 1 : 0), 0, 1) # 5% - Volume support
+        
+        This ensures deterministic ranking where same inputs always produce same output.
 
         Args:
             symbol: Stock symbol
-            confidence: LLM confidence score
+            confidence: LLM confidence score (0-1)
             breakout_analysis: Technical analysis results
 
         Returns:
-            Priority score (higher = better)
+            Priority score (0-1, higher = better)
         """
         try:
-            # Base score from confidence
-            score = confidence * 100
-
-            # Technical strength bonus
-            candle_body_pct = breakout_analysis.get("candle_body_pct", 0.0)
-            if isinstance(candle_body_pct, (int, float)):
-                score += candle_body_pct * 10  # Up to 10 points for strong candles
-
-            # Volume confirmation bonus
-            if breakout_analysis.get("volume_confirmation", False):
-                score += 5
-
-            # Trend alignment bonus
-            trend = breakout_analysis.get("trend_direction", "NEUTRAL")
-            if trend in ["BULLISH", "BEARISH"]:  # Clear trend direction
-                score += 3
-
-            # Room to move bonus
-            room_to_move = breakout_analysis.get("room_to_next_pivot", 0.0)
-            if isinstance(room_to_move, (int, float)) and room_to_move > 2.0:
-                score += min(room_to_move, 10)  # Up to 10 points for room to move
-
-            return max(score, 0.0)  # Ensure non-negative
+            # Extract technical factors with safe defaults
+            vwap_deviation_pct = breakout_analysis.get("vwap_deviation_pct", 0.0)
+            room_to_next_pivot = breakout_analysis.get("room_to_next_pivot", 0.0)
+            trend_direction = breakout_analysis.get("trend_direction", "NEUTRAL")
+            volume_confirmation = breakout_analysis.get("volume_confirmation", False)
+            
+            # Normalize and weight each component
+            confidence_component = 0.50 * max(0.0, min(1.0, confidence))  # Clamp confidence to 0-1
+            
+            # VWAP deviation: normalize absolute value, cap at 1.0%
+            vwap_component = 0.20 * min(1.0, abs(vwap_deviation_pct))
+            
+            # Room to pivot: normalize, cap at 1.0 (100% room)
+            room_component = 0.15 * min(1.0, max(0.0, room_to_next_pivot))
+            
+            # Strong trend: binary 0 or 1
+            strong_trend = 1.0 if trend_direction in ["STRONG_BULLISH", "STRONG_BEARISH"] else 0.0
+            trend_component = 0.10 * strong_trend
+            
+            # Volume confirmation: binary 0 or 1
+            volume_component = 0.05 * (1.0 if volume_confirmation else 0.0)
+            
+            # Calculate final score
+            score = confidence_component + vwap_component + room_component + trend_component + volume_component
+            
+            # Ensure score is in [0, 1] range
+            final_score = max(0.0, min(1.0, score))
+            
+            # Log detailed breakdown for debugging
+            logger.debug(
+                f"[PRIORITY] {symbol}: conf={confidence:.3f}({confidence_component:.3f}) "
+                f"vwap={vwap_deviation_pct:.3f}({vwap_component:.3f}) "
+                f"room={room_to_next_pivot:.3f}({room_component:.3f}) "
+                f"trend={trend_direction}({trend_component:.3f}) "
+                f"vol={volume_confirmation}({volume_component:.3f}) "
+                f"→ {final_score:.3f}"
+            )
+            
+            return final_score
 
         except Exception as e:
             logger.error(
                 f"[MULTI-SYMBOL] Error calculating priority score for {symbol}: {e}"
             )
-            return confidence * 100  # Fallback to confidence-only scoring
+            # Fallback to confidence-only scoring (normalized)
+            return max(0.0, min(1.0, confidence))
 
     def _should_use_batch_analysis(self, opportunities_count: int) -> bool:
         """
@@ -508,6 +619,234 @@ class MultiSymbolScanner:
         )
 
         return prompt
+
+    def _pre_llm_hard_gate(self, market_data: Dict, config: Dict) -> tuple[bool, str]:
+        """
+        Pre-LLM hard gate: enforce hard rules before calling LLM.
+        
+        Blocks known bad contexts: market closed, after time cutoff, 
+        too-low volatility range, or user-configured "no trade" windows.
+        
+        Args:
+            market_data: Market data dictionary
+            config: Trading configuration
+            
+        Returns:
+            tuple[bool, str]: (proceed, reason) - proceed=False blocks LLM call
+        """
+        from datetime import datetime, time as dt_time
+        import pytz
+        
+        try:
+            # Get current time in ET (market timezone)
+            et_tz = pytz.timezone('US/Eastern')
+            current_et = datetime.now(et_tz)
+            current_time = current_et.time()
+            
+            # 1. Check if after entry cutoff time (15:15 ET)
+            entry_cutoff = dt_time(15, 15)  # 3:15 PM ET
+            if current_time >= entry_cutoff:
+                return False, f"After entry cutoff time (current: {current_time.strftime('%H:%M')}, cutoff: 15:15 ET)"
+            
+            # 2. Check if market is closed (basic weekday check)
+            if current_et.weekday() >= 5:  # Saturday=5, Sunday=6
+                return False, f"Market closed (weekend: {current_et.strftime('%A')})"
+            
+            # 3. Check if before market open (9:30 AM ET)
+            market_open = dt_time(9, 30)
+            if current_time < market_open:
+                return False, f"Before market open (current: {current_time.strftime('%H:%M')}, open: 09:30 ET)"
+            
+            # 4. Check minimum true range percentage
+            min_tr_range_pct = config.get("MIN_TR_RANGE_PCT", 20.0)  # Default 20%
+            today_tr_pct = market_data.get("today_true_range_pct", 0.0)
+            
+            if today_tr_pct < min_tr_range_pct:
+                return False, f"True range too low ({today_tr_pct:.1f}% < {min_tr_range_pct}% minimum)"
+            
+            # 5. Check user-configured trade window (optional)
+            trade_window = config.get("TRADE_WINDOW")
+            if trade_window and isinstance(trade_window, list) and len(trade_window) == 2:
+                try:
+                    start_time = dt_time.fromisoformat(trade_window[0])
+                    end_time = dt_time.fromisoformat(trade_window[1])
+                    
+                    if not (start_time <= current_time <= end_time):
+                        return False, f"Outside trade window ({trade_window[0]}-{trade_window[1]}, current: {current_time.strftime('%H:%M')})"
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid TRADE_WINDOW format: {trade_window}")
+            
+            # All checks passed
+            return True, "All pre-LLM checks passed"
+            
+        except Exception as e:
+            logger.warning(f"Pre-LLM gate error: {e}")
+            # On error, allow LLM call (fail-open for robustness)
+            return True, f"Gate check error (allowing trade): {e}"
+
+    def _apply_consecutive_loss_throttle(self, market_data: Dict, decision_conf: float) -> tuple[bool, str]:
+        """
+        Apply consecutive-loss throttle: stricter requirements after losses.
+        
+        If last two trades were losses, require:
+        - Higher candle body percentage (20% vs normal 10%)
+        - Higher confidence threshold (+5% boost)
+        
+        Args:
+            market_data: Market data dictionary with candle_body_pct
+            decision_conf: LLM decision confidence
+            
+        Returns:
+            tuple[bool, str]: (proceed, reason)
+        """
+        try:
+            # Get recent trade outcomes from bankroll
+            from .bankroll import BankrollManager
+            
+            # Use same broker/env as scanner
+            bankroll = BankrollManager(
+                start_capital=1000.0,  # Dummy value, we're just reading history
+                broker=getattr(self, 'broker', 'robinhood'),
+                env=getattr(self, 'env', 'paper')
+            )
+            
+            recent_outcomes = bankroll.get_recent_outcomes(n=2)
+            
+            # If insufficient history, allow trade (fail-open)
+            if len(recent_outcomes) < 2:
+                return True, "Insufficient trade history for throttle"
+            
+            # Check if last two trades were losses
+            last_two_losses = all(outcome == False for outcome in recent_outcomes)
+            
+            if last_two_losses:
+                # Apply stricter requirements after consecutive losses
+                candle_body_pct = market_data.get("candle_body_pct", 0.0)
+                min_confidence = self.config.get("MIN_CONFIDENCE", 0.65)
+                
+                # Require higher candle body (20% vs normal 5-10%)
+                required_candle_body = 0.20  # 20%
+                if candle_body_pct < required_candle_body:
+                    return False, f"After 2 losses: candle body {candle_body_pct:.1%} < {required_candle_body:.1%} required"
+                
+                # Require higher confidence (+5% boost)
+                required_confidence = min_confidence + 0.05  # +5%
+                if decision_conf < required_confidence:
+                    return False, f"After 2 losses: confidence {decision_conf:.1%} < {required_confidence:.1%} required"
+                
+                return True, f"Consecutive loss throttle passed (candle: {candle_body_pct:.1%}, conf: {decision_conf:.1%})"
+            
+            else:
+                # Normal requirements after a win
+                candle_body_pct = market_data.get("candle_body_pct", 0.0)
+                min_candle_body = self.config.get("MIN_CANDLE_BODY_PCT", 0.05)
+                
+                # Allow relaxed candle body requirement (10% vs config 5%)
+                relaxed_candle_body = max(min_candle_body, 0.10)  # At least 10%
+                if candle_body_pct < relaxed_candle_body:
+                    return False, f"Normal mode: candle body {candle_body_pct:.1%} < {relaxed_candle_body:.1%} required"
+                
+                return True, f"Normal throttle passed (recent win, candle: {candle_body_pct:.1%})"
+                
+        except Exception as e:
+            logger.warning(f"Consecutive loss throttle error: {e}")
+            # Fail-open: allow trade on errors
+            return True, f"Throttle check error (allowing trade): {e}"
+
+    def _recent_signal_guard(self, symbol: str, new_decision: str, market_data: Dict, window_min: int = 5) -> tuple[bool, str]:
+        """
+        Rapid flip protection: suppress opposite trade signals within X minutes.
+        
+        Prevents churning by blocking opposite signals unless strong reversal detected.
+        
+        Args:
+            symbol: Stock symbol
+            new_decision: New trade decision (CALL, PUT, NO_TRADE)
+            market_data: Market data with trend and deviation info
+            window_min: Cooldown window in minutes (default: 5)
+            
+        Returns:
+            tuple[bool, str]: (proceed, reason)
+        """
+        try:
+            import json
+            from pathlib import Path
+            from datetime import datetime, timedelta
+            
+            # Skip guard for NO_TRADE decisions
+            if new_decision == "NO_TRADE":
+                return True, "NO_TRADE decisions not subject to rapid flip guard"
+            
+            # Load recent signal log
+            cache_dir = Path(".cache")
+            log_file = cache_dir / f"signal_log_{symbol}.json"
+            
+            if not log_file.exists():
+                return True, "No signal history for rapid flip check"
+            
+            try:
+                with open(log_file, 'r') as f:
+                    signal_log = json.load(f)
+            except Exception as e:
+                logger.warning(f"Error reading signal log for {symbol}: {e}")
+                return True, "Signal log read error (allowing trade)"
+            
+            if not signal_log:
+                return True, "Empty signal history"
+            
+            # Find most recent trade signal (CALL or PUT, not NO_TRADE)
+            recent_trade_signal = None
+            current_time = datetime.now()
+            
+            for entry in reversed(signal_log):
+                if entry.get("decision") in ["CALL", "PUT"]:
+                    try:
+                        entry_time = datetime.fromisoformat(entry["timestamp"])
+                        time_diff = current_time - entry_time
+                        
+                        # Check if within cooldown window
+                        if time_diff <= timedelta(minutes=window_min):
+                            recent_trade_signal = entry
+                            break
+                        else:
+                            # Outside window, no need to check further
+                            break
+                    except Exception as e:
+                        logger.warning(f"Error parsing timestamp in signal log: {e}")
+                        continue
+            
+            if not recent_trade_signal:
+                return True, f"No recent trade signals within {window_min} minutes"
+            
+            # Check if new decision is opposite to recent signal
+            recent_decision = recent_trade_signal["decision"]
+            is_opposite = (recent_decision == "CALL" and new_decision == "PUT") or \
+                         (recent_decision == "PUT" and new_decision == "CALL")
+            
+            if not is_opposite:
+                return True, f"Same direction as recent {recent_decision} signal"
+            
+            # Opposite signal detected - check for strong reversal criteria
+            trend_direction = market_data.get("trend_direction", "NEUTRAL")
+            vwap_deviation_pct = market_data.get("vwap_deviation_pct", 0.0)
+            
+            # Define strong reversal criteria
+            strong_trend = trend_direction in ["STRONG_BULLISH", "STRONG_BEARISH"]
+            strong_deviation = abs(vwap_deviation_pct) > 0.2  # > 0.2% VWAP deviation
+            
+            if strong_trend and strong_deviation:
+                return True, f"Strong reversal detected: {trend_direction}, VWAP dev: {vwap_deviation_pct:.1%}"
+            
+            # Block weak opposite signal
+            time_since = current_time - datetime.fromisoformat(recent_trade_signal["timestamp"])
+            minutes_ago = int(time_since.total_seconds() / 60)
+            
+            return False, f"Rapid flip blocked: {recent_decision} {minutes_ago}m ago, weak {new_decision} signal (trend: {trend_direction}, VWAP: {vwap_deviation_pct:.1%})"
+            
+        except Exception as e:
+            logger.warning(f"Rapid flip guard error for {symbol}: {e}")
+            # Fail-open: allow trade on errors
+            return True, f"Rapid flip guard error (allowing trade): {e}"
 
     def _parse_batch_results(
         self, batch_result, symbols_data: List[Dict]
@@ -725,6 +1064,225 @@ class MultiSymbolScanner:
             }
 
         return performance
+
+    def _map_decision_to_side(self, decision: str) -> str:
+        """
+        Map LLM trade decision to strict option side.
+        
+        Args:
+            decision: LLM decision string
+            
+        Returns:
+            Strict option side: "CALL" or "PUT"
+            
+        Raises:
+            ValueError: If decision cannot be mapped to valid option side
+        """
+        decision_upper = decision.upper().strip()
+        
+        # Direct mapping
+        if decision_upper == "CALL" or decision_upper == "BUY_CALL":
+            return "CALL"
+        elif decision_upper == "PUT" or decision_upper == "BUY_PUT":
+            return "PUT"
+        
+        # Fuzzy matching for robustness
+        if "CALL" in decision_upper:
+            return "CALL"
+        elif "PUT" in decision_upper:
+            return "PUT"
+        
+        # Invalid decision
+        raise ValueError(f"Cannot map decision '{decision}' to valid option side (CALL/PUT)")
+
+    def _get_expiry_policy_early(self) -> tuple[str, str]:
+        """
+        Get expiry policy early in the scanning process.
+        
+        Returns:
+            Tuple of (policy, expiry_date) where policy is '0DTE' or 'WEEKLY'
+        """
+        try:
+            # Try to use Alpaca client if available
+            if hasattr(self, 'alpaca_trader') and self.alpaca_trader:
+                return self.alpaca_trader.get_expiry_policy()
+            
+            # Fallback: implement same logic as AlpacaOptionsTrader
+            from datetime import datetime, timedelta
+            import pytz
+            
+            # Get current ET time
+            et_tz = pytz.timezone('US/Eastern')
+            now_et = datetime.now(et_tz)
+            hour = now_et.hour
+            minute = now_et.minute
+            
+            # Use 0DTE between 10:00-15:15 ET
+            if 10 <= hour < 15 or (hour == 15 and minute <= 15):
+                # Today's date for 0DTE
+                today = now_et.date()
+                return "0DTE", today.strftime("%Y-%m-%d")
+            else:
+                # Find nearest weekly Friday
+                today = now_et.date()
+                days_until_friday = (4 - today.weekday()) % 7
+                if days_until_friday == 0:  # Today is Friday
+                    days_until_friday = 7  # Next Friday
+                
+                next_friday = today + timedelta(days=days_until_friday)
+                return "WEEKLY", next_friday.strftime("%Y-%m-%d")
+                
+        except Exception as e:
+            logger.warning(f"Error determining expiry policy early: {e}")
+            # Fallback to weekly
+            from datetime import datetime, timedelta
+            today = datetime.now().date()
+            days_until_friday = (4 - today.weekday()) % 7
+            if days_until_friday == 0:
+                days_until_friday = 7
+            next_friday = today + timedelta(days=days_until_friday)
+            return "WEEKLY", next_friday.strftime("%Y-%m-%d")
+
+    def _serialize_opportunity(self, opportunity: Dict) -> Dict:
+        """
+        Create deterministic serialization of opportunity record.
+        
+        Ensures consistent field order and format for logging, CSV export,
+        and audit trails. Only includes fields relevant for serialization.
+        
+        Args:
+            opportunity: Raw opportunity dictionary
+            
+        Returns:
+            Serialized opportunity with fixed field order
+        """
+        # Fixed field order for deterministic serialization
+        serialized = {
+            "timestamp": opportunity.get("timestamp", datetime.now()).isoformat(),
+            "symbol": opportunity.get("symbol", ""),
+            "decision": opportunity.get("decision", ""),
+            "confidence": float(opportunity.get("confidence", 0.0)),
+            "current_price": float(opportunity.get("current_price", 0.0)),
+            "option_side": opportunity.get("option_side", ""),
+            "expiry_policy": opportunity.get("expiry_policy", ""),
+            "expiry_date": opportunity.get("expiry_date", ""),
+            "reason": opportunity.get("reason", ""),
+            "priority_score": float(opportunity.get("priority_score", 0.0)),
+        }
+        
+        return serialized
+
+    def _log_opportunity(self, opportunity: Dict):
+        """
+        Log opportunity using deterministic serialization for audits and analytics.
+        
+        Args:
+            opportunity: Raw opportunity dictionary
+        """
+        try:
+            # Serialize opportunity with fixed field order
+            serialized = self._serialize_opportunity(opportunity)
+            
+            # Log structured opportunity for analytics
+            logger.info(f"[OPPORTUNITY] {serialized}")
+            
+            # Optional: Write to CSV for audit trail (if needed)
+            # This could be extended to write to trade_history CSV
+            
+        except Exception as e:
+            logger.warning(f"Error logging opportunity: {e}")
+            # Fail silently - logging should not break trading
+
+    def _format_no_trade_reason(self, symbol: str, reason: str) -> str:
+        """
+        Format NO_TRADE reason for unified machine-readable format.
+        
+        Args:
+            symbol: Stock symbol
+            reason: Raw reason string
+            
+        Returns:
+            Formatted reason string with machine-readable prefix
+        """
+        # Extract machine-readable reason code
+        if "Pre-LLM gate:" in reason:
+            if "market closed" in reason.lower():
+                return f"MARKET_CLOSED: {reason}"
+            elif "time cutoff" in reason.lower():
+                return f"TIME_CUTOFF: {reason}"
+            elif "volatility" in reason.lower():
+                return f"LOW_VOLATILITY: {reason}"
+            elif "trade window" in reason.lower():
+                return f"TRADE_WINDOW: {reason}"
+            else:
+                return f"PRE_LLM_GATE: {reason}"
+        elif "LLM_ERROR:" in reason:
+            return reason  # Already formatted
+        elif "Confidence" in reason and "below threshold" in reason:
+            return f"LOW_CONF: {reason}"
+        elif "Consecutive loss throttle:" in reason:
+            return f"LOSS_THROTTLE: {reason}"
+        elif "Rapid flip guard:" in reason:
+            return f"FLIP_GUARD: {reason}"
+        else:
+            return f"OTHER: {reason}"
+
+    def _log_symbol_decision(self, symbol: str, decision: str, confidence: float, reason: str, price: float):
+        """
+        Log trading decision for rapid flip protection and analytics.
+        
+        Args:
+            symbol: Stock symbol
+            decision: Trade decision (CALL, PUT, NO_TRADE)
+            confidence: LLM confidence score
+            reason: Decision reason
+            price: Current stock price
+        """
+        try:
+            import json
+            import os
+            from pathlib import Path
+            
+            # Create .cache directory if it doesn't exist
+            cache_dir = Path(".cache")
+            cache_dir.mkdir(exist_ok=True)
+            
+            # Signal log file per symbol
+            log_file = cache_dir / f"signal_log_{symbol}.json"
+            
+            # Load existing log
+            signal_log = []
+            if log_file.exists():
+                try:
+                    with open(log_file, 'r') as f:
+                        signal_log = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Error loading signal log for {symbol}: {e}")
+                    signal_log = []
+            
+            # Add new decision
+            signal_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "decision": decision,
+                "confidence": confidence,
+                "reason": reason,
+                "price": price,
+                "scanner_env": getattr(self, 'env', 'unknown')
+            }
+            
+            signal_log.append(signal_entry)
+            
+            # Keep only last 50 entries for memory efficiency
+            if len(signal_log) > 50:
+                signal_log = signal_log[-50:]
+            
+            # Save updated log
+            with open(log_file, 'w') as f:
+                json.dump(signal_log, f, indent=2)
+                
+        except Exception as e:
+            logger.warning(f"Error logging signal for {symbol}: {e}")
+            # Fail silently - logging should not break trading
 
     def _create_market_data_for_chart(self, opportunity: Dict) -> pd.DataFrame:
         """

@@ -61,7 +61,8 @@ def ensure_scoped_files(paths: Dict[str, str]) -> None:
             writer = csv.writer(f)
             writer.writerow([
                 'timestamp', 'symbol', 'decision', 'confidence', 'current_price',
-                'strike', 'premium', 'quantity', 'total_cost', 'reason', 'status',
+                'option_side', 'expiry_policy', 'expiry_date', 'reason', 'priority_score',
+                'strike', 'premium', 'quantity', 'total_cost', 'status',
                 'fill_price', 'pnl_pct', 'pnl_amount', 'exit_reason'
             ])
         logger.info(f"Created scoped trade history: {trade_history_path}")
