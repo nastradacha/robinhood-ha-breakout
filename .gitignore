@@ -47,9 +47,9 @@ logs/*.csv
 *.log
 
 # Bankroll and trading data
-bankroll*.json
-trade_log*.csv
-positions_*.csv
+# bankroll*.json
+# trade_log*.csv
+# positions_*.csv
 
 # Screenshots
 *.png
