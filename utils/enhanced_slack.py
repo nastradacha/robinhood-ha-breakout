@@ -283,6 +283,55 @@ class EnhancedSlackIntegration:
         except Exception as e:
             logger.error(f"[ENHANCED-SLACK] Failed to send VIX normalized alert: {e}")
 
+    def send_earnings_block_alert(self, symbol: str, earnings_info: Dict):
+        """
+        Send earnings block alert to Slack.
+        
+        Args:
+            symbol: Stock symbol being blocked
+            earnings_info: Dict with earnings details from earnings_calendar
+        """
+        try:
+            session_emoji = "🌅" if earnings_info.get("session") == "BMO" else "🌆" if earnings_info.get("session") == "AMC" else "📅"
+            
+            message = (
+                f"📊 **EARNINGS BLOCK** 📊\n\n"
+                f"**Symbol:** {symbol}\n"
+                f"**Earnings:** {earnings_info.get('earnings_dt_local', 'Unknown')} {session_emoji}\n"
+                f"**Hours Until:** {earnings_info.get('hours_until', 0):.1f}h\n\n"
+                f"🛑 **TRADING BLOCKED** until earnings window passes\n"
+                f"📈 Other symbols continue to be monitored\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Earnings block alert sent for {symbol}")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send earnings block alert: {e}")
+
+    def send_earnings_clear_alert(self, symbol: str):
+        """
+        Send earnings clear alert to Slack.
+        
+        Args:
+            symbol: Stock symbol that is no longer blocked
+        """
+        try:
+            message = (
+                f"✅ **EARNINGS CLEAR** ✅\n\n"
+                f"**Symbol:** {symbol}\n\n"
+                f"🟢 **TRADING RESUMED** for {symbol}\n"
+                f"📊 Earnings window has passed\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Earnings clear alert sent for {symbol}")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send earnings clear alert: {e}")
+
     def _send_enhanced_text_alert(
         self, symbol: str, decision: str, analysis: Dict, confidence: float
     ):

@@ -72,6 +72,16 @@ MARKET_HOURS_ENABLED: true         # Enable enhanced market hours validation
 MARKET_CALENDAR_CACHE_MINUTES: 1440 # Cache market calendar for 24 hours (1440 minutes)
 ALPHA_VANTAGE_API_KEY: "<env:ALPHA_VANTAGE_API_KEY>"  # Optional: For enhanced market calendar data to minimize API calls
 
+# Earnings Calendar Integration (US-FA-002)
+EARNINGS_ENABLED: true                    # Enable earnings calendar blocking
+EARNINGS_BLOCK_WINDOW_HOURS: 24          # Block trades N hours before earnings (default: 24h)
+EARNINGS_POST_WINDOW_HOURS: 0            # Block trades N hours after earnings (default: 0h)
+EARNINGS_CACHE_MINUTES: 720              # Cache earnings data for 12 hours (720 minutes)
+EARNINGS_PROVIDER: "fmp"                 # Primary provider: "fmp" or "alpha_vantage"
+FMP_API_KEY: "<env:FMP_API_KEY>"         # Financial Modeling Prep API key (primary)
+EARNINGS_APPLY_TO_ETFS: false            # Apply earnings blocking to ETFs (default: false)
+EARNINGS_FAILSAFE_ALLOW: true            # Allow trades if earnings provider fails (default: true)
+
 # Per-Symbol True Range Thresholds (allows trading in calm market conditions)
 MIN_TR_RANGE_PCT_BY_SYMBOL:
   SPY: 0.10

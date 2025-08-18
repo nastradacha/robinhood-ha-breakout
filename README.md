@@ -26,9 +26,10 @@
 
 **This is a complete automated trading system** - from market analysis to trade execution, position monitoring, and profit-taking, all running autonomously with your oversight.
 
-### 🚀 **Current Features (v2.6.0 - MARKET HOURS VALIDATION!)**
+### 🚀 **Current Features (v2.7.0 - EARNINGS CALENDAR INTEGRATION!)**
 - 🚨 **VIX Spike Detection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - 🕒 **Market Hours Validation**: Enhanced validation with holidays and early close detection
+- 📊 **Earnings Calendar Blocking**: Prevents trades within 24h of earnings announcements
 - 📊 **Real-Time Status Dashboard**: Complete system monitoring via Slack `/trading-status` command  
 - 🔄 **Automated Recovery System**: Self-healing with exponential backoff and escalation alerts
 - 🎯 **Complete Automation Pipeline**: End-to-end automated trading system
@@ -47,6 +48,7 @@
 - 🔒 **Enterprise-Grade Risk Management**: Multi-layered safety systems
   - 🚨 **VIX Spike Protection**: Blocks new trades when volatility > 30 (configurable)
   - 🕒 **Market Hours Validation**: Holiday and early close detection prevents invalid trades
+  - 📊 **Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
   - 💰 **Symbol-Specific Risk Controls**: Tailored position sizing per asset
   - 🛡️ **Environment Isolation**: Separate paper/live bankroll tracking
   - 🚨 **Real-Time Monitoring**: Continuous position and P&L surveillance

@@ -2,6 +2,58 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.7.0] - 2025-08-18
+
+### Added - Earnings Calendar Integration (US-FA-002)
+- **Earnings calendar blocking** prevents trades within 24 hours of earnings announcements
+- **Multi-provider support** with Financial Modeling Prep (FMP) primary and Alpha Vantage fallback
+- **Timezone-aware processing** handles BMO/AMC sessions with ET to UTC conversion
+- **Intelligent caching system** with 12-hour TTL to minimize API calls and improve performance
+- **ETF handling configuration** with optional earnings blocking for ETFs
+- **Fail-safe design** allows trading if earnings data unavailable (conservative approach)
+- **Pre-LLM integration** blocks trades before AI analysis to save compute resources
+- **Slack alert integration** for earnings block and clear notifications
+
+### Implementation
+- `utils/earnings_calendar.py` - Complete earnings calendar system with EarningsCalendar class
+- `config.yaml` - EARNINGS_ENABLED, EARNINGS_BLOCK_WINDOW_HOURS, EARNINGS_CACHE_MINUTES configuration
+- Pre-LLM hard gate integration in `utils/multi_symbol_scanner.py`
+- Slack notification integration via `utils/enhanced_slack.py`
+- Environment variables: FMP_API_KEY and ALPHA_VANTAGE_API_KEY support
+
+### Enhanced
+- **Conservative risk management** - blocks new positions before earnings volatility
+- **Provider abstraction** supports multiple earnings data sources with fallback
+- **Session parsing** handles BMO (Before Market Open) and AMC (After Market Close) timing
+- **Comprehensive logging** with [EARNINGS-GATE] prefix for audit trail
+
+### Testing
+- Comprehensive test suite: `tests/test_earnings_calendar.py` with 15+ test cases
+- Provider API parsing and error handling validation
+- Timezone and window logic testing
+- Caching behavior and TTL expiration validation
+- ETF blocking toggle and integration testing
+- Public API functions and fail-safe behavior verification
+
+### Usage
+```yaml
+# config.yaml Earnings Calendar configuration
+EARNINGS_ENABLED: true                    # Enable earnings calendar blocking
+EARNINGS_BLOCK_WINDOW_HOURS: 24          # Hours before earnings to block trades
+EARNINGS_POST_WINDOW_HOURS: 0            # Hours after earnings to block trades
+EARNINGS_CACHE_MINUTES: 720              # Cache earnings data for 12 hours
+EARNINGS_PROVIDER: "fmp"                 # Primary provider: "fmp" or "alpha_vantage"
+EARNINGS_APPLY_TO_ETFS: false            # Apply earnings blocking to ETFs
+EARNINGS_FAILSAFE_ALLOW: true            # Allow trading if earnings data unavailable
+FMP_API_KEY: "<env:FMP_API_KEY>"         # Financial Modeling Prep API key
+```
+
+```bash
+# Environment variables for earnings calendar
+FMP_API_KEY=your_fmp_api_key
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+```
+
 ## [2.6.0] - 2025-08-18
 
 ### Added - VIX Spike Detection (US-FA-001)

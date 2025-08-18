@@ -744,6 +744,17 @@ class MultiSymbolScanner:
                 if current_time < market_open:
                     return False, f"Before market open (current: {current_time.strftime('%H:%M')}, open: 09:30 ET)"
             
+            # 3. Check earnings calendar blocking (US-FA-002)
+            symbol = market_data.get("symbol", "UNKNOWN")
+            try:
+                from .earnings_calendar import validate_earnings_blocking
+                can_trade, earnings_reason = validate_earnings_blocking(symbol, current_et.astimezone(pytz.UTC))
+                if not can_trade:
+                    return False, f"Earnings blocking: {earnings_reason}"
+                logger.debug(f"[EARNINGS-GATE] {symbol}: {earnings_reason}")
+            except Exception as e:
+                logger.warning(f"[EARNINGS-GATE] Earnings check failed for {symbol}: {e}, allowing trades (fail-safe)")
+            
             # 5. Check minimum true range percentage (per-symbol thresholds)
             symbol = market_data.get("symbol", "UNKNOWN")
             by_symbol = config.get("MIN_TR_RANGE_PCT_BY_SYMBOL", {})

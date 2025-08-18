@@ -15,7 +15,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
     (19 Symbols)           (Advanced ML)      (Alpaca API)           (Live P&L)            (15% Targets)
 ```
 
-**Current v2.6.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
+**Current v2.7.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
 - **🎯 Complete Automation**: From market scanning to profit-taking, zero manual intervention
 - **🏦 Alpaca API Integration**: Professional-grade execution with real-time market data
 - **📊 Multi-Symbol Intelligence**: 19 symbols with symbol-specific risk management
@@ -27,6 +27,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
 - **🛡️ Risk Management**: Symbol-specific liquidity requirements and position sizing
 - **🚨 VIX Spike Protection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - **🔒 Environment Safety**: Separate paper/live environments with explicit risk acknowledgment
+- **📊 Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
 
 The system operates as a cohesive automated trading platform with specialized components handling market analysis, execution, monitoring, and risk management.
 
@@ -319,7 +320,26 @@ positions_robinhood_live.csv   # Robinhood positions
 - `send_vix_alert()`: Slack notifications for spike/normalized states
 - `log_vix_decision()`: Audit trail for all VIX-based decisions
 
-### 11. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
+### 11. 📊 **Earnings Calendar Department** (`utils/earnings_calendar.py`) **NEW v2.7.0!**
+**What it does**: Prevents trades within 24 hours of earnings announcements to avoid volatility spikes
+
+**Think of it as**: Your earnings risk manager that protects you from earnings surprises
+- **Multi-Provider Integration**: Financial Modeling Prep (FMP) primary, Alpha Vantage fallback
+- **Timezone-Aware Processing**: Handles BMO/AMC sessions with ET to UTC conversion
+- **Intelligent Caching**: 12-hour cache TTL to minimize API calls and improve performance
+- **ETF Handling**: Configurable option to apply earnings blocking to ETFs
+- **Fail-safe Design**: Allows trading if earnings data unavailable (conservative approach)
+- **Pre-LLM Integration**: Blocks trades before AI analysis to save compute resources
+
+**Key Functions**:
+- `EarningsCalendar()`: Main earnings calendar management class
+- `validate_earnings_blocking()`: Public API for trade validation
+- `get_next_earnings()`: Fetches upcoming earnings with provider fallback
+- `_parse_earnings_datetime()`: Handles BMO/AMC session parsing with timezone conversion
+- `_is_within_blocking_window()`: Calculates if symbol is within earnings window
+- `send_earnings_block_alert()`: Slack notifications when earnings blocks trigger
+
+### 12. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
 **What it does**: Advanced position exit logic with trailing stops and time-based exits
 
 **Think of it as**: Your risk management specialist
@@ -334,7 +354,7 @@ positions_robinhood_live.csv   # Robinhood positions
 - `_check_trailing_stop()`: Trailing stop loss logic
 - `_check_time_based_exit()`: End-of-day exit recommendations
 
-### 10. 📈 **Position Monitoring Department** (`monitor_alpaca.py`)
+### 13. 📈 **Position Monitoring Department** (`monitor_alpaca.py`)
 **What it does**: Real-time position tracking with automated profit/loss alerts
 
 **Think of it as**: Your dedicated position watchdog with professional-grade data
@@ -363,7 +383,7 @@ python monitor_alpaca.py
 python main.py --monitor-positions
 ```
 
-### 8. 📈 **Analytics Department** (`trading_dashboard.py`, `trade_history.py`)
+### 14. 📈 **Analytics Department** (`trading_dashboard.py`, `trade_history.py`)
 **What it does**: Comprehensive trading performance analysis and reporting
 
 **Think of it as**: Your personal trading analyst and accountant

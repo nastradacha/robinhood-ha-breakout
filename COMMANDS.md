@@ -1,6 +1,6 @@
 # 🚀 Robinhood HA Breakout - Command Reference Guide
 
-**Complete reference for all CLI commands and usage patterns (v2.6.0)**
+**Complete reference for all CLI commands and usage patterns (v2.7.0)**
 
 ---
 
@@ -235,6 +235,7 @@ python main.py --broker alpaca --alpaca-env live --symbols SPY --i-understand-li
 - ✅ **Safety Interlocks**: Live trading requires explicit `--i-understand-live-risk` flag
 - ✅ **Fill Polling**: 90-second real-time order status with partial fill handling
 - ✅ **Environment Tagging**: All Slack notifications tagged [ALPACA:PAPER] or [ALPACA:LIVE]
+- 📊 **Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
 
 ### **Position Management Workflow**
 ```bash
@@ -368,6 +369,10 @@ ALPACA_API_KEY=your_alpaca_key
 ALPACA_SECRET_KEY=your_alpaca_secret
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
 
+# Earnings Calendar API (optional)
+FMP_API_KEY=your_fmp_api_key
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
+
 # Slack integration (optional)
 SLACK_WEBHOOK_URL=https://hooks.slack.com/...
 SLACK_BOT_TOKEN=xoxb-...
@@ -397,6 +402,15 @@ exit_strategies:
   trailing_stop_percentage: 20.0
   time_based_exit_enabled: true
   market_close_time: "15:45"
+
+# Earnings Calendar Protection (NEW v2.7.0)
+EARNINGS_ENABLED: true
+EARNINGS_BLOCK_WINDOW_HOURS: 24
+EARNINGS_POST_WINDOW_HOURS: 0
+EARNINGS_CACHE_MINUTES: 720
+EARNINGS_PROVIDER: "fmp"
+EARNINGS_APPLY_TO_ETFS: false
+EARNINGS_FAILSAFE_ALLOW: true
 ```
 
 ### **Key Files**

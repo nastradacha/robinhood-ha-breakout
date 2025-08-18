@@ -28,14 +28,25 @@ This document contains user stories for achieving bulletproof full automation of
 - Comprehensive test suite: `tests/test_vix_monitor.py` with 14 test cases
 - Fail-safe design: allows trading if VIX data unavailable
 
-### US-FA-002: Earnings Calendar Integration
-- [ ] **As a trader**, I want the system to avoid trading symbols with earnings announcements within 24 hours so that I don't get caught in earnings volatility
-- [ ] **Acceptance Criteria:**
-  - Integrate with earnings calendar API (Alpha Vantage, FMP, or similar)
-  - Block trading symbols with earnings within 24 hours (configurable)
-  - Include earnings date in opportunity evaluation logs
-  - Slack notification when earnings block prevents trades
-  - Cache earnings data to minimize API calls
+### US-FA-002: Earnings Calendar Integration ✅ COMPLETED
+- [x] **As a trader**, I want the system to avoid trading symbols with earnings announcements within 24 hours so that I don't get caught in earnings volatility
+- [x] **Acceptance Criteria:**
+  - ✅ Integrate with earnings calendar API (Alpha Vantage, FMP, or similar)
+  - ✅ Block trading symbols with earnings within 24 hours (configurable)
+  - ✅ Include earnings date in opportunity evaluation logs
+  - ✅ Slack notification when earnings block prevents trades
+  - ✅ Cache earnings data to minimize API calls
+
+**Implementation Details:**
+- `utils/earnings_calendar.py` - Complete earnings calendar system with multi-provider support
+- `config.yaml` - EARNINGS_ENABLED, EARNINGS_BLOCK_WINDOW_HOURS, EARNINGS_CACHE_MINUTES configuration
+- Pre-LLM gate integration in `utils/multi_symbol_scanner.py` blocks trades within earnings window
+- Slack alerts via `utils/enhanced_slack.py` for earnings block and clear notifications
+- Multi-provider support: Financial Modeling Prep (FMP) primary, Alpha Vantage fallback
+- Timezone-aware processing with BMO/AMC session handling and ET to UTC conversion
+- Comprehensive test suite: `tests/test_earnings_calendar.py` with 15+ test cases
+- Fail-safe design: allows trading if earnings data unavailable
+- ETF handling configuration with optional earnings blocking for ETFs
 
 ### US-FA-003: Market Hours Validation Enhancement ✅ COMPLETED
 - [x] **As a trader**, I want enhanced market hours validation that accounts for early closes and holidays so that the system never attempts trades when markets are closed
