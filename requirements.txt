@@ -33,3 +33,7 @@ plotly>=5.17.0
 # Logging and utilities
 colorama>=0.4.0
 rich>=13.7.0
+
+# Slack integration
+slack-sdk>=3.21.0
+flask>=2.3.0

@@ -42,9 +42,9 @@ env/
 *~
 
 # Logs
-logs/*.log
-logs/*.csv
-*.log
+# logs/*.log
+# logs/*.csv
+# *.log
 
 # Bankroll and trading data
 # bankroll*.json

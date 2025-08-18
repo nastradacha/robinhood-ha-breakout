@@ -349,6 +349,9 @@ def analyze_breakout_pattern(df: pd.DataFrame, lookback: int = 20) -> Dict:
 
     # True range percentage
     tr_pct = (current_tr / current_price) * 100 if current_price > 0 else 0
+    
+    # Debug logging for true range calculation
+    logger.info(f"[TR-CALC] current_tr={current_tr:.4f}, current_price={current_price:.2f}, tr_pct={tr_pct:.4f}%")
 
     # Distance to nearest support/resistance
     nearest_resistance = min(

@@ -60,7 +60,20 @@ MAX_PREMIUM_PCT: .70        # Max premium as % of bankroll (conservative) -- def
 MIN_CONFIDENCE: 0.65         # Minimum LLM confidence to trade (conservative)
 IV_THRESHOLD: 45.0           # Implied volatility threshold
 MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lowered for sensitivity)
-MIN_TR_RANGE_PCT: 20.0       # Minimum true range percentage for trade entry (volatility filter)
+MIN_TR_RANGE_PCT: 1.0        # Minimum true range percentage for trade entry (volatility filter)
+
+# Per-Symbol True Range Thresholds (allows trading in calm market conditions)
+MIN_TR_RANGE_PCT_BY_SYMBOL:
+  SPY: 0.10
+  QQQ: 0.15
+  IWM: 0.20
+  XLF: 0.15
+  XLK: 0.20
+  DIA: 0.15
+  GLD: 0.10
+  TLT: 0.10
+  UVXY: 0.60
+  XLE: 0.20
 
 # Intraday Trading Settings
 PROFIT_TARGET_PCT: 0.15      # Take profit at 15% gain (conservative)

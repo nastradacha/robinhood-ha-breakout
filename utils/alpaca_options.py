@@ -410,6 +410,12 @@ class AlpacaOptionsTrader:
         Returns:
             Order ID if successful, None otherwise
         """
+        # Check emergency stop before placing any orders
+        from .kill_switch import is_trading_halted
+        if is_trading_halted():
+            logger.error("[KILL-SWITCH] Emergency stop active - blocking order execution")
+            raise RuntimeError("Emergency stop active - trading halted")
+        
         try:
             order_side = OrderSide.BUY if side == "BUY" else OrderSide.SELL
             

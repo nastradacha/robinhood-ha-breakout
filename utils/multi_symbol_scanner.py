@@ -166,12 +166,19 @@ class MultiSymbolScanner:
                 
                 # Log decision for analytics with unified format
                 formatted_reason = self._format_no_trade_reason(symbol, f"Pre-LLM gate: {gate_reason}")
+                self._log_signal_event(
+                    symbol,
+                    "NO_TRADE",
+                    0.0,
+                    formatted_reason,
+                    market_data.get("current_price", 0.0),
+                )
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     0.0,
                     formatted_reason,
-                    current_price,
+                    market_data.get("current_price", 0.0),
                 )
                 return []
 
@@ -190,12 +197,19 @@ class MultiSymbolScanner:
                 # Log individual symbol decision for analytics with unified format
                 raw_reason = trade_decision.get("reason", "LLM analysis completed")
                 formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
+                self._log_signal_event(
+                    symbol,
+                    "NO_TRADE",
+                    trade_decision.get("confidence", 0.0),
+                    formatted_reason,
+                    market_data.get("current_price", 0.0),
+                )
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     trade_decision.get("confidence", 0.0),
                     formatted_reason,
-                    current_price,
+                    market_data.get("current_price", 0.0),
                 )
                 return []
 
@@ -211,12 +225,19 @@ class MultiSymbolScanner:
                 # Log individual symbol decision for analytics with unified format
                 raw_reason = f"Confidence {confidence:.2f} below threshold {min_confidence}"
                 formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
+                self._log_signal_event(
+                    symbol,
+                    "NO_TRADE",
+                    confidence,
+                    formatted_reason,
+                    market_data.get("current_price", 0.0),
+                )
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     confidence,
                     formatted_reason,
-                    current_price,
+                    market_data.get("current_price", 0.0),
                 )
                 return []
 
@@ -228,12 +249,19 @@ class MultiSymbolScanner:
                 # Log decision for analytics with unified format
                 raw_reason = f"Consecutive loss throttle: {throttle_reason}"
                 formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
+                self._log_signal_event(
+                    symbol,
+                    "NO_TRADE",
+                    confidence,
+                    formatted_reason,
+                    market_data.get("current_price", 0.0),
+                )
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     confidence,
                     formatted_reason,
-                    current_price,
+                    market_data.get("current_price", 0.0),
                 )
                 return []
 
@@ -243,12 +271,19 @@ class MultiSymbolScanner:
                 logger.info(f"[MULTI-SYMBOL] {symbol}: Rapid flip guard blocked - {flip_reason}")
                 
                 # Log decision for analytics
+                self._log_signal_event(
+                    symbol,
+                    "NO_TRADE",
+                    confidence,
+                    f"Rapid flip guard: {flip_reason}",
+                    market_data.get("current_price", 0.0),
+                )
                 self._log_symbol_decision(
                     symbol,
                     "NO_TRADE",
                     confidence,
                     f"Rapid flip guard: {flip_reason}",
-                    current_price,
+                    market_data.get("current_price", 0.0),
                 )
                 return []
 
@@ -341,7 +376,7 @@ class MultiSymbolScanner:
                 "analysis_timestamp": datetime.now().isoformat(),  # Add timestamp for freshness
                 # Additional fields for LLM validation compatibility
                 "today_true_range_pct": breakout_analysis.get(
-                    "today_true_range_pct", 0.0
+                    "true_range_pct", 0.0
                 ),
                 "room_to_next_pivot": breakout_analysis.get("room_to_next_pivot", 0.0),
                 "iv_5m": breakout_analysis.get("iv_5m", 30.0),
@@ -657,9 +692,21 @@ class MultiSymbolScanner:
             if current_time < market_open:
                 return False, f"Before market open (current: {current_time.strftime('%H:%M')}, open: 09:30 ET)"
             
-            # 4. Check minimum true range percentage
-            min_tr_range_pct = config.get("MIN_TR_RANGE_PCT", 20.0)  # Default 20%
+            # 4. Check minimum true range percentage (per-symbol thresholds)
+            symbol = market_data.get("symbol", "UNKNOWN")
+            by_symbol = config.get("MIN_TR_RANGE_PCT_BY_SYMBOL", {})
+            min_tr_range_pct = float(by_symbol.get(symbol, config.get("MIN_TR_RANGE_PCT", 1.0)))
+            
+            # Add sanity check to prevent "20%" accidents (treat >5 as % not fraction)
+            raw_threshold = min_tr_range_pct
+            if raw_threshold > 5:
+                min_tr_range_pct = raw_threshold / 100.0
+            min_tr_range_pct = min(max(min_tr_range_pct, 0.0), 5.0)
+            
             today_tr_pct = market_data.get("today_true_range_pct", 0.0)
+            
+            # Debug logging for true range values
+            logger.info(f"[TR-DEBUG] {symbol}: TR={today_tr_pct:.2f}% (threshold: {min_tr_range_pct:.1f}%)")
             
             if today_tr_pct < min_tr_range_pct:
                 return False, f"True range too low ({today_tr_pct:.1f}% < {min_tr_range_pct}% minimum)"
@@ -1227,9 +1274,9 @@ class MultiSymbolScanner:
         else:
             return f"OTHER: {reason}"
 
-    def _log_symbol_decision(self, symbol: str, decision: str, confidence: float, reason: str, price: float):
+    def _log_signal_event(self, symbol: str, decision: str, confidence: float, reason: str, price: float):
         """
-        Log trading decision for rapid flip protection and analytics.
+        Log trading signal event for rapid flip protection and analytics.
         
         Args:
             symbol: Stock symbol
@@ -1386,3 +1433,17 @@ class MultiSymbolScanner:
 
         except Exception as e:
             logger.error(f"[MULTI-SYMBOL] Error logging {symbol} decision: {e}")
+
+    def _send_no_trade_heartbeat(self):
+        """
+        Send Slack heartbeat when no trading opportunities are found.
+        """
+        try:
+            if self.slack_notifier:
+                message = "🔄 Multi-symbol scan complete - No trading opportunities found"
+                self.slack_notifier.send_heartbeat(message)
+                logger.debug("[MULTI-SYMBOL] Sent no-trade heartbeat to Slack")
+            else:
+                logger.debug("[MULTI-SYMBOL] No Slack notifier available for heartbeat")
+        except Exception as e:
+            logger.error(f"[MULTI-SYMBOL] Error sending no-trade heartbeat: {e}")

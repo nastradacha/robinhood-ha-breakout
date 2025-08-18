@@ -65,6 +65,7 @@ from utils.enhanced_slack import EnhancedSlackIntegration
 from utils.multi_symbol_scanner import MultiSymbolScanner
 from utils.portfolio import PortfolioManager, Position
 from utils.alpaca_options import AlpacaOptionsTrader, create_alpaca_trader
+from utils.kill_switch import get_kill_switch, is_trading_halted
 
 # Load environment variables
 load_dotenv()
@@ -1332,6 +1333,10 @@ def main_loop(
     logger = logging.getLogger(__name__)
     tz = ZoneInfo("America/New_York")
 
+    # Initialize kill switch
+    kill_switch = get_kill_switch()
+    logger.info(f"[KILL-SWITCH] Initialized (active: {kill_switch.is_active()})")
+
     # Initialize persistent browser bot for loop mode
     bot = None
     bot_idle_since = None
@@ -1343,6 +1348,27 @@ def main_loop(
         while True:
             loop_count += 1
             cycle_start = datetime.now(tz)
+
+            # Check for emergency stop file trigger
+            kill_switch.check_file_trigger()
+
+            # Check if emergency stop is active
+            if kill_switch.is_active():
+                status = kill_switch.get_status()
+                logger.warning(f"[KILL-SWITCH] Emergency stop active - skipping trading cycle. Reason: {status['reason']}")
+                
+                # Send Slack notification if not already notified this cycle
+                if slack_notifier and loop_count % 10 == 1:  # Notify every 10th cycle to avoid spam
+                    slack_notifier.send_error_alert(
+                        "Emergency Stop Active", 
+                        f"Trading halted: {status['reason']} (activated: {status['activated_at']})"
+                    )
+                
+                # Continue monitoring existing positions unless monitor_only is False
+                if not kill_switch.is_monitor_only():
+                    # Sleep and continue loop without trading
+                    time.sleep(args.interval * 60)
+                    continue
 
             # Check if we should exit based on end time
             if end_time and cycle_start >= end_time:

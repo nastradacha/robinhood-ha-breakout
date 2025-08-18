@@ -58,7 +58,6 @@ class EnhancedPositionMonitor:
 
     def __init__(self):
         """Initialize monitor with Alpaca and fallback data sources."""
-        self.alpaca = AlpacaClient()
         self.slack = EnhancedSlackIntegration()
 
         # Load config and resolve broker/env-scoped positions file
@@ -69,6 +68,9 @@ class EnhancedPositionMonitor:
             broker = config.get("BROKER", "robinhood")
             env = config.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
 
+            # Initialize Alpaca client with correct environment
+            self.alpaca = AlpacaClient(env=env)
+
             # Prefer explicit POSITIONS_FILE from config (populated by load_config)
             positions_file = config.get("POSITIONS_FILE")
             if not positions_file:
@@ -78,6 +80,8 @@ class EnhancedPositionMonitor:
         except Exception:
             # Ultimate fallback to legacy filename
             positions_file = "positions.csv"
+            # Fallback Alpaca client (paper mode)
+            self.alpaca = AlpacaClient(env="paper")
 
         self.positions_file = positions_file
 

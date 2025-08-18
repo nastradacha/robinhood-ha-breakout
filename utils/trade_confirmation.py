@@ -91,11 +91,14 @@ logger = logging.getLogger(__name__)
 class TradeConfirmationManager:
     """Manages trade confirmation and outcome recording."""
 
-    def __init__(self, portfolio_manager, bankroll_manager, slack_notifier=None):
+    def __init__(self, portfolio_manager, bankroll_manager, slack_notifier=None, use_webhook=False):
         self.portfolio_manager = portfolio_manager
         self.bankroll_manager = bankroll_manager
         self.slack_notifier = slack_notifier
         self.pending_trade = None  # Store trade details for Slack bridge
+        self.slack_listener = None  # Slack message listener
+        self.use_webhook = use_webhook
+        self.webhook_server = None
 
     def get_user_decision(
         self, trade_details: Dict, method: str = "prompt"
@@ -124,6 +127,25 @@ class TradeConfirmationManager:
         # Store pending trade for potential Slack confirmation
         self.pending_trade = trade_details.copy()
 
+        # Send Slack notification for trade decision
+        if self.slack_notifier:
+            direction = trade_details.get('direction', 'N/A')
+            strike = trade_details.get('strike', 'N/A')
+            premium = trade_details.get('premium', 0)
+            quantity = trade_details.get('quantity', 1)
+            
+            slack_msg = f"🎯 *TRADE DECISION REQUIRED*\n\n" \
+                       f"Trade: {direction} ${strike}\n" \
+                       f"Expected Premium: ${premium:.2f}\n" \
+                       f"Quantity: {quantity} contracts\n\n" \
+                       f"💡 Reply with: 'filled 1.28' or 'cancelled'"
+            
+            self.slack_notifier.send_heartbeat(slack_msg)
+            logger.info(f"[TRADE-CONFIRM] Sent Slack notification for {direction} ${strike}")
+            
+            # Start Slack listener for replies in background
+            self._start_slack_listener_background()
+
         print("\n" + "=" * 60)
         print("🎯 TRADE DECISION REQUIRED")
         print("=" * 60)
@@ -147,12 +169,21 @@ class TradeConfirmationManager:
             print("  [P] Submit at different price (enter custom premium)")
             print("  [0.XX] Enter premium directly (e.g., 0.75)")
 
-            decision = input("\nYour choice: ").lower().strip()
+            # Check for Slack messages before prompting
+            if self.slack_notifier and self._check_slack_messages():
+                # Slack message processed, return the result
+                if hasattr(self, '_slack_decision'):
+                    decision, premium = self._slack_decision
+                    delattr(self, '_slack_decision')
+                    return decision, premium
+
+            choice = input("\nYour choice: ").strip().upper()
 
             # Check if user entered a premium directly (e.g., "0.75", "1.25")
             try:
                 if (
-                    decision.replace(".", "").replace("-", "").isdigit()
+                    choice.replace(".", "").replace("-", "").isdigit()
+                    and float(choice) > 0
                     and float(decision) > 0
                 ):
                     actual_premium = float(decision)
@@ -389,6 +420,9 @@ class TradeConfirmationManager:
             logger.warning(f"Unrecognized Slack message: {message}")
             return False
 
+        # Store decision for terminal pickup
+        self._slack_decision = (decision, actual_premium)
+        
         # Record the trade outcome (copy pending trade before clearing)
         trade_copy = self.pending_trade.copy()
         self.record_trade_outcome(trade_copy, decision, actual_premium)
@@ -399,12 +433,61 @@ class TradeConfirmationManager:
         # Send confirmation back to Slack
         if self.slack_notifier:
             if decision == "SUBMITTED":
-                confirm_msg = f"[OK] Confirmed via Slack: {trade_copy.get('direction')} ${trade_copy.get('strike')} @ ${actual_premium:.2f}"
+                confirm_msg = f"✅ Confirmed via Slack: {trade_copy.get('direction')} ${trade_copy.get('strike')} @ ${actual_premium:.2f}"
             else:
                 confirm_msg = "❌ Confirmed via Slack: Trade cancelled"
             self.slack_notifier.send_heartbeat(confirm_msg)
 
         return True
+
+    def _start_slack_listener_background(self):
+        """Start Slack listener in background thread."""
+        import threading
+        import os
+        
+        try:
+            from .slack_listener import SlackTradeListener
+            
+            # Get Slack token from environment
+            slack_token = os.getenv('SLACK_BOT_TOKEN')
+            if not slack_token:
+                logger.warning("No SLACK_BOT_TOKEN found, Slack replies disabled")
+                return
+                
+            # Create listener
+            self.slack_listener = SlackTradeListener(slack_token)
+            
+            # Start listener in background thread
+            def listen_for_messages():
+                try:
+                    self.slack_listener.start_listening(
+                        message_handler=self.process_slack_message,
+                        poll_interval=3
+                    )
+                except Exception as e:
+                    logger.error(f"Slack listener error: {e}")
+            
+            listener_thread = threading.Thread(target=listen_for_messages, daemon=True)
+            listener_thread.start()
+            logger.info("[SLACK-LISTENER] Started background listener")
+            
+        except ImportError:
+            logger.warning("Slack listener not available")
+        except Exception as e:
+            logger.error(f"Failed to start Slack listener: {e}")
+
+    def _check_slack_messages(self) -> bool:
+        """Check for new Slack messages and process them."""
+        if not self.slack_listener:
+            return False
+            
+        try:
+            # This is handled by the background listener
+            # Just check if we have a pending decision
+            return hasattr(self, '_slack_decision')
+        except Exception as e:
+            logger.error(f"Error checking Slack messages: {e}")
+            return False
 
 
 def create_quick_confirmation_script():
