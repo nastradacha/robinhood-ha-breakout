@@ -13,9 +13,19 @@ All notable changes to the Robinhood HA Breakout system will be documented in th
 - **System status dashboard** integration with real-time VIX display
 - **Fail-safe design** allows trading if VIX data unavailable
 
+### Added - Market Hours Validation Enhancement (US-FA-003)
+- **Enhanced market hours validation** with holiday and early close detection
+- **Market calendar API integration** with Alpha Vantage support and hardcoded fallback
+- **Holiday detection** for all major US market holidays (9 holidays)
+- **Early close detection** for July 3rd, Black Friday, Christmas Eve (1:00 PM ET close)
+- **Weekend and pre-market/after-hours handling** with timezone conversion
+- **24-hour caching system** for performance optimization
+- **Pre-LLM gate integration** prevents trades during market closures
+
 ### Implementation
 - `utils/vix_monitor.py` - Complete VIX monitoring system with VIXMonitor class
-- `config.yaml` - VIX_SPIKE_THRESHOLD, VIX_CACHE_MINUTES, VIX_ENABLED configuration
+- `utils/market_calendar.py` - Market calendar system with MarketCalendar class
+- `config.yaml` - VIX_SPIKE_THRESHOLD, VIX_CACHE_MINUTES, VIX_ENABLED, MARKET_HOURS_ENABLED configuration
 - Pre-LLM hard gate integration in `utils/multi_symbol_scanner.py`
 - Slack notification integration via `utils/enhanced_slack.py`
 - System status dashboard VIX integration in `utils/system_status.py`
@@ -28,16 +38,22 @@ All notable changes to the Robinhood HA Breakout system will be documented in th
 
 ### Testing
 - Comprehensive test suite: `tests/test_vix_monitor.py` with 14 test cases
+- Market hours validation test suite: `tests/test_market_calendar.py` with 21 test cases
+- Integration tests for trading gate validation and fallback behavior
 - VIX data fetching, caching, and spike detection validated
 - Trading gate integration confirmed blocking trades during spikes
 - Slack alert functionality tested with state change detection
 
 ### Usage
 ```yaml
-# config.yaml VIX configuration
-VIX_SPIKE_THRESHOLD: 30.0    # Block trades when VIX > 30
-VIX_CACHE_MINUTES: 5         # Cache VIX data for 5 minutes
-VIX_ENABLED: true            # Enable VIX monitoring
+# config.yaml VIX and Market Hours configuration
+VIX_SPIKE_THRESHOLD: 30.0           # Block trades when VIX > 30
+VIX_CACHE_MINUTES: 5                # Cache VIX data for 5 minutes
+VIX_ENABLED: true                   # Enable VIX monitoring
+
+MARKET_HOURS_ENABLED: true          # Enable enhanced market hours validation
+MARKET_CALENDAR_CACHE_MINUTES: 1440 # Cache market calendar for 24 hours
+ALPHA_VANTAGE_API_KEY: "<env:ALPHA_VANTAGE_API_KEY>"  # Optional for enhanced data
 ```
 
 ```bash

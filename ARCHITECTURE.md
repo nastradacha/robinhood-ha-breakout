@@ -15,7 +15,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
     (19 Symbols)           (Advanced ML)      (Alpaca API)           (Live P&L)            (15% Targets)
 ```
 
-**Current v2.0.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
+**Current v2.6.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
 - **🎯 Complete Automation**: From market scanning to profit-taking, zero manual intervention
 - **🏦 Alpaca API Integration**: Professional-grade execution with real-time market data
 - **📊 Multi-Symbol Intelligence**: 19 symbols with symbol-specific risk management
@@ -25,6 +25,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
 - **🔄 Transaction Reconciliation**: Direct Alpaca API sync ensures 100% trade accuracy
 - **📱 Enterprise Notifications**: Comprehensive Slack integration with charts and analysis
 - **🛡️ Risk Management**: Symbol-specific liquidity requirements and position sizing
+- **🚨 VIX Spike Protection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - **🔒 Environment Safety**: Separate paper/live environments with explicit risk acknowledgment
 
 The system operates as a cohesive automated trading platform with specialized components handling market analysis, execution, monitoring, and risk management.
@@ -300,7 +301,25 @@ positions_robinhood_live.csv   # Robinhood positions
 - **10-candle context** (vs 5) for improved analysis quality
 - **Timestamp tracking** for data freshness validation
 
-### 10. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
+### 10. 🚨 **VIX Monitoring Department** (`utils/vix_monitor.py`) **NEW!**
+**What it does**: Real-time volatility monitoring with automatic trade protection
+
+**Think of it as**: Your volatility risk manager that protects you during market chaos
+- **Real-time VIX Monitoring**: Fetches current VIX level before each trade decision
+- **Automatic Trade Blocking**: No new positions when VIX > 30 (configurable threshold)
+- **Slack Alerts**: Notifications when VIX spikes block trading or normalize
+- **Fail-safe Design**: Allows trading if VIX data unavailable
+- **System Integration**: VIX status displayed in system dashboard
+- **Conservative Protection**: Existing positions continue monitoring during spikes
+
+**Key Functions**:
+- `VIXMonitor()`: Main volatility monitoring class
+- `get_current_vix()`: Real-time VIX level with caching
+- `is_vix_spike()`: Volatility threshold evaluation
+- `send_vix_alert()`: Slack notifications for spike/normalized states
+- `log_vix_decision()`: Audit trail for all VIX-based decisions
+
+### 11. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
 **What it does**: Advanced position exit logic with trailing stops and time-based exits
 
 **Think of it as**: Your risk management specialist

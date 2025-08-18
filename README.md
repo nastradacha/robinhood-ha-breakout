@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.6.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-19%20Symbols-orange.svg)](#-multi-symbol-trading)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20API-blue.svg)](#-real-time-market-data)
 [![Automated Execution](https://img.shields.io/badge/execution-Fully%20Automated-green.svg)](#-automated-execution)
@@ -26,8 +26,10 @@
 
 **This is a complete automated trading system** - from market analysis to trade execution, position monitoring, and profit-taking, all running autonomously with your oversight.
 
-### 🚀 **Current Features (v2.5.0 - SYSTEM STATUS DASHBOARD!)**
-- 📊 **Real-Time Status Dashboard**: Complete system monitoring via Slack `/trading-status` command
+### 🚀 **Current Features (v2.6.0 - MARKET HOURS VALIDATION!)**
+- 🚨 **VIX Spike Detection**: Automatic volatility monitoring blocks new trades when VIX > 30
+- 🕒 **Market Hours Validation**: Enhanced validation with holidays and early close detection
+- 📊 **Real-Time Status Dashboard**: Complete system monitoring via Slack `/trading-status` command  
 - 🔄 **Automated Recovery System**: Self-healing with exponential backoff and escalation alerts
 - 🎯 **Complete Automation Pipeline**: End-to-end automated trading system
   - ✅ **Multi-Symbol Scanning**: 19 symbols with symbol-specific liquidity requirements
@@ -43,6 +45,8 @@
   - 🏛️ **Dealer Gamma Integration**: Market maker positioning insights
   - 🧠 **Context Memory System**: AI learns from recent trading patterns
 - 🔒 **Enterprise-Grade Risk Management**: Multi-layered safety systems
+  - 🚨 **VIX Spike Protection**: Blocks new trades when volatility > 30 (configurable)
+  - 🕒 **Market Hours Validation**: Holiday and early close detection prevents invalid trades
   - 💰 **Symbol-Specific Risk Controls**: Tailored position sizing per asset
   - 🛡️ **Environment Isolation**: Separate paper/live bankroll tracking
   - 🚨 **Real-Time Monitoring**: Continuous position and P&L surveillance

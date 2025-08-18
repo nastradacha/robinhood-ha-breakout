@@ -63,9 +63,14 @@ MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lower
 MIN_TR_RANGE_PCT: 1.0        # Minimum true range percentage for trade entry (volatility filter)
 
 # VIX Spike Detection (US-FA-001)
-VIX_SPIKE_THRESHOLD: 30.0    # Block new positions when VIX > 30 (high volatility)
-VIX_CACHE_MINUTES: 5         # Cache VIX data for 5 minutes to minimize API calls
-VIX_ENABLED: true            # Enable VIX spike detection
+VIX_ENABLED: true                   # Enable VIX spike detection
+VIX_SPIKE_THRESHOLD: 30.0          # Block new trades when VIX > this value
+VIX_CACHE_MINUTES: 5               # Cache VIX data for this many minutes
+
+# Market Hours Validation (US-FA-003)
+MARKET_HOURS_ENABLED: true         # Enable enhanced market hours validation
+MARKET_CALENDAR_CACHE_MINUTES: 1440 # Cache market calendar for 24 hours (1440 minutes)
+ALPHA_VANTAGE_API_KEY: "<env:ALPHA_VANTAGE_API_KEY>"  # Optional: For enhanced market calendar data to minimize API calls
 
 # Per-Symbol True Range Thresholds (allows trading in calm market conditions)
 MIN_TR_RANGE_PCT_BY_SYMBOL:

@@ -719,19 +719,30 @@ class MultiSymbolScanner:
             except Exception as e:
                 logger.warning(f"[VIX-GATE] VIX check failed: {e}, allowing trades (fail-safe)")
             
-            # 2. Check if after entry cutoff time (15:15 ET)
-            entry_cutoff = dt_time(15, 15)  # 3:15 PM ET
-            if current_time >= entry_cutoff:
-                return False, f"After entry cutoff time (current: {current_time.strftime('%H:%M')}, cutoff: 15:15 ET)"
-            
-            # 3. Check if market is closed (basic weekday check)
-            if current_et.weekday() >= 5:  # Saturday=5, Sunday=6
-                return False, f"Market closed (weekend: {current_et.strftime('%A')})"
-            
-            # 4. Check if before market open (9:30 AM ET)
-            market_open = dt_time(9, 30)
-            if current_time < market_open:
-                return False, f"Before market open (current: {current_time.strftime('%H:%M')}, open: 09:30 ET)"
+            # 2. Check market hours validation (US-FA-003)
+            try:
+                from .market_calendar import validate_trading_time
+                can_trade, market_reason = validate_trading_time(current_et)
+                if not can_trade:
+                    return False, f"Market hours validation: {market_reason}"
+                logger.debug(f"[MARKET-GATE] {market_reason}")
+            except Exception as e:
+                logger.warning(f"[MARKET-GATE] Market hours check failed: {e}, falling back to basic validation")
+                
+                # Fallback to basic market hours validation
+                # Check if after entry cutoff time (15:15 ET)
+                entry_cutoff = dt_time(15, 15)  # 3:15 PM ET
+                if current_time >= entry_cutoff:
+                    return False, f"After entry cutoff time (current: {current_time.strftime('%H:%M')}, cutoff: 15:15 ET)"
+                
+                # Check if market is closed (basic weekday check)
+                if current_et.weekday() >= 5:  # Saturday=5, Sunday=6
+                    return False, f"Market closed (weekend: {current_et.strftime('%A')})"
+                
+                # Check if before market open (9:30 AM ET)
+                market_open = dt_time(9, 30)
+                if current_time < market_open:
+                    return False, f"Before market open (current: {current_time.strftime('%H:%M')}, open: 09:30 ET)"
             
             # 5. Check minimum true range percentage (per-symbol thresholds)
             symbol = market_data.get("symbol", "UNKNOWN")

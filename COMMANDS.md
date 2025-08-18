@@ -1,6 +1,6 @@
 # 🚀 Robinhood HA Breakout - Command Reference Guide
 
-**Complete reference for all CLI commands and usage patterns (v2.5.0)**
+**Complete reference for all CLI commands and usage patterns (v2.6.0)**
 
 ---
 
@@ -459,7 +459,7 @@ python main.py --dry-run --log-level DEBUG
 
 ---
 
-## 📊 **System Status Dashboard (NEW v2.5.0)**
+## 📊 **System Status Dashboard (NEW v2.6.0)**
 
 ### **Slack Commands**
 ```bash
@@ -471,7 +471,8 @@ python main.py --dry-run --log-level DEBUG
 - 🟢 **System Health**: Real-time health monitoring (healthy/degraded/critical)
 - 💰 **Active Positions**: P&L across all broker/environment combinations
 - 📈 **Daily Summary**: Trades, win rate, realized P&L
-- 🏛️ **Market Conditions**: Market hours, VIX, time to close
+- 🏛️ **Market Conditions**: Market hours, VIX level, time to close
+- 🚨 **VIX Spike Protection**: Real-time volatility monitoring and trade blocking
 - 🔗 **API Status**: Connectivity to Alpaca, Slack, Yahoo Finance
 - 🔄 **Recovery Status**: Automated recovery attempts and escalations
 

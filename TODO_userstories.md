@@ -37,14 +37,24 @@ This document contains user stories for achieving bulletproof full automation of
   - Slack notification when earnings block prevents trades
   - Cache earnings data to minimize API calls
 
-### US-FA-003: Market Hours Validation Enhancement
-- [ ] **As a trader**, I want enhanced market hours validation that accounts for early closes and holidays so that the system never attempts trades when markets are closed
-- [ ] **Acceptance Criteria:**
+### US-FA-003: Market Hours Validation Enhancement ✅ COMPLETED
+- [x] **As a trader**, I want enhanced market hours validation that accounts for early closes and holidays so that the system never attempts trades when markets are closed
+- [x] **Acceptance Criteria:**
   - Integrate with market calendar API for holidays/early closes
   - Validate market status before each trade attempt
   - Handle pre-market and after-hours periods appropriately
   - Log market status in all trade decisions
   - Graceful handling of market closure during active positions
+
+**Implementation Details:**
+- `utils/market_calendar.py` - Complete market calendar system with holiday/early close detection
+- `config.yaml` - MARKET_HOURS_ENABLED, MARKET_CALENDAR_CACHE_MINUTES, ALPHA_VANTAGE_API_KEY settings
+- Pre-LLM gate integration in `utils/multi_symbol_scanner.py` validates market hours before trades
+- Comprehensive fallback system: API → hardcoded holidays → basic validation
+- Fail-safe design: allows trading if market calendar unavailable
+- System status dashboard integration shows market hours and time to open/close
+- Comprehensive test suite: `tests/test_market_calendar.py` with 15+ test cases
+- Supports holidays, early closes, weekends, pre-market, after-hours detection
 
 ---
 
