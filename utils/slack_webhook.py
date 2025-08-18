@@ -27,6 +27,185 @@ class SlackWebhookServer:
         self.trade_confirmation_manager = None
         self._setup_routes()
         
+    def _handle_trading_status_command(self, data):
+        """Handle /trading-status slash command."""
+        try:
+            from utils.system_status import get_system_status
+            
+            # Get complete system status
+            status_report = get_system_status()
+            
+            # Format as Slack message blocks
+            blocks = self._format_status_blocks(status_report)
+            
+            # Return immediate response
+            return jsonify({
+                "response_type": "ephemeral",
+                "blocks": blocks
+            })
+            
+        except Exception as e:
+            logger.error(f"[SLACK-WEBHOOK] Error handling trading status command: {e}")
+            return jsonify({
+                "response_type": "ephemeral",
+                "text": f"❌ Error retrieving system status: {str(e)}"
+            })
+    
+    def _format_status_blocks(self, status_report):
+        """Format system status as Slack message blocks."""
+        blocks = []
+        
+        # Header block
+        health_emoji = {
+            "healthy": "🟢",
+            "degraded": "🟡", 
+            "critical": "🔴"
+        }.get(status_report.system_health.status, "⚪")
+        
+        blocks.append({
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"{health_emoji} Trading System Status"
+            }
+        })
+        
+        # System health section
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Status:* {status_report.system_health.status.title()}"
+                },
+                {
+                    "type": "mrkdwn", 
+                    "text": f"*Uptime:* {status_report.system_health.uptime}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Last Update:* {status_report.system_health.last_update}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Recovery Active:* {'Yes' if status_report.system_health.recovery_active else 'No'}"
+                }
+            ]
+        })
+        
+        # Positions section
+        if status_report.positions:
+            position_text = ""
+            for pos in status_report.positions[:5]:  # Show top 5
+                pnl_emoji = "🟢" if pos.unrealized_pnl >= 0 else "🔴"
+                position_text += f"{pnl_emoji} {pos.symbol} ({pos.broker.upper()}/{pos.environment.upper()}): "
+                position_text += f"${pos.unrealized_pnl:.2f} ({pos.unrealized_pnl_pct:+.1f}%)\n"
+            
+            if len(status_report.positions) > 5:
+                position_text += f"... and {len(status_report.positions) - 5} more positions"
+                
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Active Positions ({status_report.total_positions}):*\n{position_text}"
+                }
+            })
+        else:
+            blocks.append({
+                "type": "section", 
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Active Positions:* None"
+                }
+            })
+        
+        # Daily summary section
+        win_emoji = "🎯" if status_report.daily_summary.win_rate >= 70 else "📊"
+        pnl_emoji = "🟢" if status_report.daily_summary.realized_pnl >= 0 else "🔴"
+        
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Trades Today:* {status_report.daily_summary.trades_today}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Daily P&L:* {pnl_emoji} ${status_report.daily_summary.realized_pnl:.2f}"
+                },
+                {
+                    "type": "mrkdwn", 
+                    "text": f"*Win Rate:* {win_emoji} {status_report.daily_summary.win_rate:.1f}%"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Total Unrealized:* ${status_report.total_unrealized_pnl:.2f}"
+                }
+            ]
+        })
+        
+        # Market conditions section
+        market_emoji = "🟢" if status_report.market_conditions.market_open else "🔴"
+        vix_emoji = {
+            "low": "🟢",
+            "normal": "🟡", 
+            "elevated": "🟠",
+            "high": "🔴"
+        }.get(status_report.market_conditions.vix_status, "⚪")
+        
+        vix_text = f"{status_report.market_conditions.vix:.1f}" if status_report.market_conditions.vix else "N/A"
+        
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Market:* {market_emoji} {'Open' if status_report.market_conditions.market_open else 'Closed'}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*VIX:* {vix_emoji} {vix_text}"
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": f"*Hours:* {status_report.market_conditions.market_hours}"
+                },
+                {
+                    "type": "mrkdwn", 
+                    "text": f"*Time to Close:* {status_report.market_conditions.time_to_close}"
+                }
+            ]
+        })
+        
+        # API connectivity section
+        api_status = []
+        for api, connected in status_report.system_health.api_connectivity.items():
+            emoji = "🟢" if connected else "🔴"
+            api_status.append(f"{emoji} {api.title()}")
+        
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn", 
+                "text": f"*API Status:* {' | '.join(api_status)}"
+            }
+        })
+        
+        # Footer with timestamp
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"📅 Generated at {status_report.timestamp} | Use `/trading-status` to refresh"
+                }
+            ]
+        })
+        
+        return blocks
+        
     def _setup_routes(self):
         """Setup Flask routes for Slack events."""
         
@@ -46,6 +225,12 @@ class SlackWebhookServer:
                     challenge = data.get('challenge')
                     logger.info(f"[SLACK-WEBHOOK] Returning challenge: {challenge}")
                     return challenge, 200
+                
+                # Handle slash commands
+                if data and data.get('type') == 'slash_command':
+                    command = data.get('command')
+                    if command == '/trading-status':
+                        return self._handle_trading_status_command(data)
                 
                 # Handle actual events
                 if data and data.get('type') == 'event_callback':

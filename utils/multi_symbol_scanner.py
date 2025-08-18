@@ -78,6 +78,7 @@ class MultiSymbolScanner:
         logger.info(f"[MULTI-SYMBOL] Starting scan of {len(self.symbols)} symbols...")
 
         opportunities = []
+        rejection_reasons = []  # Track why symbols were rejected
 
         # Use ThreadPoolExecutor for concurrent symbol analysis
         with ThreadPoolExecutor(max_workers=len(self.symbols)) as executor:
@@ -98,8 +99,12 @@ class MultiSymbolScanner:
                             f"[MULTI-SYMBOL] {symbol}: Found {len(symbol_opportunities)} opportunities"
                         )
                     else:
+                        # Try to get rejection reason from the scan result
+                        rejection_reason = getattr(future, '_rejection_reason', 'No opportunities')
+                        rejection_reasons.append(f"{symbol}: {rejection_reason}")
                         logger.info(f"[MULTI-SYMBOL] {symbol}: No opportunities found")
                 except Exception as e:
+                    rejection_reasons.append(f"{symbol}: Error - {str(e)}")
                     logger.error(f"[MULTI-SYMBOL] Error scanning {symbol}: {e}")
 
         # Sort opportunities by priority and confidence
@@ -111,13 +116,39 @@ class MultiSymbolScanner:
             )
             self._send_multi_symbol_alert(sorted_opportunities)
         else:
+            # Create summary of rejection reasons
+            reason_summary = self._summarize_rejection_reasons(rejection_reasons)
             logger.info(
-                "[MULTI-SYMBOL] No trading opportunities found across all symbols"
+                f"[MULTI-SYMBOL] No trading opportunities found across all symbols. Reasons: {reason_summary}"
             )
             # Send Slack heartbeat with NO_TRADE reasons summary
-            self._send_no_trade_heartbeat()
+            self._send_no_trade_heartbeat(rejection_reasons)
 
         return sorted_opportunities
+
+    def _summarize_rejection_reasons(self, rejection_reasons: List[str]) -> str:
+        """Summarize rejection reasons for logging and Slack alerts."""
+        if not rejection_reasons:
+            return "Unknown reasons"
+        
+        # Count rejection types
+        reason_counts = {}
+        for reason in rejection_reasons:
+            if "True range too low" in reason:
+                reason_counts["TR below threshold"] = reason_counts.get("TR below threshold", 0) + 1
+            elif "401" in reason or "authorization" in reason.lower():
+                reason_counts["Options auth error"] = reason_counts.get("Options auth error", 0) + 1
+            elif "Error" in reason:
+                reason_counts["API errors"] = reason_counts.get("API errors", 0) + 1
+            else:
+                reason_counts["Other"] = reason_counts.get("Other", 0) + 1
+        
+        # Format summary
+        summary_parts = []
+        for reason_type, count in reason_counts.items():
+            summary_parts.append(f"{count} {reason_type}")
+        
+        return "; ".join(summary_parts)
 
     def _scan_single_symbol(self, symbol: str) -> List[Dict]:
         """
@@ -705,11 +736,11 @@ class MultiSymbolScanner:
             
             today_tr_pct = market_data.get("today_true_range_pct", 0.0)
             
-            # Debug logging for true range values
-            logger.info(f"[TR-DEBUG] {symbol}: TR={today_tr_pct:.2f}% (threshold: {min_tr_range_pct:.1f}%)")
+            # Debug logging for true range values with higher precision
+            logger.info(f"[TR-DEBUG] {symbol}: TR={today_tr_pct:.4f}% (threshold: {min_tr_range_pct:.4f}%) [raw: {today_tr_pct:.6f} vs {min_tr_range_pct:.6f}]")
             
             if today_tr_pct < min_tr_range_pct:
-                return False, f"True range too low ({today_tr_pct:.1f}% < {min_tr_range_pct}% minimum)"
+                return False, f"True range too low ({today_tr_pct:.4f}% < {min_tr_range_pct:.4f}% minimum)"
             
             # 5. Check user-configured trade window (optional)
             trade_window = config.get("TRADE_WINDOW")
@@ -1434,9 +1465,12 @@ class MultiSymbolScanner:
         except Exception as e:
             logger.error(f"[MULTI-SYMBOL] Error logging {symbol} decision: {e}")
 
-    def _send_no_trade_heartbeat(self):
+    def _send_no_trade_heartbeat(self, rejection_reasons: List[str] = None):
         """
         Send Slack heartbeat when no trading opportunities are found.
+        
+        Args:
+            rejection_reasons: List of rejection reasons for context
         """
         try:
             if self.slack_notifier:

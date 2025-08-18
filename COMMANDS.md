@@ -1,6 +1,6 @@
 # 🚀 Robinhood HA Breakout - Command Reference Guide
 
-**Complete reference for all CLI commands and usage patterns (v0.9.0)**
+**Complete reference for all CLI commands and usage patterns (v2.5.0)**
 
 ---
 
@@ -454,7 +454,44 @@ python main.py --dry-run --log-level DEBUG
 ### **Log Files**
 - `logs/app.log` - Application logs
 - `logs/trade_log.csv` - Trade decisions and outcomes
+- `logs/recovery.log` - Recovery system attempts and escalations
 - Console output for real-time status
+
+---
+
+## 📊 **System Status Dashboard (NEW v2.5.0)**
+
+### **Slack Commands**
+```bash
+# Get complete system status via Slack
+/trading-status
+```
+
+**Status Dashboard Features:**
+- 🟢 **System Health**: Real-time health monitoring (healthy/degraded/critical)
+- 💰 **Active Positions**: P&L across all broker/environment combinations
+- 📈 **Daily Summary**: Trades, win rate, realized P&L
+- 🏛️ **Market Conditions**: Market hours, VIX, time to close
+- 🔗 **API Status**: Connectivity to Alpaca, Slack, Yahoo Finance
+- 🔄 **Recovery Status**: Automated recovery attempts and escalations
+
+**Mobile-Optimized Display:**
+```
+🟢 Trading System Status
+
+Status: Healthy          Uptime: 2h 15m
+Last Update: 13:37:25    Recovery Active: No
+
+Active Positions (3):
+🟢 SPY (ALPACA/PAPER): $125.50 (+8.2%)
+🔴 QQQ (ALPACA/PAPER): -$45.20 (-3.1%)
+
+Trades Today: 2          Daily P&L: 🟢 $233.02
+Win Rate: 🎯 100.0%      Total Unrealized: $158.60
+
+Market: 🟢 Open          VIX: 🟡 18.5
+API Status: 🟢 Alpaca | 🟢 Slack | 🟢 Yahoo_Finance
+```
 
 ---
 

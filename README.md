@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.0.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-19%20Symbols-orange.svg)](#-multi-symbol-trading)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20API-blue.svg)](#-real-time-market-data)
 [![Automated Execution](https://img.shields.io/badge/execution-Fully%20Automated-green.svg)](#-automated-execution)
@@ -26,7 +26,9 @@
 
 **This is a complete automated trading system** - from market analysis to trade execution, position monitoring, and profit-taking, all running autonomously with your oversight.
 
-### 🚀 **Current Features (v2.0.0 - FULLY AUTOMATED!)**
+### 🚀 **Current Features (v2.5.0 - SYSTEM STATUS DASHBOARD!)**
+- 📊 **Real-Time Status Dashboard**: Complete system monitoring via Slack `/trading-status` command
+- 🔄 **Automated Recovery System**: Self-healing with exponential backoff and escalation alerts
 - 🎯 **Complete Automation Pipeline**: End-to-end automated trading system
   - ✅ **Multi-Symbol Scanning**: 19 symbols with symbol-specific liquidity requirements
   - ✅ **Real-Time Alpaca Integration**: Live market data and options pricing
@@ -144,6 +146,61 @@
    ```bash
    cp .env.example .env
    ```
+
+---
+
+## 📊 **System Status Dashboard (NEW v2.5.0)**
+
+### **Real-Time Monitoring via Slack**
+
+Get complete system status with a single Slack command:
+
+```bash
+/trading-status
+```
+
+**Dashboard Features:**
+- 🟢 **System Health**: Real-time monitoring (healthy/degraded/critical)
+- 💰 **Active Positions**: P&L across all broker/environment combinations  
+- 📈 **Daily Summary**: Trades, win rate, realized P&L
+- 🏛️ **Market Conditions**: Market hours, VIX volatility, time to close
+- 🔗 **API Status**: Connectivity to Alpaca, Slack, Yahoo Finance
+- 🔄 **Recovery Status**: Automated recovery attempts and escalations
+
+**Mobile-Optimized Display:**
+```
+🟢 Trading System Status
+
+Status: Healthy          Uptime: 2h 15m
+Last Update: 13:37:25    Recovery Active: No
+
+Active Positions (3):
+🟢 SPY (ALPACA/PAPER): $125.50 (+8.2%)
+🔴 QQQ (ALPACA/PAPER): -$45.20 (-3.1%)
+
+Trades Today: 2          Daily P&L: 🟢 $233.02
+Win Rate: 🎯 100.0%      Total Unrealized: $158.60
+
+Market: 🟢 Open          VIX: 🟡 18.5
+API Status: 🟢 Alpaca | 🟢 Slack | 🟢 Yahoo_Finance
+```
+
+### **Automated Recovery System (v2.4.0)**
+
+The system now includes self-healing capabilities:
+
+- **🔄 Exponential Backoff**: Progressive retry delays (1s → 2s → 4s → 8s)
+- **🌐 Network Monitoring**: Connectivity checks to all critical APIs
+- **⚡ Auto-Recovery**: Handles API timeouts, network issues, service interruptions
+- **📊 Escalation Alerts**: Manual intervention alerts after 3 failed attempts
+- **📝 Comprehensive Logging**: All recovery attempts logged to `logs/recovery.log`
+
+**Enhanced Error Handling:**
+- Graceful degradation for Alpaca options authorization errors
+- Improved logging precision with detailed rejection reasons
+- Actionable error messages for troubleshooting
+
+---
 
 3. **Edit the `.env` file** with your information:
    ```

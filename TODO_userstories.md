@@ -140,14 +140,24 @@ This document contains user stories for achieving bulletproof full automation of
 - Test suite: `tests/test_recovery.py` with 15 test cases covering all scenarios
 - Production validated: System running with recovery active
 
-### US-FA-012: System Status Dashboard
-- [ ] **As a trader**, I want a real-time view of system status so that I can monitor automation health remotely
-- [ ] **Acceptance Criteria:**
-  - Slack command to check status: `/trading-status`
-  - Show active positions, daily P&L, system health
-  - Display last successful data update timestamps
-  - Show current market conditions (VIX, market hours)
-  - Include recent trade activity summary
+### US-FA-012: System Status Dashboard ✅ COMPLETED
+- [x] **As a trader**, I want a real-time view of system status so that I can monitor automation health remotely
+- [x] **Acceptance Criteria:**
+  - ✅ Slack command to check status: `/trading-status`
+  - ✅ Show active positions, daily P&L, system health
+  - ✅ Display last successful data update timestamps
+  - ✅ Show current market conditions (VIX, market hours)
+  - ✅ Include recent trade activity summary
+
+**Implementation Details:**
+- `utils/system_status.py` - Complete system status aggregation engine
+- `utils/slack_webhook.py` - `/trading-status` Slack command with rich Block Kit formatting
+- Real-time health monitoring (healthy/degraded/critical) with uptime tracking
+- Position aggregation across all broker/environment combinations
+- Daily performance summary with trades, win rate, realized P&L
+- Market conditions display with VIX volatility and trading hours
+- API connectivity monitoring for Alpaca, Slack, Yahoo Finance
+- Mobile-optimized Slack interface with emoji indicators
 
 ---
 

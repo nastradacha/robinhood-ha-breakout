@@ -2,6 +2,73 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.5.0] - 2025-08-18 📊 SYSTEM STATUS DASHBOARD
+
+### 📊 **NEW: System Status Dashboard (US-FA-012)**
+
+**Complete real-time system monitoring and status reporting via Slack.**
+
+#### 🎯 **Dashboard Features**
+- **✅ Real-Time Health Monitoring**: System status (healthy/degraded/critical) with uptime tracking
+- **✅ Position Aggregation**: Active positions across all broker/environment combinations
+- **✅ Daily Performance Summary**: Trades, win rate, realized P&L, and performance metrics
+- **✅ Market Conditions**: Market hours, VIX volatility, time to close
+- **✅ API Connectivity**: Real-time status for Alpaca, Slack, Yahoo Finance APIs
+- **✅ Recovery Integration**: Automated recovery attempts and escalation monitoring
+
+#### 🛠️ **Technical Implementation**
+- **SystemStatusManager** (`utils/system_status.py`): Comprehensive status aggregation engine
+- **Slack Integration** (`utils/slack_webhook.py`): `/trading-status` command with rich Block Kit formatting
+- **Multi-Broker Support**: Aggregates data across Alpaca paper/live and Robinhood environments
+- **Mobile Optimization**: Compact, emoji-rich display optimized for mobile Slack clients
+- **Real-Time Data**: Live position P&L, market conditions, and system health metrics
+
+#### 📱 **Slack Command Interface**
+```bash
+/trading-status  # Get complete system status
+```
+
+**Mobile-Friendly Status Display:**
+```
+🟢 Trading System Status
+
+Status: Healthy          Uptime: 2h 15m
+Last Update: 13:37:25    Recovery Active: No
+
+Active Positions (3):
+🟢 SPY (ALPACA/PAPER): $125.50 (+8.2%)
+🔴 QQQ (ALPACA/PAPER): -$45.20 (-3.1%)
+
+Trades Today: 2          Daily P&L: 🟢 $233.02
+Win Rate: 🎯 100.0%      Total Unrealized: $158.60
+
+Market: 🟢 Open          VIX: 🟡 18.5
+API Status: 🟢 Alpaca | 🟢 Slack | 🟢 Yahoo_Finance
+```
+
+#### 🔧 **Critical Bug Fixes**
+- **✅ TR Logging Precision**: Fixed threshold display confusion with 4-decimal precision
+- **✅ Rejection Transparency**: Added detailed reasons for blocked trades
+- **✅ Alpaca 401 Handling**: Graceful degradation for options authorization errors
+- **✅ Method Signature Fix**: Corrected `_send_no_trade_heartbeat()` parameter handling
+
+#### 📊 **Enhanced Logging**
+- **Improved TR Debug**: `TR=0.0800% (threshold: 0.1000%) [raw: 0.000800 vs 0.001000]`
+- **Rejection Summary**: `No trading opportunities found. Reasons: 9 TR below threshold; 1 Options auth error`
+- **Actionable Errors**: `[ALPACA] 401 options authorization error: verify paper options entitlement & API keys`
+
+#### 🚀 **Usage Examples**
+```python
+# Get system status programmatically
+from utils.system_status import get_system_status
+status_report = get_system_status()
+
+# Access status components
+print(f"System Health: {status_report.system_health.status}")
+print(f"Active Positions: {status_report.total_positions}")
+print(f"Daily P&L: ${status_report.daily_summary.realized_pnl:.2f}")
+```
+
 ## [2.4.0] - 2025-08-18 🔄 AUTOMATED RECOVERY SYSTEM
 
 ### 🔄 **NEW: Automated Recovery Procedures (US-FA-011)**

@@ -285,7 +285,15 @@ class AlpacaOptionsTrader:
                 exercise_style=ExerciseStyle.AMERICAN
             )
             
-            contracts = self.client.get_option_contracts(request)
+            try:
+                contracts = self.client.get_option_contracts(request)
+            except APIError as e:
+                # Handle 401 authorization errors gracefully
+                if "401" in str(e) or "40110000" in str(e):
+                    logger.error(f"[ALPACA] 401 options authorization error for {symbol}: verify paper options entitlement & API keys in env; falling back to Yahoo for price only")
+                    return None
+                else:
+                    raise  # Re-raise other API errors
             
             if not contracts or not hasattr(contracts, 'option_contracts') or not contracts.option_contracts:
                 logger.warning(f"No {side} contracts found for {symbol} expiring {expiry_date}")
