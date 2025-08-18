@@ -90,7 +90,9 @@ class EnhancedSlackIntegration:
             logger.debug("[ENHANCED-SLACK] Slack not enabled, skipping alert")
             return
 
-        try:
+        from .recovery import retry_with_recovery
+        
+        def _send_alert():
             if self.charts_enabled and decision in ["CALL", "PUT"]:
                 # Send rich alert with high-quality chart using new system
                 success = self.enhanced_chart_sender.send_breakout_chart_to_slack(
@@ -110,9 +112,15 @@ class EnhancedSlackIntegration:
                 logger.info(
                     f"[ENHANCED-SLACK] Sent enhanced text alert for {symbol} {decision}"
                 )
-
+        
+        try:
+            retry_with_recovery(
+                operation=_send_alert,
+                operation_name=f"send breakout alert for {symbol}",
+                component="slack_api"
+            )
         except Exception as e:
-            logger.error(f"[ENHANCED-SLACK] Failed to send breakout alert: {e}")
+            logger.error(f"[ENHANCED-SLACK] Failed to send breakout alert after retries: {e}")
             # Fallback to basic notification
             self._send_basic_fallback_alert(symbol, decision, analysis, confidence)
 
@@ -137,7 +145,9 @@ class EnhancedSlackIntegration:
         if not self.enabled:
             return
 
-        try:
+        from .recovery import retry_with_recovery
+        
+        def _send_position_alert():
             if self.charts_enabled:
                 # Send rich alert with P&L chart
                 self.enhanced_notifier.send_position_alert_with_chart(
@@ -146,15 +156,13 @@ class EnhancedSlackIntegration:
                 logger.info(
                     f"[ENHANCED-SLACK] Sent position alert with chart for {position['symbol']}"
                 )
-            else:
-                # Fallback to enhanced text alert
-                self._send_enhanced_position_text(
-                    position, current_price, pnl_pct, alert_type
-                )
-                logger.info(
-                    f"[ENHANCED-SLACK] Sent enhanced position text for {position['symbol']}"
-                )
-
+        
+        try:
+            retry_with_recovery(
+                operation=_send_position_alert,
+                operation_name=f"send position alert for {position['symbol']}",
+                component="slack_api"
+            )
         except Exception as e:
             logger.error(f"[ENHANCED-SLACK] Failed to send position alert: {e}")
             # Fallback to basic notification

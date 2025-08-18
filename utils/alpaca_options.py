@@ -12,6 +12,7 @@ Key Features:
 - Risk sizing with 100x options multiplier
 - Paper/live environment safety interlocks
 - Comprehensive error handling and timeouts
+- Automated recovery from transient API failures
 
 Contract Selection Rules:
 - Time window: 0DTE between 10:00-15:15 ET, otherwise nearest weekly Friday
@@ -92,6 +93,16 @@ class ContractInfo:
 
 
 @dataclass
+class Quote:
+    """Container for option quote data."""
+    bid: float
+    ask: float
+    bid_size: int
+    ask_size: int
+    timestamp: Optional[datetime] = None
+
+
+@dataclass
 class FillResult:
     """Container for order fill results."""
     status: str  # 'FILLED', 'PARTIAL', 'PENDING', 'REJECTED', 'CANCELLED', 'TIMEOUT'
@@ -132,9 +143,18 @@ class AlpacaOptionsTrader:
         Returns:
             Tuple of (is_valid, reason)
         """
+        from .recovery import retry_with_recovery
+        
+        def _get_market_clock():
+            return self.client.get_clock()
+        
         try:
-            # Get market clock
-            clock = self.client.get_clock()
+            # Get market clock with recovery
+            clock = retry_with_recovery(
+                operation=_get_market_clock,
+                operation_name="get market clock",
+                component="alpaca_api"
+            )
             
             if not clock.is_open:
                 return False, "Market is closed"
@@ -416,7 +436,10 @@ class AlpacaOptionsTrader:
             logger.error("[KILL-SWITCH] Emergency stop active - blocking order execution")
             raise RuntimeError("Emergency stop active - trading halted")
         
-        try:
+        # Use recovery system for order placement
+        from .recovery import retry_with_recovery
+        
+        def _submit_order():
             order_side = OrderSide.BUY if side == "BUY" else OrderSide.SELL
             
             request = MarketOrderRequest(
@@ -432,9 +455,16 @@ class AlpacaOptionsTrader:
             
             logger.info(f"Market order submitted: {order.id}")
             return order.id
+        
+        try:
+            return retry_with_recovery(
+                operation=_submit_order,
+                operation_name=f"place market order {side} {qty} {contract_symbol}",
+                component="alpaca_api"
+            )
             
         except APIError as e:
-            logger.error(f"API error placing market order: {e}")
+            logger.error(f"API error placing market order after retries: {e}")
             
             # Try limit order fallback if market order rejected
             if "rejected" in str(e).lower():
@@ -443,7 +473,7 @@ class AlpacaOptionsTrader:
             
             return None
         except Exception as e:
-            logger.error(f"Error placing market order: {e}")
+            logger.error(f"Error placing market order after retries: {e}")
             return None
 
     def _place_limit_fallback(
@@ -642,40 +672,42 @@ class AlpacaOptionsTrader:
         """
         return self.place_market_order(contract_symbol, qty, side="SELL")
 
-    def get_latest_quote(self, contract_symbol: str) -> Optional[Dict]:
+    def get_latest_quote(self, symbol: str) -> Optional[Quote]:
         """Get latest quote for option contract.
         
         Args:
-            contract_symbol: OCC-formatted contract symbol
+            symbol: Option contract symbol
             
         Returns:
-            Quote dict with bid/ask prices or None if failed
+            Latest quote or None if available
         """
+        from .recovery import retry_with_recovery
+        
+        def _get_quote():
+            request = LatestOptionQuoteRequest(symbol_or_symbols=symbol)
+            quotes = self.data_client.get_option_latest_quote(request)
+            
+            if symbol in quotes:
+                quote_data = quotes[symbol]
+                return Quote(
+                    bid=quote_data.bid,
+                    ask=quote_data.ask,
+                    bid_size=quote_data.bid_size,
+                    ask_size=quote_data.ask_size,
+                    timestamp=quote_data.timestamp
+                )
+            
+            return None
+        
         try:
-            from alpaca.data.requests import OptionLatestQuoteRequest
-            
-            quote_request = OptionLatestQuoteRequest(symbol_or_symbols=contract_symbol)
-            quote_response = self.data_client.get_option_latest_quote(quote_request)
-            
-            if not quote_response or contract_symbol not in quote_response:
-                logger.warning(f"No quote response for {contract_symbol}")
-                return None
-            
-            quote = quote_response[contract_symbol]
-            if not quote or not quote.bid_price or not quote.ask_price:
-                logger.warning(f"Missing bid/ask prices for {contract_symbol}")
-                return None
-            
-            return {
-                "bid": float(quote.bid_price),
-                "ask": float(quote.ask_price),
-                "mid": (float(quote.bid_price) + float(quote.ask_price)) / 2,
-                "spread": float(quote.ask_price) - float(quote.bid_price),
-                "timestamp": quote.timestamp if hasattr(quote, 'timestamp') else None
-            }
+            return retry_with_recovery(
+                operation=_get_quote,
+                operation_name=f"get latest quote for {symbol}",
+                component="alpaca_api"
+            )
             
         except Exception as e:
-            logger.error(f"Error getting quote for {contract_symbol}: {e}")
+            logger.error(f"Error getting latest quote for {symbol} after retries: {e}")
             return None
 
 

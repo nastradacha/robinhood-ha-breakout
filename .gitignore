@@ -41,15 +41,15 @@ env/
 *.swo
 *~
 
-# Logs
-# logs/*.log
-# logs/*.csv
-# *.log
+Logs
+logs/*.log
+logs/*.csv
+*.log
 
 # Bankroll and trading data
-# bankroll*.json
-# trade_log*.csv
-# positions_*.csv
+bankroll*.json
+trade_log*.csv
+positions_*.csv
 
 # Screenshots
 *.png
@@ -57,7 +57,7 @@ env/
 *.jpeg
 
 # Temporarily allow positions.csv access for fixes
-# positions.csv
+positions.csv
 
 # Test coverage
 htmlcov/

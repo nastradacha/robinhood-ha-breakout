@@ -416,6 +416,49 @@ class TradeConfirmationManager:
                 logger.error(f"Invalid Slack message format: {message}")
                 return False
 
+        # Emergency stop commands (fallback parsing)
+        elif any(keyword in message.lower() for keyword in ["emergency", "stop", "halt", "kill"]):
+            logger.warning(f"[EMERGENCY-STOP] Emergency stop command detected in Slack: {message}")
+            
+            # Activate kill switch
+            from .kill_switch import get_kill_switch
+            kill_switch = get_kill_switch()
+            
+            reason = f"Emergency stop via Slack message: {message}"
+            success = kill_switch.activate(reason, source="slack_message")
+            
+            if success:
+                logger.critical(f"[EMERGENCY-STOP] Trading halted via Slack message")
+                if self.slack_notifier:
+                    self.slack_notifier.send_error_alert(
+                        "Emergency Stop Activated", 
+                        f"Trading halted via message: {message}"
+                    )
+            
+            # Cancel any pending trade
+            if self.pending_trade:
+                decision = "CANCELLED"
+                actual_premium = 0
+                logger.info("[EMERGENCY-STOP] Pending trade cancelled due to emergency stop")
+            else:
+                return True  # No pending trade to handle
+
+        elif any(keyword in message.lower() for keyword in ["resume", "continue", "restart"]):
+            logger.info(f"[EMERGENCY-STOP] Resume command detected in Slack: {message}")
+            
+            # Deactivate kill switch
+            from .kill_switch import get_kill_switch
+            kill_switch = get_kill_switch()
+            
+            if kill_switch.is_active():
+                success = kill_switch.deactivate(source="slack_message")
+                if success:
+                    logger.info("[EMERGENCY-STOP] Trading resumed via Slack message")
+                    if self.slack_notifier:
+                        self.slack_notifier.send_heartbeat("✅ Trading resumed via Slack message")
+            
+            return True  # No trade confirmation to handle
+
         else:
             logger.warning(f"Unrecognized Slack message: {message}")
             return False

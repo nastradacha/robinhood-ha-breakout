@@ -84,38 +84,50 @@ def fetch_market_data(
     Returns:
         DataFrame with OHLCV data
     """
-    # Try Alpaca first (real-time data) - use cached client to prevent concurrent connections
-    alpaca = get_alpaca_client(env=env)
-    if alpaca.enabled:
-        try:
-            data = alpaca.get_market_data(symbol, period)
-            if data is not None and not data.empty:
-                # Ensure we have the required columns
-                required_cols = ["Open", "High", "Low", "Close", "Volume"]
-                if all(col in data.columns for col in required_cols):
-                    logger.info(
-                        f"[ALPACA] Fetched {len(data)} bars for {symbol} (real-time)"
-                    )
-                    return data
-                else:
-                    logger.warning(
-                        "[ALPACA] Missing required columns, falling back to Yahoo Finance"
-                    )
-            else:
-                logger.warning(
-                    f"[ALPACA] No data returned for {symbol}, falling back to Yahoo Finance"
-                )
-        except Exception as e:
-            logger.warning(
-                f"[ALPACA] Error fetching data for {symbol}: {e}, falling back to Yahoo Finance"
-            )
-    else:
-        logger.info(f"[ALPACA] Not configured, using Yahoo Finance for {symbol}")
-
-    # Fallback to Yahoo Finance (delayed data)
+    # Try Alpaca first (real-time data) with recovery
+    from .recovery import retry_with_recovery
+    
+    def _fetch_alpaca_data():
+        alpaca = get_alpaca_client(env=env)
+        if not alpaca.enabled:
+            raise Exception("Alpaca not configured")
+        
+        data = alpaca.get_market_data(symbol, period)
+        if data is None or data.empty:
+            raise Exception(f"No data returned for {symbol}")
+        
+        # Ensure we have the required columns
+        required_cols = ["Open", "High", "Low", "Close", "Volume"]
+        if not all(col in data.columns for col in required_cols):
+            raise Exception("Missing required columns")
+        
+        logger.info(f"[ALPACA] Fetched {len(data)} bars for {symbol} (real-time)")
+        return data
+    
+    # Try Alpaca with recovery
     try:
+        return retry_with_recovery(
+            operation=_fetch_alpaca_data,
+            operation_name=f"fetch Alpaca data for {symbol}",
+            component="alpaca_api"
+        )
+    except Exception as e:
+        logger.warning(f"[ALPACA] Failed to fetch data for {symbol} after retries: {e}, falling back to Yahoo Finance")
+
+    # Fallback to Yahoo Finance (delayed data) with recovery
+    def _fetch_yahoo_data():
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period, interval=interval)
+        if data.empty:
+            raise Exception(f"No Yahoo Finance data for {symbol}")
+        return data
+    
+    try:
+        data = retry_with_recovery(
+            operation=_fetch_yahoo_data,
+            operation_name=f"fetch Yahoo Finance data for {symbol}",
+            component="yahoo_finance"
+        )
 
         if data.empty:
             raise ValueError(f"No data returned for {symbol}")

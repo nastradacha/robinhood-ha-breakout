@@ -2,6 +2,123 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.4.0] - 2025-08-18 🔄 AUTOMATED RECOVERY SYSTEM
+
+### 🔄 **NEW: Automated Recovery Procedures (US-FA-011)**
+
+**Complete automated recovery system for handling transient failures without manual intervention.**
+
+#### 🔧 **Recovery Features**
+- **✅ Exponential Backoff**: Progressive retry delays (1s → 2s → 4s → 8s) with configurable parameters
+- **✅ Network Monitoring**: Connectivity checks to Alpaca, Slack, Yahoo Finance, and DNS
+- **✅ Process Management**: Auto-restart failed monitoring processes with health checks
+- **✅ Comprehensive Logging**: All recovery attempts logged to `logs/recovery.log`
+- **✅ Escalation System**: Manual intervention alerts after 3 failed attempts
+- **✅ Component Integration**: Recovery wrappers for all critical API calls
+
+#### 🛠️ **Technical Implementation**
+- **RecoveryManager Class** (`utils/recovery.py`): Thread-safe recovery with JSON logging
+- **ExponentialBackoff**: Configurable retry logic with max delay caps
+- **Network Resilience**: Progressive delay recovery (5s → 15s → 30s → 60s)
+- **API Integration**: Recovery wrappers in Alpaca, Slack, and data fetching components
+- **Process Supervision**: Health monitoring with CPU/memory checks
+
+#### 🔗 **Component Integration**
+- **Alpaca API** (`utils/alpaca_options.py`): Market orders, quotes, clock checks
+- **Slack API** (`utils/enhanced_slack.py`): Notifications, chart uploads, alerts
+- **Data Fetching** (`utils/data.py`): Yahoo Finance and Alpaca market data
+- **Signal Processing**: Breakout analysis and LLM decision making
+- **Main Trading Loop**: Multi-symbol data fetching with recovery
+
+#### 📊 **Testing & Validation**
+- **Comprehensive Test Suite**: 15 unit and integration tests (`tests/test_recovery.py`)
+- **Thread Safety Tests**: Concurrent operation validation
+- **Mock Integration**: Testing with simulated API failures
+- **Production Validation**: Live system running with recovery active
+
+#### 🚀 **Usage Examples**
+```python
+# Automatic retry with recovery
+from utils.recovery import retry_with_recovery
+
+result = retry_with_recovery(
+    operation=api_call_function,
+    operation_name="fetch market data",
+    component="alpaca_api"
+)
+
+# Recovery statistics
+from utils.recovery import get_recovery_manager
+stats = get_recovery_manager().get_recovery_stats()
+```
+
+#### 📋 **Recovery Configuration**
+```yaml
+# Default settings (customizable)
+recovery:
+  initial_delay: 1.0      # Initial retry delay
+  max_delay: 300.0        # Maximum retry delay  
+  backoff_factor: 2.0     # Delay multiplier
+  max_attempts: 3         # Max attempts before escalation
+```
+
+## [2.3.0] - 2025-08-18 🚨 EMERGENCY STOP MECHANISM
+
+### 🛡️ **NEW: Emergency Stop Mechanism (US-FA-010)**
+
+**Complete emergency control system for immediate trading halt during critical situations.**
+
+#### 🚨 **Emergency Stop Features**
+- **✅ File-Based Kill Switch**: Create `EMERGENCY_STOP.txt` in project root to halt trading
+- **✅ Slack Slash Commands**: `/stop-trading <reason>` and `/resume-trading` with signature verification
+- **✅ API Endpoints**: REST endpoints `/api/stop`, `/api/resume`, `/api/status` with Bearer token auth
+- **✅ Message Fallback**: Emergency keywords in Slack trade confirmations trigger halt
+- **✅ Defensive Blocking**: Order execution blocked at Alpaca API level when active
+- **✅ Main Loop Integration**: Trading cycles skip when emergency stop active
+- **✅ Position Monitoring**: Continues monitoring existing positions unless disabled
+
+#### 🔧 **Technical Implementation**
+- **KillSwitch Class** (`utils/kill_switch.py`): Thread-safe emergency stop with JSON persistence
+- **Slack Integration** (`utils/slack_webhook.py`): Slash commands with HMAC signature verification
+- **API Security**: Bearer token authentication for programmatic control
+- **Trade Confirmation** (`utils/trade_confirmation.py`): Emergency keyword parsing
+- **Main Loop** (`main.py`): Kill switch checks before each trading cycle
+- **Alpaca Protection** (`utils/alpaca_options.py`): RuntimeError on order attempts when halted
+
+#### 🔒 **Security & Safety**
+- **Signature Verification**: Slack requests validated with HMAC-SHA256
+- **Token Authentication**: API endpoints protected with Bearer tokens
+- **User Authorization**: Optional user ID whitelist for Slack commands
+- **Comprehensive Logging**: All emergency actions logged with source tracking
+- **Thread Safety**: Atomic operations with file-based persistence
+- **Multiple Triggers**: File, Slack, API, and message-based activation methods
+
+#### 📊 **Testing & Validation**
+- **Comprehensive Test Suite**: 14 unit and integration tests (12/14 passing)
+- **Thread Safety Tests**: Concurrent activation/deactivation validation
+- **Persistence Tests**: State recovery across system restarts
+- **Integration Tests**: Main loop, Alpaca, and Slack integration validation
+
+#### 🚀 **Usage Examples**
+```bash
+# File-based emergency stop
+echo "Market crash detected" > EMERGENCY_STOP.txt
+
+# Slack commands
+/stop-trading Market volatility spike
+/resume-trading
+
+# API endpoints
+curl -X POST https://server/api/stop \
+  -H "Authorization: Bearer token" \
+  -d '{"reason": "System maintenance"}'
+```
+
+#### 📋 **Environment Variables**
+- `SLACK_SIGNING_SECRET`: Slack app signing secret for command verification
+- `SLACK_ALLOWED_USER_IDS`: Optional comma-separated user ID whitelist
+- `CONTROL_API_TOKEN`: Bearer token for API endpoint authentication
+
 ## [1.0.0] - 2025-08-11 🎉 PRODUCTION READY!
 
 ### 🚀 **MAJOR MILESTONE: Complete Alpaca Options Trading Integration**

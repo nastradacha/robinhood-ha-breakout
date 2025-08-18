@@ -8,6 +8,8 @@ in real-time instead of polling.
 import os
 import time
 import logging
+import hmac
+import hashlib
 from flask import Flask, request, jsonify
 from typing import Optional
 import threading
@@ -75,11 +77,302 @@ class SlackWebhookServer:
                 logger.error(f"[SLACK-WEBHOOK] Traceback: {traceback.format_exc()}")
                 return jsonify({'error': str(e)}), 500
         
+        @self.app.route('/slack/commands', methods=['POST'])
+        def handle_slack_command():
+            """Handle Slack slash commands."""
+            try:
+                # Verify Slack signature
+                if not self._verify_slack_signature(request):
+                    logger.warning("[SLACK-COMMANDS] Invalid signature")
+                    return jsonify({'error': 'Invalid signature'}), 401
+                
+                # Parse form data
+                command = request.form.get('command', '')
+                text = request.form.get('text', '').strip()
+                user_id = request.form.get('user_id', '')
+                user_name = request.form.get('user_name', '')
+                
+                logger.info(f"[SLACK-COMMANDS] Received {command} from {user_name} ({user_id}): '{text}'")
+                
+                # Check if user is authorized (optional)
+                allowed_users = os.getenv('SLACK_ALLOWED_USER_IDS', '').split(',')
+                if allowed_users and allowed_users[0] and user_id not in allowed_users:
+                    logger.warning(f"[SLACK-COMMANDS] Unauthorized user {user_id}")
+                    return jsonify({
+                        'response_type': 'ephemeral',
+                        'text': '❌ You are not authorized to use this command.'
+                    })
+                
+                # Handle commands
+                if command == '/stop-trading':
+                    return self._handle_stop_trading(text, user_name)
+                elif command == '/resume-trading':
+                    return self._handle_resume_trading(user_name)
+                else:
+                    return jsonify({
+                        'response_type': 'ephemeral',
+                        'text': f'❓ Unknown command: {command}'
+                    })
+                    
+            except Exception as e:
+                logger.error(f"[SLACK-COMMANDS] Error processing command: {e}")
+                import traceback
+                logger.error(f"[SLACK-COMMANDS] Traceback: {traceback.format_exc()}")
+                return jsonify({
+                    'response_type': 'ephemeral',
+                    'text': '❌ Internal error processing command.'
+                }), 500
+
+        @self.app.route('/api/stop', methods=['POST'])
+        def api_stop_trading():
+            """API endpoint to stop trading."""
+            try:
+                # Verify authorization token
+                if not self._verify_api_token(request):
+                    return jsonify({'error': 'Unauthorized'}), 401
+                
+                # Get reason from request body
+                data = request.get_json() or {}
+                reason = data.get('reason', 'Emergency stop via API')
+                
+                from .kill_switch import get_kill_switch
+                kill_switch = get_kill_switch()
+                
+                success = kill_switch.activate(reason, source="api")
+                
+                if success:
+                    logger.critical(f"[API] Emergency stop activated: {reason}")
+                    return jsonify({
+                        'success': True,
+                        'message': 'Trading stopped',
+                        'reason': reason,
+                        'activated_at': kill_switch.get_status()['activated_at']
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Emergency stop already active'
+                    }), 409
+                    
+            except Exception as e:
+                logger.error(f"[API] Error stopping trading: {e}")
+                return jsonify({'error': 'Internal server error'}), 500
+
+        @self.app.route('/api/resume', methods=['POST'])
+        def api_resume_trading():
+            """API endpoint to resume trading."""
+            try:
+                # Verify authorization token
+                if not self._verify_api_token(request):
+                    return jsonify({'error': 'Unauthorized'}), 401
+                
+                from .kill_switch import get_kill_switch
+                kill_switch = get_kill_switch()
+                
+                if not kill_switch.is_active():
+                    return jsonify({
+                        'success': False,
+                        'message': 'Trading is not currently halted'
+                    }), 409
+                
+                status = kill_switch.get_status()
+                previous_reason = status.get('reason', 'Unknown')
+                
+                success = kill_switch.deactivate(source="api")
+                
+                if success:
+                    logger.info(f"[API] Trading resumed (was: {previous_reason})")
+                    return jsonify({
+                        'success': True,
+                        'message': 'Trading resumed',
+                        'previous_reason': previous_reason
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'message': 'Failed to resume trading'
+                    }), 500
+                    
+            except Exception as e:
+                logger.error(f"[API] Error resuming trading: {e}")
+                return jsonify({'error': 'Internal server error'}), 500
+
+        @self.app.route('/api/status', methods=['GET'])
+        def api_get_status():
+            """API endpoint to get kill switch status."""
+            try:
+                # Verify authorization token
+                if not self._verify_api_token(request):
+                    return jsonify({'error': 'Unauthorized'}), 401
+                
+                from .kill_switch import get_kill_switch
+                kill_switch = get_kill_switch()
+                status = kill_switch.get_status()
+                
+                return jsonify({
+                    'success': True,
+                    'kill_switch': status
+                })
+                
+            except Exception as e:
+                logger.error(f"[API] Error getting status: {e}")
+                return jsonify({'error': 'Internal server error'}), 500
+
         @self.app.route('/health', methods=['GET'])
         def health_check():
             """Health check endpoint."""
-            return jsonify({'status': 'healthy', 'service': 'slack-webhook'})
+            from .kill_switch import get_kill_switch
+            kill_switch = get_kill_switch()
+            status = kill_switch.get_status()
+            
+            return jsonify({
+                'status': 'healthy', 
+                'service': 'slack-webhook',
+                'kill_switch': status
+            })
     
+    def _verify_slack_signature(self, request) -> bool:
+        """Verify Slack request signature.
+        
+        Args:
+            request: Flask request object
+            
+        Returns:
+            True if signature is valid
+        """
+        signing_secret = os.getenv('SLACK_SIGNING_SECRET')
+        if not signing_secret:
+            logger.warning("[SLACK-COMMANDS] No SLACK_SIGNING_SECRET configured, skipping verification")
+            return True  # Allow if no secret configured (dev mode)
+        
+        timestamp = request.headers.get('X-Slack-Request-Timestamp', '')
+        signature = request.headers.get('X-Slack-Signature', '')
+        
+        if not timestamp or not signature:
+            return False
+        
+        # Check timestamp (prevent replay attacks)
+        try:
+            request_time = int(timestamp)
+            current_time = int(time.time())
+            if abs(current_time - request_time) > 300:  # 5 minutes
+                logger.warning("[SLACK-COMMANDS] Request timestamp too old")
+                return False
+        except ValueError:
+            return False
+        
+        # Verify signature
+        body = request.get_data()
+        sig_basestring = f"v0:{timestamp}:{body.decode('utf-8')}"
+        expected_signature = 'v0=' + hmac.new(
+            signing_secret.encode(),
+            sig_basestring.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        return hmac.compare_digest(expected_signature, signature)
+    
+    def _verify_api_token(self, request) -> bool:
+        """Verify API authorization token.
+        
+        Args:
+            request: Flask request object
+            
+        Returns:
+            True if token is valid
+        """
+        expected_token = os.getenv('CONTROL_API_TOKEN')
+        if not expected_token:
+            logger.warning("[API] No CONTROL_API_TOKEN configured, allowing request")
+            return True  # Allow if no token configured (dev mode)
+        
+        # Check Authorization header
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return False
+        
+        provided_token = auth_header[7:]  # Remove "Bearer " prefix
+        return hmac.compare_digest(expected_token, provided_token)
+    
+    def _handle_stop_trading(self, reason_text: str, user_name: str):
+        """Handle /stop-trading command.
+        
+        Args:
+            reason_text: Reason provided by user
+            user_name: Slack username
+            
+        Returns:
+            JSON response for Slack
+        """
+        from .kill_switch import get_kill_switch
+        
+        kill_switch = get_kill_switch()
+        
+        # Use provided reason or default
+        reason = reason_text if reason_text else f"Emergency stop by {user_name}"
+        
+        # Activate kill switch
+        success = kill_switch.activate(reason, source="slack")
+        
+        if success:
+            logger.critical(f"[SLACK-COMMANDS] Emergency stop activated by {user_name}: {reason}")
+            
+            # Send confirmation response
+            return jsonify({
+                'response_type': 'in_channel',  # Visible to everyone
+                'text': f'🚨 *EMERGENCY STOP ACTIVATED*\n'
+                       f'Reason: {reason}\n'
+                       f'Activated by: {user_name}\n'
+                       f'All new trading is now halted.'
+            })
+        else:
+            return jsonify({
+                'response_type': 'ephemeral',
+                'text': '⚠️ Emergency stop is already active.'
+            })
+    
+    def _handle_resume_trading(self, user_name: str):
+        """Handle /resume-trading command.
+        
+        Args:
+            user_name: Slack username
+            
+        Returns:
+            JSON response for Slack
+        """
+        from .kill_switch import get_kill_switch
+        
+        kill_switch = get_kill_switch()
+        
+        if not kill_switch.is_active():
+            return jsonify({
+                'response_type': 'ephemeral',
+                'text': '✅ Trading is not currently halted.'
+            })
+        
+        # Get current status for logging
+        status = kill_switch.get_status()
+        previous_reason = status.get('reason', 'Unknown')
+        
+        # Deactivate kill switch
+        success = kill_switch.deactivate(source="slack")
+        
+        if success:
+            logger.info(f"[SLACK-COMMANDS] Trading resumed by {user_name} (was: {previous_reason})")
+            
+            return jsonify({
+                'response_type': 'in_channel',  # Visible to everyone
+                'text': f'✅ *TRADING RESUMED*\n'
+                       f'Previous halt reason: {previous_reason}\n'
+                       f'Resumed by: {user_name}\n'
+                       f'Normal trading operations can continue.'
+            })
+        else:
+            return jsonify({
+                'response_type': 'ephemeral',
+                'text': '❌ Failed to resume trading. Check logs.'
+            })
+
     def set_trade_confirmation_manager(self, manager):
         """Set the trade confirmation manager for processing messages."""
         self.trade_confirmation_manager = manager
