@@ -62,6 +62,11 @@ IV_THRESHOLD: 45.0           # Implied volatility threshold
 MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lowered for sensitivity)
 MIN_TR_RANGE_PCT: 1.0        # Minimum true range percentage for trade entry (volatility filter)
 
+# VIX Spike Detection (US-FA-001)
+VIX_SPIKE_THRESHOLD: 30.0    # Block new positions when VIX > 30 (high volatility)
+VIX_CACHE_MINUTES: 5         # Cache VIX data for 5 minutes to minimize API calls
+VIX_ENABLED: true            # Enable VIX spike detection
+
 # Per-Symbol True Range Thresholds (allows trading in calm market conditions)
 MIN_TR_RANGE_PCT_BY_SYMBOL:
   SPY: 0.10

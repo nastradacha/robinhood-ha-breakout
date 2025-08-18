@@ -109,9 +109,9 @@ class TestPositionSizing:
             bankroll_file = Path(temp_dir) / "test_bankroll.json"
             manager = BankrollManager(str(bankroll_file), start_capital=100.0)
 
-            # Test within risk limits
+            # Test within risk limits (premium=0.25, qty=2, total_risk=$50 < $50 limit)
             qty = manager.calculate_position_size(
-                premium=10.0, risk_fraction=0.5, size_rule="fixed-qty", fixed_qty=2
+                premium=0.25, risk_fraction=0.5, size_rule="fixed-qty", fixed_qty=2
             )
             assert qty == 2
 
@@ -130,25 +130,25 @@ class TestPositionSizing:
             bankroll_file = Path(temp_dir) / "test_bankroll.json"
             manager = BankrollManager(str(bankroll_file), start_capital=100.0)
 
-            # Test normal case
+            # Test normal case (premium=0.10, max_risk=$50, 50/(0.10*100)=5 contracts)
             qty = manager.calculate_position_size(
-                premium=10.0, risk_fraction=0.5, size_rule="dynamic-qty"
+                premium=0.10, risk_fraction=0.5, size_rule="dynamic-qty"
             )
-            # Max risk = 100 * 0.5 = 50, so 50 / 10 = 5 contracts
+            # Max risk = 100 * 0.5 = 50, so 50 / (0.10 * 100) = 5 contracts
             assert qty == 5
 
-            # Test with expensive premium
+            # Test with expensive premium (0.40*100=$40 per contract)
             qty = manager.calculate_position_size(
-                premium=40.0, risk_fraction=0.5, size_rule="dynamic-qty"
+                premium=0.40, risk_fraction=0.5, size_rule="dynamic-qty"
             )
-            # Max risk = 50, so 50 / 40 = 1.25, floor to 1
+            # Max risk = 50, so 50 / (0.40 * 100) = 1.25, floor to 1
             assert qty == 1
 
-            # Test with very expensive premium
+            # Test with very expensive premium (0.60*100=$60 per contract > $50 max risk)
             qty = manager.calculate_position_size(
-                premium=60.0, risk_fraction=0.5, size_rule="dynamic-qty"
+                premium=0.60, risk_fraction=0.5, size_rule="dynamic-qty"
             )
-            # Max risk = 50, so 50 / 60 = 0.83, but minimum is 1
+            # Max risk = 50, so 50 / (0.60 * 100) = 0.83, but minimum is 1
             assert qty == 1
 
     def test_calculate_position_size_invalid_rule(self):
@@ -166,9 +166,9 @@ class TestPositionSizing:
             bankroll_file = Path(temp_dir) / "test_bankroll.json"
             manager = BankrollManager(str(bankroll_file), start_capital=100.0)
 
-            # Risk = 10 * 2 = 20, which is 20% of 100 (within 50% limit)
+            # Risk = 0.20 * 2 * 100 = 40, which is 40% of 100 (within 50% limit)
             is_valid = manager.validate_trade_risk(
-                premium=10.0, quantity=2, max_risk_pct=50.0
+                premium=0.20, quantity=2, max_risk_pct=50.0
             )
             assert is_valid is True
 

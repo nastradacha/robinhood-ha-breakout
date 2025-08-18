@@ -342,45 +342,47 @@ class SystemStatusManager:
             )
     
     def _get_market_conditions(self) -> MarketConditions:
-        """Get current market conditions."""
+        """Get current market conditions including VIX."""
         try:
-            # Get market hours (simplified - would integrate with Alpaca API)
-            now = datetime.now()
-            market_open = self._is_market_open(now)
-            market_hours = "09:30-16:00 ET"
+            # Get VIX data from VIX monitor
+            try:
+                from .vix_monitor import get_vix_monitor
+                vix_monitor = get_vix_monitor()
+                vix_data = vix_monitor.get_current_vix()
+                vix_value = vix_data.value if vix_data else 0.0
+            except Exception as e:
+                logger.warning(f"[SYSTEM-STATUS] VIX fetch failed: {e}")
+                vix_value = 0.0
             
-            # Get VIX data (simplified - would use real API)
-            vix = self._get_vix_data()
-            vix_status = self._classify_vix(vix)
+            # Check if market is open
+            et_tz = pytz.timezone('US/Eastern')
+            current_et = datetime.now(et_tz)
+            current_time = current_et.time()
             
-            # Calculate trading day progress
-            trading_day_progress = self._calculate_trading_day_progress(now)
-            
-            # Time to market close
-            time_to_close = self._calculate_time_to_close(now)
+            # Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday
+            market_open = (
+                current_et.weekday() < 5 and  # Monday=0, Friday=4
+                time(9, 30) <= current_time <= time(16, 0)
+            )
             
             return MarketConditions(
+                vix_level=vix_value,
                 market_open=market_open,
-                market_hours=market_hours,
-                vix=vix,
-                vix_status=vix_status,
-                trading_day_progress=trading_day_progress,
-                time_to_close=time_to_close
+                trading_session="regular" if market_open else "closed",
+                last_update=datetime.now()
             )
             
         except Exception as e:
             logger.error(f"[SYSTEM-STATUS] Error getting market conditions: {e}")
             return MarketConditions(
+                vix_level=0.0,
                 market_open=False,
-                market_hours="Unknown",
-                vix=None,
-                vix_status="unknown",
-                trading_day_progress=0.0,
-                time_to_close="Unknown"
+                trading_session="unknown",
+                last_update=datetime.now()
             )
     
     def _check_api_connectivity(self) -> Dict[str, bool]:
-        """Check connectivity to key APIs."""
+        """Check connectivity to critical APIs."""
         connectivity = {}
         
         # Check Alpaca API

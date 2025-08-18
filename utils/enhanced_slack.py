@@ -235,6 +235,54 @@ class EnhancedSlackIntegration:
         except Exception as e:
             logger.error(f"[ENHANCED-SLACK] Failed to send heartbeat: {e}")
 
+    def send_vix_spike_alert(self, vix_value: float, threshold: float):
+        """
+        Send VIX spike alert to Slack.
+        
+        Args:
+            vix_value: Current VIX level
+            threshold: VIX threshold that was exceeded
+        """
+        try:
+            message = (
+                f"🚨 **VIX SPIKE ALERT** 🚨\n\n"
+                f"**Current VIX:** {vix_value:.2f}\n"
+                f"**Threshold:** {threshold:.1f}\n\n"
+                f"🛑 **NEW POSITIONS BLOCKED** until VIX normalizes\n"
+                f"📊 Existing positions continue to be monitored\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] VIX spike alert sent: {vix_value:.2f} > {threshold:.1f}")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send VIX spike alert: {e}")
+
+    def send_vix_normalized_alert(self, vix_value: float, threshold: float):
+        """
+        Send VIX normalization alert to Slack.
+        
+        Args:
+            vix_value: Current VIX level
+            threshold: VIX threshold
+        """
+        try:
+            message = (
+                f"✅ **VIX NORMALIZED** ✅\n\n"
+                f"**Current VIX:** {vix_value:.2f}\n"
+                f"**Threshold:** {threshold:.1f}\n\n"
+                f"🟢 **TRADING RESUMED** - New positions allowed\n"
+                f"📈 System scanning for breakout opportunities\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] VIX normalized alert sent: {vix_value:.2f} <= {threshold:.1f}")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send VIX normalized alert: {e}")
+
     def _send_enhanced_text_alert(
         self, symbol: str, decision: str, analysis: Dict, confidence: float
     ):

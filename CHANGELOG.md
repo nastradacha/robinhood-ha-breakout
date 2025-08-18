@@ -2,6 +2,50 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.6.0] - 2025-08-18
+
+### Added - VIX Spike Detection (US-FA-001)
+- **VIX volatility monitoring** with configurable spike threshold (default: 30.0)
+- **Automatic trade blocking** during high volatility periods to protect capital
+- **Real-time VIX data fetching** with 5-minute caching to minimize API calls
+- **Slack alerts** for VIX spike/normalized state changes
+- **Pre-LLM gate integration** blocks trades before expensive LLM analysis
+- **System status dashboard** integration with real-time VIX display
+- **Fail-safe design** allows trading if VIX data unavailable
+
+### Implementation
+- `utils/vix_monitor.py` - Complete VIX monitoring system with VIXMonitor class
+- `config.yaml` - VIX_SPIKE_THRESHOLD, VIX_CACHE_MINUTES, VIX_ENABLED configuration
+- Pre-LLM hard gate integration in `utils/multi_symbol_scanner.py`
+- Slack notification integration via `utils/enhanced_slack.py`
+- System status dashboard VIX integration in `utils/system_status.py`
+
+### Enhanced
+- **Conservative risk management** - blocks new positions during market stress
+- **Existing position monitoring** continues during VIX spikes
+- **State change alerts** only sent when VIX crosses threshold boundaries
+- **Audit trail logging** includes VIX level in all trade decisions
+
+### Testing
+- Comprehensive test suite: `tests/test_vix_monitor.py` with 14 test cases
+- VIX data fetching, caching, and spike detection validated
+- Trading gate integration confirmed blocking trades during spikes
+- Slack alert functionality tested with state change detection
+
+### Usage
+```yaml
+# config.yaml VIX configuration
+VIX_SPIKE_THRESHOLD: 30.0    # Block trades when VIX > 30
+VIX_CACHE_MINUTES: 5         # Cache VIX data for 5 minutes
+VIX_ENABLED: true            # Enable VIX monitoring
+```
+
+```bash
+# Test VIX monitoring
+python utils/vix_monitor.py
+# Output: VIX Value: 15.05, Spike: False, Reason: VIX normal: 15.05 <= 30.0 threshold
+```
+
 ## [2.5.0] - 2025-08-18 📊 SYSTEM STATUS DASHBOARD
 
 ### 📊 **NEW: System Status Dashboard (US-FA-012)**

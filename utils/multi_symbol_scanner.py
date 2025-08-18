@@ -691,7 +691,7 @@ class MultiSymbolScanner:
         Pre-LLM hard gate: enforce hard rules before calling LLM.
         
         Blocks known bad contexts: market closed, after time cutoff, 
-        too-low volatility range, or user-configured "no trade" windows.
+        too-low volatility range, VIX spikes, or user-configured "no trade" windows.
         
         Args:
             market_data: Market data dictionary
@@ -709,21 +709,31 @@ class MultiSymbolScanner:
             current_et = datetime.now(et_tz)
             current_time = current_et.time()
             
-            # 1. Check if after entry cutoff time (15:15 ET)
+            # 1. Check VIX spike detection (US-FA-001)
+            try:
+                from .vix_monitor import check_vix_spike
+                is_spike, vix_value, vix_reason = check_vix_spike()
+                if is_spike:
+                    return False, f"VIX spike blocking trades: {vix_reason}"
+                logger.debug(f"[VIX-GATE] {vix_reason}")
+            except Exception as e:
+                logger.warning(f"[VIX-GATE] VIX check failed: {e}, allowing trades (fail-safe)")
+            
+            # 2. Check if after entry cutoff time (15:15 ET)
             entry_cutoff = dt_time(15, 15)  # 3:15 PM ET
             if current_time >= entry_cutoff:
                 return False, f"After entry cutoff time (current: {current_time.strftime('%H:%M')}, cutoff: 15:15 ET)"
             
-            # 2. Check if market is closed (basic weekday check)
+            # 3. Check if market is closed (basic weekday check)
             if current_et.weekday() >= 5:  # Saturday=5, Sunday=6
                 return False, f"Market closed (weekend: {current_et.strftime('%A')})"
             
-            # 3. Check if before market open (9:30 AM ET)
+            # 4. Check if before market open (9:30 AM ET)
             market_open = dt_time(9, 30)
             if current_time < market_open:
                 return False, f"Before market open (current: {current_time.strftime('%H:%M')}, open: 09:30 ET)"
             
-            # 4. Check minimum true range percentage (per-symbol thresholds)
+            # 5. Check minimum true range percentage (per-symbol thresholds)
             symbol = market_data.get("symbol", "UNKNOWN")
             by_symbol = config.get("MIN_TR_RANGE_PCT_BY_SYMBOL", {})
             min_tr_range_pct = float(by_symbol.get(symbol, config.get("MIN_TR_RANGE_PCT", 1.0)))
