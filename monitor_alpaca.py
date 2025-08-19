@@ -36,6 +36,7 @@ from utils.exit_strategies import (
     ExitReason,
 )
 from utils.exit_confirmation import ExitConfirmationWorkflow
+from utils.circuit_breaker_reset import check_and_process_file_reset
 import yfinance as yf
 from dotenv import load_dotenv
 
@@ -670,21 +671,29 @@ Avoid overnight risk!
                 print(message)
 
     def run_monitoring_cycle(self) -> None:
-        """Run one monitoring cycle."""
+        """Run one complete monitoring cycle for all positions."""
+        # Check for file-based circuit breaker reset at start of each cycle
+        try:
+            reset_executed, reset_message = check_and_process_file_reset(self.config)
+            if reset_executed:
+                logger.info(f"[MONITOR] Circuit breaker reset processed: {reset_message}")
+                if self.slack.enabled:
+                    self.slack.basic_notifier.send_message(f"🔄 **MONITOR UPDATE**: {reset_message}")
+        except Exception as e:
+            logger.error(f"[MONITOR] Error checking circuit breaker reset: {e}")
+
         positions = self.load_positions()
         
         # Increment heartbeat counter
         self.heartbeat_counter += 1
 
         if not positions:
-            logger.info("[MONITOR] No positions to monitor")
-            # Send heartbeat even when no positions
+            logger.debug("[MONITOR] No positions to monitor")
             if self.heartbeat_counter % self.heartbeat_interval == 0:
                 self.send_heartbeat("📊 Position monitor active - no positions to track")
             return
 
-        logger.info(f"[MONITOR] Checking {len(positions)} positions...")
-        
+        logger.info(f"[MONITOR] Monitoring {len(positions)} positions")
         # Send heartbeat every N cycles
         if self.heartbeat_counter % self.heartbeat_interval == 0:
             position_summary = []

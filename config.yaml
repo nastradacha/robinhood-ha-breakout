@@ -187,6 +187,20 @@ MARKET_CLOSE_MINUTE: 0
 # Slack UX Configuration (v0.7.0)
 HEARTBEAT_EVERY: 3  # Send heartbeat every N scan intervals to avoid spam
 
+# Daily Drawdown Circuit Breaker (US-FA-004)
+DAILY_DRAWDOWN_ENABLED: true                    # Enable daily drawdown protection
+DAILY_DRAWDOWN_THRESHOLD_PERCENT: 5.0          # Stop trading at 5% daily loss
+DAILY_DRAWDOWN_POST_THRESHOLD_PERCENT: 0.0     # Additional buffer after threshold
+DAILY_DRAWDOWN_REQUIRE_MANUAL_RESET: true      # Require manual reset to resume trading
+DAILY_DRAWDOWN_RESET_TIME: "09:30"             # Daily reset time (ET market open)
+DAILY_DRAWDOWN_ALERT_LEVELS: [2.5, 4.0, 5.0]  # Alert at these loss percentages
 
+# Weekly Drawdown Circuit Breaker (US-FA-005)
+WEEKLY_DRAWDOWN_ENABLED: true                   # Enable weekly drawdown protection
+WEEKLY_DRAWDOWN_THRESHOLD_PERCENT: 15.0        # Stop trading at 15% weekly loss
+WEEKLY_DRAWDOWN_REQUIRE_MANUAL_RESET: true     # Require manual intervention to resume
+WEEKLY_DRAWDOWN_ALERT_LEVELS: [10.0, 12.5, 15.0]  # Alert at these weekly loss percentages
+WEEKLY_DRAWDOWN_PERFORMANCE_WINDOW: 7          # Rolling 7-day performance window
+WEEKLY_DRAWDOWN_MIN_TRADING_DAYS: 3            # Minimum trading days before weekly protection activates
 
 # CHROME_MAJOR: 138

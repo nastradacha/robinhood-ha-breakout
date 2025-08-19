@@ -1,0 +1,13 @@
+{
+  "current_bankroll": "live",
+  "start_capital": "live",
+  "total_trades": 0,
+  "winning_trades": 0,
+  "total_pnl": 0.0,
+  "max_drawdown": 0.0,
+  "peak_bankroll": "live",
+  "created_at": "2025-08-18T18:27:26.083009",
+  "last_updated": "2025-08-18T18:27:26.083014",
+  "trade_history": [],
+  "win_loss_history": []
+}

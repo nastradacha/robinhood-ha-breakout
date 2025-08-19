@@ -66,6 +66,7 @@ from utils.multi_symbol_scanner import MultiSymbolScanner
 from utils.portfolio import PortfolioManager, Position
 from utils.alpaca_options import AlpacaOptionsTrader, create_alpaca_trader
 from utils.kill_switch import get_kill_switch, is_trading_halted
+from utils.circuit_breaker_reset import check_and_process_file_reset
 
 # Load environment variables
 load_dotenv()
@@ -1351,6 +1352,16 @@ def main_loop(
 
             # Check for emergency stop file trigger
             kill_switch.check_file_trigger()
+
+            # Check for circuit breaker reset file trigger
+            try:
+                reset_executed, reset_message = check_and_process_file_reset(config)
+                if reset_executed:
+                    logger.info(f"[MAIN-LOOP] Circuit breaker reset processed: {reset_message}")
+                    if slack_notifier:
+                        slack_notifier.basic_notifier.send_message(f"🔄 **MAIN LOOP**: {reset_message}")
+            except Exception as e:
+                logger.error(f"[MAIN-LOOP] Error checking circuit breaker reset: {e}")
 
             # Check if emergency stop is active
             if kill_switch.is_active():

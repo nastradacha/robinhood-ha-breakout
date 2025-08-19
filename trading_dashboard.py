@@ -24,6 +24,7 @@ import math
 
 from utils.scoped_files import get_scoped_paths, ensure_scoped_files
 from utils.enhanced_slack import EnhancedSlackIntegration
+from utils.drawdown_circuit_breaker import DrawdownCircuitBreaker
 
 
 def _load_config() -> Dict:
@@ -447,6 +448,43 @@ def display_dashboard(export_csv: bool = False, export_html: bool = False, slack
     print(f"Current Bankroll: ${current_bankroll:,.2f}")
     print(f"Starting Capital: ${start_capital:,.2f}")
     print(f"Peak Bankroll: ${peak_bankroll:,.2f}")
+
+    # Circuit Breaker Status
+    try:
+        config = {}
+        if hasattr(paths, 'get') and 'config' in paths:
+            config = paths['config']
+        elif 'broker' in paths and 'env' in paths:
+            # Load config from file for circuit breaker check
+            config_path = Path("config.yaml")
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+        
+        circuit_breaker = DrawdownCircuitBreaker(config)
+        cb_status = circuit_breaker.get_circuit_breaker_status()
+        
+        print("\n=== DAILY DRAWDOWN PROTECTION ===")
+        if cb_status['is_active']:
+            print(f"🔴 CIRCUIT BREAKER ACTIVE")
+            print(f"   Activated: {cb_status.get('activation_date', 'Unknown')} at {cb_status.get('activation_time', 'Unknown')}")
+            print(f"   Reason: {cb_status.get('activation_reason', 'Daily loss threshold exceeded')}")
+            print(f"   Loss at Activation: {cb_status.get('activation_pnl_percent', 0):.2f}%")
+            if cb_status.get('manual_reset_required', False):
+                print(f"   ⚠️  Manual reset required to resume trading")
+        else:
+            print(f"🟢 Circuit Breaker: INACTIVE")
+            print(f"   Daily P&L Tracking: {'ENABLED' if cb_status.get('enabled', False) else 'DISABLED'}")
+            if cb_status.get('enabled', False):
+                print(f"   Loss Threshold: {cb_status.get('threshold_percent', 5.0):.1f}%")
+                daily_pnl = cb_status.get('current_daily_pnl_percent', 0)
+                pnl_color = "🟢" if daily_pnl >= 0 else "🟡" if daily_pnl > -2.5 else "🟠" if daily_pnl > -4.0 else "🔴"
+                print(f"   Today's P&L: {pnl_color} {daily_pnl:+.2f}%")
+                
+    except Exception as e:
+        print(f"\n=== DAILY DRAWDOWN PROTECTION ===")
+        print(f"⚠️  Status check failed: {e}")
+        print(f"   Circuit breaker may be unavailable")
     print(
         f"Total Return: ${current_bankroll - start_capital:+,.2f} ({((current_bankroll - start_capital) / start_capital * 100):+.1f}%)"
     )

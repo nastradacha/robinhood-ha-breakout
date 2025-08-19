@@ -15,7 +15,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
     (19 Symbols)           (Advanced ML)      (Alpaca API)           (Live P&L)            (15% Targets)
 ```
 
-**Current v2.7.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
+**Current v2.9.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
 - **🎯 Complete Automation**: From market scanning to profit-taking, zero manual intervention
 - **🏦 Alpaca API Integration**: Professional-grade execution with real-time market data
 - **📊 Multi-Symbol Intelligence**: 19 symbols with symbol-specific risk management
@@ -24,7 +24,9 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
 - **📈 Real-Time Monitoring**: Live position tracking with automatic profit-taking at 15% targets
 - **🔄 Transaction Reconciliation**: Direct Alpaca API sync ensures 100% trade accuracy
 - **📱 Enterprise Notifications**: Comprehensive Slack integration with charts and analysis
-- **🛡️ Risk Management**: Symbol-specific liquidity requirements and position sizing
+- **🛡️ Advanced Risk Management**: Multi-layered protection systems
+- **🚨 Weekly Drawdown Protection**: System-wide disable when weekly losses exceed 15% threshold
+- **🚨 Daily Drawdown Circuit Breaker**: Halts trading when daily losses exceed 5% threshold
 - **🚨 VIX Spike Protection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - **🔒 Environment Safety**: Separate paper/live environments with explicit risk acknowledgment
 - **📊 Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
@@ -339,7 +341,26 @@ positions_robinhood_live.csv   # Robinhood positions
 - `_is_within_blocking_window()`: Calculates if symbol is within earnings window
 - `send_earnings_block_alert()`: Slack notifications when earnings blocks trigger
 
-### 12. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
+### 12. 🚨 **Daily Drawdown Protection Department** (`utils/daily_pnl_tracker.py`, `utils/drawdown_circuit_breaker.py`) **NEW v2.8.0!**
+**What it does**: Real-time daily P&L monitoring with automatic trading halt when losses exceed thresholds
+
+**Think of it as**: Your capital preservation specialist that prevents catastrophic daily losses
+- **Multi-Broker P&L Tracking**: Aggregates daily P&L across Alpaca paper/live and Robinhood environments
+- **Real-Time Loss Monitoring**: Calculates current daily P&L percentage from starting balances
+- **Automatic Circuit Breaker**: Halts all new trades when daily loss exceeds 5% (configurable)
+- **Persistent State Management**: Survives system restarts and maintains circuit breaker status
+- **Manual Reset Mechanisms**: File trigger, Slack commands, or programmatic API reset options
+- **Slack Alert Integration**: Immediate notifications for activation, reset, and warning levels
+- **Fail-safe Design**: Allows trading if P&L calculation fails (conservative approach)
+
+**Key Functions**:
+- `DailyPnLTracker()`: Multi-broker daily P&L calculation and tracking
+- `DrawdownCircuitBreaker()`: Circuit breaker logic with configurable thresholds
+- `CircuitBreakerResetManager()`: Manual reset mechanisms and audit logging
+- `check_circuit_breaker()`: Public API for pre-LLM gate integration
+- `check_and_process_file_reset()`: File-based reset trigger processing
+
+### 13. 🛡️ **Exit Strategies** (`utils/exit_strategies.py`) **NEW!**
 **What it does**: Advanced position exit logic with trailing stops and time-based exits
 
 **Think of it as**: Your risk management specialist

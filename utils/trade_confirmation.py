@@ -416,6 +416,75 @@ class TradeConfirmationManager:
                 logger.error(f"Invalid Slack message format: {message}")
                 return False
 
+        # Circuit breaker status commands
+        elif any(keyword in message.lower() for keyword in ["circuit status", "breaker status", "status circuit", "status breaker", "cb status"]):
+            logger.info(f"[CIRCUIT-BREAKER] Status command detected in Slack: {message}")
+            
+            try:
+                from .drawdown_circuit_breaker import get_circuit_breaker_status
+                cb_status = get_circuit_breaker_status(self.config)
+                
+                # Format status message
+                if cb_status['is_active']:
+                    status_msg = (
+                        f"🔴 **CIRCUIT BREAKER ACTIVE**\n\n"
+                        f"**Activated:** {cb_status.get('activation_date', 'Unknown')} at {cb_status.get('activation_time', 'Unknown')}\n"
+                        f"**Reason:** {cb_status.get('activation_reason', 'Daily loss threshold exceeded')}\n"
+                        f"**Loss at Activation:** {cb_status.get('activation_pnl_percent', 0):.2f}%\n"
+                        f"**Manual Reset Required:** {'Yes' if cb_status.get('manual_reset_required', False) else 'No'}\n\n"
+                        f"⚠️ **Trading is currently BLOCKED**\n"
+                        f"Use `reset circuit breaker` command to resume trading"
+                    )
+                else:
+                    daily_pnl = cb_status.get('current_daily_pnl_percent', 0)
+                    threshold = cb_status.get('threshold_percent', 5.0)
+                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🟡" if daily_pnl > -2.5 else "🟠" if daily_pnl > -4.0 else "🔴"
+                    
+                    status_msg = (
+                        f"🟢 **CIRCUIT BREAKER INACTIVE**\n\n"
+                        f"**Status:** {'ENABLED' if cb_status.get('enabled', False) else 'DISABLED'}\n"
+                        f"**Loss Threshold:** {threshold:.1f}%\n"
+                        f"**Today's P&L:** {pnl_emoji} {daily_pnl:+.2f}%\n"
+                        f"**Remaining Buffer:** {threshold - abs(daily_pnl):.1f}%\n\n"
+                        f"✅ **Trading is currently ALLOWED**"
+                    )
+                
+                if hasattr(self, 'slack_notifier') and self.slack_notifier:
+                    self.slack_notifier.basic_notifier.send_message(status_msg)
+                
+                logger.info(f"[CIRCUIT-BREAKER] Status sent to Slack")
+                return True  # Message was processed
+                
+            except Exception as e:
+                logger.error(f"[CIRCUIT-BREAKER] Error getting status: {e}")
+                if hasattr(self, 'slack_notifier') and self.slack_notifier:
+                    self.slack_notifier.basic_notifier.send_message(f"❌ Error retrieving circuit breaker status: {e}")
+                return False
+
+        # Circuit breaker reset commands
+        elif any(keyword in message.lower() for keyword in ["reset circuit", "circuit reset", "reset breaker", "breaker reset"]):
+            logger.info(f"[CIRCUIT-BREAKER] Reset command detected in Slack: {message}")
+            
+            try:
+                from .circuit_breaker_reset import process_slack_reset_command
+                reset_executed, reset_message = process_slack_reset_command(message, self.config)
+                
+                if reset_executed:
+                    logger.info(f"[CIRCUIT-BREAKER] Slack reset successful: {reset_message}")
+                    # Send confirmation back to Slack
+                    if hasattr(self, 'slack_notifier') and self.slack_notifier:
+                        self.slack_notifier.basic_notifier.send_message(f"✅ {reset_message}")
+                else:
+                    logger.warning(f"[CIRCUIT-BREAKER] Slack reset failed: {reset_message}")
+                    if hasattr(self, 'slack_notifier') and self.slack_notifier:
+                        self.slack_notifier.basic_notifier.send_message(f"❌ {reset_message}")
+                        
+                return True  # Message was processed
+                
+            except Exception as e:
+                logger.error(f"[CIRCUIT-BREAKER] Error processing Slack reset: {e}")
+                return False
+
         # Emergency stop commands (fallback parsing)
         elif any(keyword in message.lower() for keyword in ["emergency", "stop", "halt", "kill"]):
             logger.warning(f"[EMERGENCY-STOP] Emergency stop command detected in Slack: {message}")

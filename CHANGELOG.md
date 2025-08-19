@@ -2,6 +2,64 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.9.0] - 2025-08-18
+
+### Added - Weekly Drawdown Protection (US-FA-005)
+- **Weekly P&L tracking** with rolling 7-day performance calculation across all broker environments
+- **Weekly circuit breaker** automatically disables trading when weekly losses exceed 15% threshold
+- **Manual intervention requirement** for system re-enable after weekly threshold breach
+- **Weekly performance analytics** including winning/losing days, worst day, and total P&L statistics
+- **Critical Slack alerts** for system disable/re-enable with comprehensive performance summaries
+- **Precedence system** where weekly protection overrides daily circuit breaker limits
+- **Configurable thresholds** with alert levels at 10%, 12.5%, and 15% weekly loss
+- **State persistence** maintains weekly disable status across system restarts
+
+### Implementation
+- `utils/weekly_pnl_tracker.py` - Rolling 7-day P&L calculation with trade aggregation
+- `utils/drawdown_circuit_breaker.py` - Enhanced with weekly protection integration
+- `utils/enhanced_slack.py` - Weekly system disable/re-enable notification methods
+- `config.yaml` - WEEKLY_DRAWDOWN_* configuration keys for thresholds and behavior
+- `tests/test_weekly_drawdown_protection.py` - Comprehensive test suite for weekly protection
+
+### Enhanced
+- **Capital preservation** - prevents catastrophic weekly losses during extended losing periods
+- **Multi-layered protection** - weekly protection takes precedence over daily limits
+- **Performance analytics** - detailed weekly statistics for strategy analysis
+- **Manual reset workflow** - requires intervention to resume trading after weekly threshold
+
+## [2.8.0] - 2025-08-18
+
+### Added - Daily Drawdown Circuit Breaker (US-FA-004)
+- **Daily P&L tracking** across all broker environments with real-time loss monitoring
+- **Circuit breaker activation** automatically halts new trades when daily losses exceed 5% threshold
+- **Multi-broker aggregation** combines P&L from Alpaca paper/live and Robinhood environments
+- **Persistent state management** survives system restarts and maintains circuit breaker status
+- **Manual reset mechanisms** via file trigger, Slack commands, or programmatic API
+- **Slack alert integration** for activation, reset, and warning level notifications
+- **Pre-LLM gate integration** blocks trades before AI analysis when circuit breaker active
+- **Fail-safe design** allows trading if P&L calculation fails (conservative approach)
+
+### Implementation
+- `utils/daily_pnl_tracker.py` - Real-time daily P&L tracking with multi-broker support
+- `utils/drawdown_circuit_breaker.py` - Circuit breaker logic with configurable thresholds
+- `utils/circuit_breaker_reset.py` - Manual reset mechanisms and audit logging
+- `config.yaml` - DAILY_DRAWDOWN_* configuration keys for enabling, thresholds, and behavior
+- Pre-LLM hard gate integration in `utils/multi_symbol_scanner.py`
+- Slack notification integration via `utils/enhanced_slack.py`
+
+### Enhanced
+- **Capital preservation** - prevents catastrophic daily losses with automatic trading halt
+- **Multi-environment support** aggregates P&L across all active trading accounts
+- **Timezone-aware processing** handles ET market hours and daily reset logic
+- **Comprehensive audit trail** with detailed logging and reset history tracking
+
+### Testing
+- `tests/test_daily_drawdown_circuit_breaker.py` - 15+ comprehensive test cases
+- Multi-broker P&L calculation testing
+- Circuit breaker activation and reset testing
+- Slack integration and manual reset mechanism testing
+- Error handling and fail-safe behavior validation
+
 ## [2.7.0] - 2025-08-18
 
 ### Added - Earnings Calendar Integration (US-FA-002)

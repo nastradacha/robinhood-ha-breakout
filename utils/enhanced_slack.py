@@ -332,6 +332,76 @@ class EnhancedSlackIntegration:
         except Exception as e:
             logger.error(f"[ENHANCED-SLACK] Failed to send earnings clear alert: {e}")
 
+    def send_circuit_breaker_activation_alert(self, circuit_breaker_info: Dict):
+        """Send Slack alert when daily drawdown circuit breaker activates"""
+        try:
+            pnl_percent = circuit_breaker_info.get("activation_pnl_percent", 0.0)
+            threshold = circuit_breaker_info.get("threshold_percent", 5.0)
+            activation_reason = circuit_breaker_info.get("activation_reason", "Daily loss threshold exceeded")
+            
+            message = (
+                f"🚨 **CIRCUIT BREAKER ACTIVATED** 🚨\n\n"
+                f"**Daily P&L:** {pnl_percent:.2f}% 📉\n"
+                f"**Threshold:** -{threshold}% ⚠️\n"
+                f"**Reason:** {activation_reason}\n\n"
+                f"🛑 **ALL NEW TRADING HALTED**\n"
+                f"📊 Existing positions continue to be monitored\n"
+                f"🔄 Manual reset required to resume trading\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Circuit breaker activation alert sent: {pnl_percent:.2f}%")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send circuit breaker activation alert: {e}")
+
+    def send_circuit_breaker_reset_alert(self, reset_info: Dict):
+        """Send Slack alert when circuit breaker is manually reset"""
+        try:
+            reset_reason = reset_info.get("reset_reason", "Manual reset")
+            previous_pnl = reset_info.get("previous_activation", {}).get("pnl_percent", 0.0)
+            
+            message = (
+                f"✅ **CIRCUIT BREAKER RESET** ✅\n\n"
+                f"**Reset Reason:** {reset_reason}\n"
+                f"**Previous Loss:** {previous_pnl:.2f}% 📊\n\n"
+                f"🟢 **TRADING RESUMED**\n"
+                f"📈 New trade opportunities will be evaluated\n"
+                f"🔍 Daily P&L tracking continues\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Circuit breaker reset alert sent")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send circuit breaker reset alert: {e}")
+
+    def send_daily_pnl_warning_alert(self, pnl_info: Dict):
+        """Send Slack alert for daily P&L warning levels"""
+        try:
+            pnl_percent = pnl_info.get("daily_pnl_percent", 0.0)
+            warning_level = pnl_info.get("warning_level", 0.0)
+            threshold = pnl_info.get("threshold_percent", 5.0)
+            distance_to_threshold = threshold + pnl_percent  # pnl_percent is negative
+            
+            warning_emoji = "⚠️" if warning_level >= 4.0 else "⚡" if warning_level >= 2.5 else "📊"
+            
+            message = (
+                f"{warning_emoji} **DAILY P&L WARNING** {warning_emoji}\n\n"
+                f"**Current Daily P&L:** {pnl_percent:.2f}% 📉\n"
+                f"**Warning Level:** -{warning_level}%\n"
+                f"**Circuit Breaker:** -{threshold}%\n"
+                f"**Distance to Threshold:** {distance_to_threshold:.2f}%\n\n"
+                f"🔍 Monitor positions closely\n"
+                f"⚠️ Consider risk management actions\n\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}"
+            )
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Daily P&L warning alert sent: {pnl_percent:.2f}%")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send daily P&L warning alert: {e}")
+
     def _send_enhanced_text_alert(
         self, symbol: str, decision: str, analysis: Dict, confidence: float
     ):
@@ -725,8 +795,11 @@ class EnhancedSlackIntegration:
         self._trade_confirmation_manager = manager
         logger.info("[SLACK-CONFIRM] Trade confirmation manager set")
 
-    def send_market_analysis(self, analysis: dict):
-        """Send market analysis summary."""
+    def send_heartbeat_with_context(self, message: str, analysis: Dict):
+        """Send enhanced heartbeat with market context"""
+        if not self.enabled:
+            return
+
         symbol = analysis.get("symbol", "N/A")
         trend = analysis.get("trend_direction", "N/A")
         price = analysis.get("current_price", 0)
@@ -740,6 +813,126 @@ class EnhancedSlackIntegration:
         )
 
         self.send_heartbeat(message)
+    
+    def send_weekly_system_disable_alert(self, alert_data: Dict):
+        """Send critical alert for weekly system disable (US-FA-005)"""
+        if not self.enabled:
+            return
+        
+        try:
+            disable_reason = alert_data.get("disable_reason", "Weekly loss threshold exceeded")
+            threshold_percent = alert_data.get("threshold_percent", 15.0)
+            weekly_pnl_percent = alert_data.get("disable_weekly_pnl_percent", 0.0)
+            performance_summary = alert_data.get("performance_summary", {})
+            disable_count = alert_data.get("disable_count", 1)
+            
+            # Create critical alert message
+            message = (
+                f"🚨 **CRITICAL: TRADING SYSTEM DISABLED** 🚨\n\n"
+                f"**Weekly Drawdown Protection Activated**\n"
+                f"📉 **Weekly Loss:** {weekly_pnl_percent:.2f}%\n"
+                f"🎯 **Threshold:** {threshold_percent:.1f}%\n"
+                f"⚠️ **Status:** All trading HALTED\n"
+                f"🔄 **Disable Count:** {disable_count}\n\n"
+                f"**Reason:** {disable_reason}\n\n"
+            )
+            
+            # Add performance summary if available
+            if performance_summary:
+                stats = performance_summary.get("statistics", {})
+                message += (
+                    f"**📊 Performance Summary:**\n"
+                    f"• Period: {performance_summary.get('period', 'N/A')}\n"
+                    f"• Total P&L: ${performance_summary.get('total_pnl', 0):.2f}\n"
+                    f"• Winning Days: {stats.get('winning_days', 0)}\n"
+                    f"• Losing Days: {stats.get('losing_days', 0)}\n"
+                    f"• Worst Day: ${stats.get('worst_day_pnl', 0):.2f}\n\n"
+                )
+            
+            message += (
+                f"**🔧 MANUAL INTERVENTION REQUIRED**\n"
+                f"System will remain disabled until manually re-enabled.\n"
+                f"Review strategy and market conditions before resuming.\n\n"
+                f"*Weekly Drawdown Protection - US-FA-005*"
+            )
+            
+            # Send as critical alert
+            self.basic_notifier.send_message(message)
+            logger.critical(f"[ENHANCED-SLACK] Weekly system disable alert sent")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send weekly disable alert: {e}")
+    
+    def send_weekly_system_reenable_alert(self, reenable_info: Dict):
+        """Send alert for weekly system re-enable"""
+        if not self.enabled:
+            return
+        
+        try:
+            reenable_reason = reenable_info.get("reenable_reason", "Manual re-enable")
+            reenable_time = reenable_info.get("reenable_time", "Unknown")
+            previous_disable = reenable_info.get("previous_disable", {})
+            
+            message = (
+                f"✅ **TRADING SYSTEM RE-ENABLED** ✅\n\n"
+                f"**Weekly Drawdown Protection Lifted**\n"
+                f"🔄 **Re-enabled:** {reenable_time}\n"
+                f"📝 **Reason:** {reenable_reason}\n\n"
+            )
+            
+            # Add previous disable info if available
+            if previous_disable:
+                disable_date = previous_disable.get("disable_date", "Unknown")
+                disable_reason = previous_disable.get("disable_reason", "Unknown")
+                weekly_pnl = previous_disable.get("disable_weekly_pnl_percent", 0.0)
+                
+                message += (
+                    f"**Previous Disable Info:**\n"
+                    f"• Date: {disable_date}\n"
+                    f"• Weekly Loss: {weekly_pnl:.2f}%\n"
+                    f"• Reason: {disable_reason}\n\n"
+                )
+            
+            message += (
+                f"**🚀 TRADING RESUMED**\n"
+                f"System is now active and monitoring for opportunities.\n"
+                f"Continue monitoring performance closely.\n\n"
+                f"*Weekly Drawdown Protection - US-FA-005*"
+            )
+            
+            # Send as info alert
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Weekly system re-enable alert sent")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send weekly re-enable alert: {e}")
+    
+    def send_weekly_system_reenable_notification(self, notification_data: Dict):
+        """Send notification for weekly system re-enable via reset manager"""
+        if not self.enabled:
+            return
+        
+        try:
+            reenable_reason = notification_data.get("reenable_reason", "Manual intervention")
+            reenable_time = notification_data.get("reenable_time", "Unknown")
+            reset_method = notification_data.get("reset_method", "manual")
+            
+            message = (
+                f"🔧 **SYSTEM RE-ENABLE NOTIFICATION** 🔧\n\n"
+                f"**Weekly Protection System Reset**\n"
+                f"⏰ **Time:** {reenable_time}\n"
+                f"🔄 **Method:** {reset_method}\n"
+                f"📝 **Reason:** {reenable_reason}\n\n"
+                f"**Status:** Trading system operational\n\n"
+                f"*Weekly System Reset Manager*"
+            )
+            
+            # Send as info notification
+            self.basic_notifier.send_message(message)
+            logger.info(f"[ENHANCED-SLACK] Weekly re-enable notification sent")
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-SLACK] Failed to send weekly re-enable notification: {e}")
 
 
 # Example usage and testing

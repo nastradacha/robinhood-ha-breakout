@@ -755,7 +755,28 @@ class MultiSymbolScanner:
             except Exception as e:
                 logger.warning(f"[EARNINGS-GATE] Earnings check failed for {symbol}: {e}, allowing trades (fail-safe)")
             
-            # 5. Check minimum true range percentage (per-symbol thresholds)
+            # 4. Check daily drawdown circuit breaker (US-FA-004)
+            try:
+                from .drawdown_circuit_breaker import check_circuit_breaker
+                should_block, circuit_reason = check_circuit_breaker(config)
+                if should_block:
+                    return False, f"Circuit breaker: {circuit_reason}"
+                logger.debug(f"[CIRCUIT-BREAKER-GATE] {symbol}: {circuit_reason}")
+            except Exception as e:
+                logger.warning(f"[CIRCUIT-BREAKER-GATE] Circuit breaker check failed for {symbol}: {e}, allowing trades (fail-safe)")
+            
+            # 5. Check weekly drawdown protection (US-FA-005)
+            try:
+                from .weekly_drawdown_circuit_breaker import get_weekly_circuit_breaker
+                weekly_cb = get_weekly_circuit_breaker(config)
+                should_disable, weekly_reason = weekly_cb.check_weekly_drawdown_limit()
+                if should_disable:
+                    return False, f"Weekly protection: {weekly_reason}"
+                logger.debug(f"[WEEKLY-PROTECTION-GATE] {symbol}: {weekly_reason}")
+            except Exception as e:
+                logger.warning(f"[WEEKLY-PROTECTION-GATE] Weekly protection check failed for {symbol}: {e}, allowing trades (fail-safe)")
+            
+            # 6. Check minimum true range percentage (per-symbol thresholds)
             symbol = market_data.get("symbol", "UNKNOWN")
             by_symbol = config.get("MIN_TR_RANGE_PCT_BY_SYMBOL", {})
             min_tr_range_pct = float(by_symbol.get(symbol, config.get("MIN_TR_RANGE_PCT", 1.0)))

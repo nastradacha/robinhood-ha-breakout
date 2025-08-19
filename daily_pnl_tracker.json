@@ -1,0 +1,11 @@
+{
+  "tracking_date": "2025-08-18",
+  "market_open_time": "09:30",
+  "daily_start_balances": {
+    "alpaca:paper": 0.0,
+    "alpaca:live": 0.0,
+    "robinhood:live": 0.0
+  },
+  "last_updated": "2025-08-18T18:27:26.082256-04:00",
+  "reset_required": false
+}

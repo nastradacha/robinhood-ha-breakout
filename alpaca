@@ -1,0 +1,13 @@
+{
+  "current_bankroll": "paper",
+  "start_capital": "paper",
+  "total_trades": 0,
+  "winning_trades": 0,
+  "total_pnl": 0.0,
+  "max_drawdown": 0.0,
+  "peak_bankroll": "paper",
+  "created_at": "2025-08-18T18:27:26.082313",
+  "last_updated": "2025-08-18T18:27:26.082326",
+  "trade_history": [],
+  "win_loss_history": []
+}

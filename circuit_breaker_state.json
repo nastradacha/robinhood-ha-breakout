@@ -1,0 +1,20 @@
+{
+  "is_active": false,
+  "activation_date": null,
+  "activation_time": null,
+  "activation_pnl_percent": null,
+  "activation_reason": null,
+  "last_updated": "2025-08-18T19:22:11.548612-04:00",
+  "manual_reset_required": false,
+  "reset_count": 2,
+  "last_reset": {
+    "reset_time": "2025-08-18T19:22:11.548612-04:00",
+    "reset_reason": "Regression test cleanup",
+    "previous_activation": {
+      "date": "2025-08-18",
+      "time": "19:20:50",
+      "pnl_percent": 0.0,
+      "reason": "Manual activation: Test persistence"
+    }
+  }
+}

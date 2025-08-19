@@ -1,6 +1,6 @@
 # 🚀 Robinhood HA Breakout - Command Reference Guide
 
-**Complete reference for all CLI commands and usage patterns (v2.7.0)**
+**Complete reference for all CLI commands and usage patterns (v2.9.0)**
 
 ---
 
@@ -403,6 +403,14 @@ exit_strategies:
   time_based_exit_enabled: true
   market_close_time: "15:45"
 
+# Daily Drawdown Circuit Breaker (NEW v2.8.0)
+DAILY_DRAWDOWN_ENABLED: true
+DAILY_DRAWDOWN_THRESHOLD_PERCENT: 5.0
+DAILY_DRAWDOWN_POST_THRESHOLD_PERCENT: 0.0
+DAILY_DRAWDOWN_REQUIRE_MANUAL_RESET: true
+DAILY_DRAWDOWN_RESET_TIME: "09:30"
+DAILY_DRAWDOWN_ALERT_LEVELS: [2.5, 4.0, 5.0]
+
 # Earnings Calendar Protection (NEW v2.7.0)
 EARNINGS_ENABLED: true
 EARNINGS_BLOCK_WINDOW_HOURS: 24
@@ -438,6 +446,18 @@ python backup_trading_data.py --restore
 
 # Repair corrupted trade log
 python analytics_dashboard.py  # Auto-repairs CSV
+```
+
+### **Circuit Breaker Reset (NEW v2.8.0)**
+```bash
+# File-based reset (create trigger file)
+echo "Emergency reset due to market conditions" > circuit_breaker_reset.trigger
+
+# Check circuit breaker status
+python -c "from utils.drawdown_circuit_breaker import get_drawdown_circuit_breaker; import yaml; config=yaml.safe_load(open('config.yaml')); cb=get_drawdown_circuit_breaker(config); print(cb.get_circuit_breaker_status())"
+
+# Manual reset via Python
+python -c "from utils.circuit_breaker_reset import get_reset_manager; import yaml; config=yaml.safe_load(open('config.yaml')); rm=get_reset_manager(config); print(rm.execute_manual_reset('Manual override', 'command_line'))"
 ```
 
 ### **Reset Configuration**

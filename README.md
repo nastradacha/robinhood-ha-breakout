@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.6.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.9.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-19%20Symbols-orange.svg)](#-multi-symbol-trading)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20API-blue.svg)](#-real-time-market-data)
 [![Automated Execution](https://img.shields.io/badge/execution-Fully%20Automated-green.svg)](#-automated-execution)
@@ -26,7 +26,9 @@
 
 **This is a complete automated trading system** - from market analysis to trade execution, position monitoring, and profit-taking, all running autonomously with your oversight.
 
-### 🚀 **Current Features (v2.7.0 - EARNINGS CALENDAR INTEGRATION!)**
+### 🚀 **Current Features (v2.9.0 - WEEKLY DRAWDOWN PROTECTION!)**
+- 🚨 **Weekly Drawdown Protection**: Automatic system disable when weekly losses exceed 15% threshold
+- 🚨 **Daily Drawdown Circuit Breaker**: Automatic trading halt when daily losses exceed 5% threshold
 - 🚨 **VIX Spike Detection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - 🕒 **Market Hours Validation**: Enhanced validation with holidays and early close detection
 - 📊 **Earnings Calendar Blocking**: Prevents trades within 24h of earnings announcements
@@ -46,6 +48,8 @@
   - 🏛️ **Dealer Gamma Integration**: Market maker positioning insights
   - 🧠 **Context Memory System**: AI learns from recent trading patterns
 - 🔒 **Enterprise-Grade Risk Management**: Multi-layered safety systems
+  - 🚨 **Weekly Drawdown Protection**: System-wide disable at 15% weekly loss with manual reset requirement
+  - 🚨 **Daily Drawdown Circuit Breaker**: Halts trading when daily losses exceed 5% threshold
   - 🚨 **VIX Spike Protection**: Blocks new trades when volatility > 30 (configurable)
   - 🕒 **Market Hours Validation**: Holiday and early close detection prevents invalid trades
   - 📊 **Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
