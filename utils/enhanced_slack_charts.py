@@ -211,16 +211,14 @@ class EnhancedSlackChartSender:
             f"{symbol}_ultra_hq_breakout_{timestamp}.png"
         )
         
-        plt.savefig(
-            chart_path,
-            dpi=self.chart_config["dpi"],
-            facecolor=self.chart_config["facecolor"],
-            bbox_inches="tight",
-            pad_inches=0.5,  # More padding for mobile
-            format='png',
-            optimize=True,  # Optimize file size
-            quality=95,  # High quality compression
-        )
+        save_kwargs = {
+            "dpi": 300,  # Ultra-high DPI for crisp mobile display
+            "bbox_inches": "tight",
+            "pad_inches": 0.5,  # More padding for mobile
+            "format": 'png'
+        }
+        
+        plt.savefig(chart_path, **save_kwargs)
         plt.close()
         
         logger.info(f"[ENHANCED-CHARTS] Created ultra-HQ chart: {chart_path}")
@@ -419,7 +417,9 @@ class EnhancedSlackChartSender:
     
     def _prepare_heikin_ashi_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """Prepare Heikin-Ashi data for enhanced chart visualization."""
-        return self._calculate_heikin_ashi(data)
+        # Import the standard HA function from data.py to ensure consistency
+        from .data import calculate_heikin_ashi
+        return calculate_heikin_ashi(data)
     
     def _calculate_heikin_ashi(self, data: pd.DataFrame) -> pd.DataFrame:
         """Calculate Heikin-Ashi values for smoother visualization."""
@@ -476,7 +476,7 @@ class EnhancedSlackChartSender:
                          else self.colors["neutral"] if confidence >= 50 
                          else self.colors["bearish"])
             
-            ax.text(0.98, 0.98, f"🎯 Confidence\n{confidence:.1f}%", 
+            ax.text(0.98, 0.98, f"Confidence\n{confidence:.1f}%", 
                    transform=ax.transAxes, fontsize=self.chart_config["annotation_size"],
                    color=conf_color, weight="bold",
                    horizontalalignment='right', verticalalignment='top',
@@ -486,8 +486,8 @@ class EnhancedSlackChartSender:
         # Add volatility indicator
         if "atr_percentage" in analysis:
             atr_pct = analysis["atr_percentage"]
-            volatility_emoji = "🔥" if atr_pct > 2.0 else "📊" if atr_pct > 1.0 else "😴"
-            ax.text(0.02, 0.02, f"{volatility_emoji} ATR: {atr_pct:.2f}%", 
+            volatility_indicator = "[HIGH]" if atr_pct > 2.0 else "[MED]" if atr_pct > 1.0 else "[LOW]"
+            ax.text(0.02, 0.02, f"{volatility_indicator} ATR: {atr_pct:.2f}%", 
                    transform=ax.transAxes, fontsize=self.chart_config["annotation_size"],
                    color=self.colors["current"], weight="bold",
                    verticalalignment='bottom',
@@ -560,8 +560,8 @@ class EnhancedSlackChartSender:
         fig.suptitle("", fontsize=1)  # Remove default title
         plt.tight_layout()
         
-        # Add professional branding watermark
-        fig.text(0.99, 0.01, "📈 RobinhoodBot Pro • Enhanced Analysis", 
+        # Add professional branding watermark (removed emoji to avoid glyph warnings)
+        fig.text(0.99, 0.01, "RobinhoodBot Pro • Enhanced Analysis", 
                 fontsize=10, color=self.colors["volume"], alpha=0.6,
                 horizontalalignment='right', verticalalignment='bottom')
     
@@ -584,14 +584,15 @@ class EnhancedSlackChartSender:
         confidence = analysis.get("confidence", 0)
         current_price = analysis.get("current_price", 0)
         
-        emoji = "📈" if trend == "BULLISH" else "📉" if trend == "BEARISH" else "📊"
+        # Use text indicators instead of emojis to avoid glyph warnings
+        trend_indicator = "[BULL]" if trend == "BULLISH" else "[BEAR]" if trend == "BEARISH" else "[NEUTRAL]"
         
-        message = f"{emoji} **{symbol} BREAKOUT ANALYSIS**\n\n"
+        message = f"{trend_indicator} **{symbol} BREAKOUT ANALYSIS**\n\n"
         message += f"**Current Price:** ${current_price:.2f}\n"
         message += f"**Trend:** {trend}\n"
         message += f"**Confidence:** {confidence:.1f}%\n"
         message += f"**Time:** {datetime.now().strftime('%H:%M:%S EST')}\n\n"
-        message += "📊 **Professional chart analysis attached above**"
+        message += "**Professional chart analysis attached above**"
         
         return message
     

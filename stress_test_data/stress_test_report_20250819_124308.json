@@ -1,0 +1,186 @@
+{
+  "timestamp": "2025-08-19T12:43:08.125978",
+  "summary": {
+    "total_tests": 11,
+    "passed_tests": 2,
+    "failed_tests": 9,
+    "success_rate": 18.181818181818183
+  },
+  "categories": {
+    "VIX Stress": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "VIX Extreme Spike",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:43:08.094833",
+          "end_time": "2025-08-19T12:43:08.104634",
+          "duration": 0.009801,
+          "passed": false,
+          "error_message": "VIX stress test failed: 'VIXMonitor' object has no attribute 'get_position_size_adjustment'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "VIX Regime Changes",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:43:08.104640",
+          "end_time": "2025-08-19T12:43:08.104859",
+          "duration": 0.000219,
+          "passed": false,
+          "error_message": "VIX regime test failed: 'VIXMonitor' object has no attribute 'get_position_size_adjustment'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Circuit Breaker": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "Daily Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:43:08.104864",
+          "end_time": "2025-08-19T12:43:08.114255",
+          "duration": 0.009391,
+          "passed": false,
+          "error_message": "Daily circuit breaker test failed: get_daily_pnl_tracker() missing 1 required positional argument: 'config'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Weekly Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:43:08.114261",
+          "end_time": "2025-08-19T12:43:08.122959",
+          "duration": 0.008698,
+          "passed": false,
+          "error_message": "Weekly circuit breaker test failed: get_daily_pnl_tracker() missing 1 required positional argument: 'config'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Emergency Stop": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Emergency Stop File",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:43:08.122974",
+          "end_time": "2025-08-19T12:43:08.124877",
+          "duration": 0.001903,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "emergency_file_detected": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:43:08.124882",
+              "level": "INFO",
+              "message": "Emergency stop file correctly detected"
+            }
+          ]
+        },
+        {
+          "test_name": "Programmatic Kill Switch",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:43:08.125054",
+          "end_time": "2025-08-19T12:43:08.125309",
+          "duration": 0.000255,
+          "passed": false,
+          "error_message": "Kill switch activation failed",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Data Failure": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Alpaca API Failure",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:43:08.125318",
+          "end_time": "2025-08-19T12:43:08.125444",
+          "duration": 0.000126,
+          "passed": false,
+          "error_message": "Alpaca API failure test failed: ValidationResult.__init__() got an unexpected keyword argument 'allow_trading'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Data Staleness Detection",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:43:08.125446",
+          "end_time": "2025-08-19T12:43:08.125574",
+          "duration": 0.000128,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "staleness_seconds": 300
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:43:08.125570",
+              "level": "INFO",
+              "message": "Staleness classification: Stale"
+            }
+          ]
+        }
+      ]
+    },
+    "System Health": {
+      "passed": 0,
+      "failed": 3,
+      "tests": [
+        {
+          "test_name": "Low Disk Space",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:43:08.125580",
+          "end_time": "2025-08-19T12:43:08.125710",
+          "duration": 0.00013,
+          "passed": false,
+          "error_message": "Low disk space test failed: SystemHealthReport.__init__() got an unexpected keyword argument 'checks'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "High CPU Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:43:08.125711",
+          "end_time": "2025-08-19T12:43:08.125816",
+          "duration": 0.000105,
+          "passed": false,
+          "error_message": "High CPU usage test failed: SystemHealthReport.__init__() got an unexpected keyword argument 'checks'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "High Memory Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:43:08.125817",
+          "end_time": "2025-08-19T12:43:08.125952",
+          "duration": 0.000135,
+          "passed": false,
+          "error_message": "High memory usage test failed: SystemHealthReport.__init__() got an unexpected keyword argument 'checks'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "Address 9 failed test(s) before live deployment",
+    "Review VIX position sizing logic - system may not be responding appropriately to volatility spikes",
+    "Circuit breaker mechanisms need attention - risk controls may not be functioning properly",
+    "Emergency stop mechanisms require immediate attention - critical safety feature compromised",
+    "Improve data source resilience and fallback mechanisms",
+    "System health monitoring needs enhancement - may not detect critical system issues"
+  ]
+}

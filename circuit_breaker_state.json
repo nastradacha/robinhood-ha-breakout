@@ -1,20 +1,28 @@
 {
-  "is_active": false,
-  "activation_date": null,
-  "activation_time": null,
-  "activation_pnl_percent": null,
-  "activation_reason": null,
-  "last_updated": "2025-08-18T19:22:11.548612-04:00",
-  "manual_reset_required": false,
-  "reset_count": 2,
+  "is_active": true,
+  "activation_date": "2025-08-19",
+  "activation_time": "14:52:24",
+  "activation_pnl_percent": -6.5,
+  "activation_reason": "Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
+  "last_updated": "2025-08-19T14:52:24.900563-04:00",
+  "manual_reset_required": true,
+  "reset_count": 4,
   "last_reset": {
-    "reset_time": "2025-08-18T19:22:11.548612-04:00",
-    "reset_reason": "Regression test cleanup",
+    "reset_time": "2025-08-19T14:52:24.812933-04:00",
+    "reset_reason": "Test reset",
     "previous_activation": {
-      "date": "2025-08-18",
-      "time": "19:20:50",
+      "date": "2025-08-19",
+      "time": "14:52:24",
       "pnl_percent": 0.0,
-      "reason": "Manual activation: Test persistence"
+      "reason": "Manual activation: Test activation"
+    }
+  },
+  "triggered": true,
+  "trigger_reason": "6.00% loss exceeds 5.0% threshold",
+  "breakdown_at_activation": {
+    "alpaca_paper": {
+      "pnl": -650.0,
+      "pnl_percent": -6.5
     }
   }
 }

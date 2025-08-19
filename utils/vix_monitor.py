@@ -47,6 +47,7 @@ class VIXMonitor:
         if self._initialized:
             return
             
+        self.logger = logging.getLogger(__name__)
         self.config = self._load_config(config_path)
         self.vix_threshold = self.config.get('VIX_SPIKE_THRESHOLD', 30.0)
         self.cache_minutes = self.config.get('VIX_CACHE_MINUTES', 5)
@@ -54,17 +55,22 @@ class VIXMonitor:
         
         self._cached_vix: Optional[VIXData] = None
         self._last_spike_state = False  # Track spike state changes for alerts
-        
         self._initialized = True
-        logger.info(f"[VIX-MONITOR] Initialized (enabled: {self.enabled}, threshold: {self.vix_threshold})")
+        
+        self.logger.info(f"[VIX-MONITOR] Initialized (enabled: {self.enabled}, threshold: {self.vix_threshold})")
     
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
+    def _load_config(self, config_or_path=None) -> Dict[str, Any]:
+        """Load configuration from dict or YAML file."""
+        if config_or_path is None:
+            return {}
+        if isinstance(config_or_path, dict):
+            return config_or_path
+        # assume path-like
         try:
-            with open(config_path, 'r') as f:
+            with open(config_or_path, 'r') as f:
                 return yaml.safe_load(f)
         except Exception as e:
-            logger.warning(f"[VIX-MONITOR] Config load failed: {e}, using defaults")
+            self.logger.warning(f"[VIX-MONITOR] Config load failed: {e}, using defaults")
             return {}
     
     def get_current_vix(self, force_refresh: bool = False) -> Optional[VIXData]:

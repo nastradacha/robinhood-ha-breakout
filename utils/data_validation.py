@@ -111,6 +111,19 @@ class DataValidator:
         self.alert_on_discrepancy = self.config.get("DATA_ALERT_ON_DISCREPANCY", True)
         self.require_validation = self.config.get("DATA_REQUIRE_VALIDATION", False)
         
+        # Symbol-specific overrides for vendor mismatch tolerance
+        self.split_whitelist = self.config.get("DATA_SPLIT_WHITELIST", {"GLD", "SLV", "TLT"})
+        self.symbol_attention_thresholds = self.config.get("DATA_SYMBOL_ATTENTION_THRESHOLDS", {
+            "GLD": 15.0,  # Higher threshold for GLD due to vendor differences
+            "SLV": 12.0,
+            "TLT": 10.0
+        })
+        
+        # Strict validation mode and pause functionality
+        self.strict_validation = self.config.get("DATA_STRICT_VALIDATION", False)
+        self.pause_on_validate_fail = self.config.get("DATA_PAUSE_ON_VALIDATE_FAIL", None)
+        self.paused_symbols = {}  # Track paused symbols with expiry times
+        
         # Initialize clients
         self.alpaca_client = None
         self.slack = None
@@ -246,12 +259,18 @@ class DataValidator:
             discrepancy_pct = self.calculate_discrepancy(primary_data, validation_data)
             split_detected, split_reason = self.detect_split_mismatch(primary_data, validation_data)
             
-            if split_detected:
+            if split_detected and symbol not in self.split_whitelist:
                 issues.append(f"Potential split mismatch detected: {split_reason}")
+            elif split_detected and symbol in self.split_whitelist:
+                # Log but don't flag as issue for whitelisted symbols
+                logger.info(f"[DATA-VALIDATION] {symbol}: Split mismatch ignored (whitelisted): {split_reason}")
             elif discrepancy_pct > 10.0:  # Major discrepancy threshold
                 issues.append(f"Major price discrepancy {discrepancy_pct:.1f}% - possible data error")
-            elif discrepancy_pct > 2.0:  # Attention threshold
-                issues.append(f"Price discrepancy {discrepancy_pct:.1f}% requires attention")
+            else:
+                # Use symbol-specific attention threshold
+                attention_threshold = self.symbol_attention_thresholds.get(symbol, 2.0)
+                if discrepancy_pct > attention_threshold:
+                    issues.append(f"Price discrepancy {discrepancy_pct:.1f}% requires attention")
         
         # Determine quality and recommendation
         quality, recommendation = self._assess_quality(primary_data, validation_data, discrepancy_pct, issues)
@@ -411,6 +430,64 @@ class DataValidator:
         
         return results
     
+    def _parse_duration(self, duration_str: str) -> int:
+        """Parse duration string like '30m', '1h' into seconds."""
+        if not duration_str:
+            return 0
+        
+        duration_str = duration_str.lower().strip()
+        if duration_str.endswith('m'):
+            return int(duration_str[:-1]) * 60
+        elif duration_str.endswith('h'):
+            return int(duration_str[:-1]) * 3600
+        elif duration_str.endswith('s'):
+            return int(duration_str[:-1])
+        else:
+            # Assume minutes if no unit
+            return int(duration_str) * 60
+    
+    def _is_symbol_paused(self, symbol: str) -> Tuple[bool, str]:
+        """Check if symbol is currently paused due to validation failures."""
+        if symbol not in self.paused_symbols:
+            return False, ""
+        
+        pause_expiry = self.paused_symbols[symbol]
+        if datetime.now() > pause_expiry:
+            # Pause expired, remove from list
+            del self.paused_symbols[symbol]
+            logger.info(f"[DATA-VALIDATION] {symbol}: Pause expired, resuming validation")
+            return False, ""
+        
+        remaining = (pause_expiry - datetime.now()).total_seconds()
+        return True, f"Symbol paused for {remaining/60:.0f}m due to validation failures"
+    
+    def _pause_symbol(self, symbol: str, reason: str):
+        """Pause symbol for configured duration due to validation failure."""
+        if not self.pause_on_validate_fail:
+            return
+        
+        duration_seconds = self._parse_duration(self.pause_on_validate_fail)
+        if duration_seconds <= 0:
+            return
+        
+        pause_expiry = datetime.now() + timedelta(seconds=duration_seconds)
+        self.paused_symbols[symbol] = pause_expiry
+        
+        logger.warning(f"[DATA-VALIDATION] {symbol}: Paused for {self.pause_on_validate_fail} - {reason}")
+        
+        # Send Slack alert for symbol pause
+        if self.slack:
+            try:
+                self.slack.send_alert(
+                    f"⏸️ **SYMBOL PAUSED**\n\n"
+                    f"**Symbol:** {symbol}\n"
+                    f"**Duration:** {self.pause_on_validate_fail}\n"
+                    f"**Reason:** {reason}\n"
+                    f"**Auto-resume:** {pause_expiry.strftime('%H:%M:%S')}"
+                )
+            except Exception as e:
+                logger.error(f"[DATA-VALIDATION] Failed to send pause alert: {e}")
+
     def should_allow_trading(self, symbol: str) -> Tuple[bool, str]:
         """
         Determine if trading should be allowed based on data quality
@@ -421,14 +498,35 @@ class DataValidator:
         if not self.validation_enabled:
             return True, "Data validation disabled"
         
+        # Check if symbol is currently paused
+        is_paused, pause_reason = self._is_symbol_paused(symbol)
+        if is_paused:
+            return False, pause_reason
+        
         result = self.validate_symbol_data(symbol)
         
+        # In strict validation mode, any validation issue blocks trading
+        if self.strict_validation:
+            if result.recommendation not in ["PROCEED_NORMAL"]:
+                reason = f"Strict validation: {', '.join(result.issues) if result.issues else result.recommendation}"
+                self._pause_symbol(symbol, reason)
+                return False, reason
+        
+        # Standard validation logic
         if result.recommendation in ["BLOCK_TRADING", "PAUSE_SYMBOL"]:
-            return False, f"Trading blocked: {', '.join(result.issues)}"
+            reason = f"Trading blocked: {', '.join(result.issues)}"
+            self._pause_symbol(symbol, reason)
+            return False, reason
         elif result.recommendation == "REQUIRE_MANUAL_APPROVAL":
-            return False, f"Manual approval required: {result.discrepancy_pct:.1f}% discrepancy"
+            reason = f"Manual approval required: {result.discrepancy_pct:.1f}% discrepancy"
+            if self.strict_validation:
+                self._pause_symbol(symbol, reason)
+            return False, reason
         elif result.recommendation == "ATTENTION":
-            return False, f"Data requires attention: {result.discrepancy_pct:.1f}% discrepancy"
+            reason = f"Data requires attention: {result.discrepancy_pct:.1f}% discrepancy"
+            if self.strict_validation:
+                self._pause_symbol(symbol, reason)
+            return False, reason
         else:
             return True, f"Data quality acceptable ({result.quality.value})"
 

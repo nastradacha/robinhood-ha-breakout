@@ -71,12 +71,15 @@ class EnhancedSlackIntegration:
 
         # Configuration
         self.enabled = self.basic_notifier.enabled
-        self.charts_enabled = self.enabled and os.getenv("SLACK_BOT_TOKEN")
+        slack_token = os.getenv("SLACK_BOT_TOKEN")
+        self.charts_enabled = self.enabled and slack_token
 
         self._initialized = True
-        logger.info(
-            f"[ENHANCED-SLACK] Initialized (enabled: {self.enabled}, charts: {self.charts_enabled})"
-        )
+        def _mask_token(token: str, pre=4, suf=4) -> str:
+            """Mask sensitive token for logging."""
+            return f"{token[:pre]}...{token[-suf:]}" if token and len(token) > pre + suf else "***"
+        
+        logger.info(f"[ENHANCED-SLACK] Initialized (enabled: {self.enabled}, charts: {_mask_token(slack_token)})")
 
     def send_breakout_alert_with_chart(
         self,

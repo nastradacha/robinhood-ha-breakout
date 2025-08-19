@@ -1,0 +1,193 @@
+{
+  "timestamp": "2025-08-19T12:09:59.269678",
+  "summary": {
+    "total_tests": 10,
+    "passed_tests": 0,
+    "failed_tests": 10,
+    "success_rate": 0.0
+  },
+  "categories": {
+    "VIX Stress": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "VIX Extreme Spike",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:09:51.906105",
+          "end_time": "2025-08-19T12:09:51.906685",
+          "duration": 0.00058,
+          "passed": false,
+          "error_message": "VIX stress test failed: 'VIXMonitor' object has no attribute 'get_position_size_adjustment'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "VIX Regime Changes",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:09:51.906690",
+          "end_time": "2025-08-19T12:09:51.906816",
+          "duration": 0.000126,
+          "passed": false,
+          "error_message": "VIX regime test failed: 'VIXMonitor' object has no attribute 'get_position_size_adjustment'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Circuit Breaker": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "Daily Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:09:51.906820",
+          "end_time": "2025-08-19T12:09:51.915946",
+          "duration": 0.009126,
+          "passed": false,
+          "error_message": "Daily circuit breaker test failed: 'DrawdownCircuitBreaker' object has no attribute 'should_block_trading'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Weekly Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:09:51.915952",
+          "end_time": "2025-08-19T12:09:51.924523",
+          "duration": 0.008571,
+          "passed": false,
+          "error_message": "Weekly circuit breaker test failed: 'DrawdownCircuitBreaker' object has no attribute 'should_block_trading'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Emergency Stop": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "File-based Kill Switch",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:09:51.924541",
+          "end_time": "2025-08-19T12:09:51.925243",
+          "duration": 0.000702,
+          "passed": false,
+          "error_message": "File-based kill switch test failed: 'KillSwitch' object has no attribute 'check_status'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Programmatic Kill Switch",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:09:51.925247",
+          "end_time": "2025-08-19T12:09:51.926906",
+          "duration": 0.001659,
+          "passed": false,
+          "error_message": "Programmatic kill switch test failed: 'KillSwitch' object has no attribute 'should_block_trading'",
+          "metrics": {},
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:09:51.926897",
+              "level": "INFO",
+              "message": "Kill switch activated programmatically"
+            }
+          ]
+        }
+      ]
+    },
+    "Data Failure": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "Alpaca API Failure",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:09:51.926913",
+          "end_time": "2025-08-19T12:09:52.248880",
+          "duration": 0.321967,
+          "passed": false,
+          "error_message": "Data validator did not properly handle API failure",
+          "metrics": {},
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:09:52.248873",
+              "level": "INFO",
+              "message": "Validation quality: DataQuality.ACCEPTABLE"
+            },
+            {
+              "timestamp": "2025-08-19T12:09:52.248878",
+              "level": "INFO",
+              "message": "Recommendation: PROCEED_WITH_CAUTION"
+            }
+          ]
+        },
+        {
+          "test_name": "Data Staleness Detection",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:09:52.248892",
+          "end_time": "2025-08-19T12:09:52.249298",
+          "duration": 0.000406,
+          "passed": false,
+          "error_message": "Data staleness test failed: 'StalenessMonitor' object has no attribute 'check_data_staleness'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "System Health": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "Low Disk Space",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:09:52.249303",
+          "end_time": "2025-08-19T12:09:55.593566",
+          "duration": 3.344263,
+          "passed": false,
+          "error_message": "Low disk space test failed: 'SystemHealthReport' object has no attribute 'checks'",
+          "metrics": {},
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:09:55.593546",
+              "level": "INFO",
+              "message": "Overall health: HealthStatus.WARNING"
+            },
+            {
+              "timestamp": "2025-08-19T12:09:55.593550",
+              "level": "INFO",
+              "message": "Trading allowed: True"
+            }
+          ]
+        },
+        {
+          "test_name": "High Memory Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:09:55.593571",
+          "end_time": "2025-08-19T12:09:59.269644",
+          "duration": 3.676073,
+          "passed": false,
+          "error_message": "High memory usage test failed: 'SystemHealthReport' object has no attribute 'checks'",
+          "metrics": {},
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:09:59.269621",
+              "level": "INFO",
+              "message": "Overall health: HealthStatus.CRITICAL"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "Address 10 failed test(s) before live deployment",
+    "Review VIX position sizing logic - system may not be responding appropriately to volatility spikes",
+    "Circuit breaker mechanisms need attention - risk controls may not be functioning properly",
+    "Emergency stop mechanisms require immediate attention - critical safety feature compromised",
+    "Improve data source resilience and fallback mechanisms",
+    "System health monitoring needs enhancement - may not detect critical system issues"
+  ]
+}

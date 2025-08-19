@@ -95,6 +95,12 @@ def fetch_market_data(
     if validate_quality:
         try:
             validator = get_data_validator()
+            validation_result = validator.validate_symbol_data(symbol)
+            
+            if validation_result.recommendation in ["PAUSE_SYMBOL", "BLOCK_TRADING"]:
+                logger.warning(f"[{symbol}] Validation blocked trade: {validation_result.recommendation}")
+                return None  # Don't continue downstream
+            
             allowed, reason = validator.should_allow_trading(symbol)
             if not allowed:
                 logger.error(f"[DATA-VALIDATION] Trading blocked for {symbol}: {reason}")
@@ -183,6 +189,12 @@ def get_current_price(symbol: str = "SPY", env: str = "paper", validate_quality:
     if validate_quality:
         try:
             validator = get_data_validator()
+            validation_result = validator.validate_symbol_data(symbol)
+            
+            if validation_result.recommendation in ["PAUSE_SYMBOL", "BLOCK_TRADING"]:
+                logger.warning(f"[{symbol}] Validation blocked trade: {validation_result.recommendation}")
+                return None  # Don't continue downstream
+            
             allowed, reason = validator.should_allow_trading(symbol)
             if not allowed:
                 logger.error(f"[DATA-VALIDATION] Price fetch blocked for {symbol}: {reason}")

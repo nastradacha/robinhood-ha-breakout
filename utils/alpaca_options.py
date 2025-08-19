@@ -297,6 +297,12 @@ class AlpacaOptionsTrader:
             
             if not contracts or not hasattr(contracts, 'option_contracts') or not contracts.option_contracts:
                 logger.warning(f"No {side} contracts found for {symbol} expiring {expiry_date}")
+                
+                # Fallback to next available expiry within 2 trading days
+                fallback_contract = self._try_expiry_fallback(symbol, side, policy, expiry_date, min_oi, min_vol, max_spread_pct)
+                if fallback_contract:
+                    return fallback_contract
+                
                 return None
             
             contract_list = contracts.option_contracts
@@ -417,7 +423,198 @@ class AlpacaOptionsTrader:
             )
             
         except Exception as e:
-            logger.error(f"Error finding ATM contract: {e}")
+            logger.error(f"Error finding ATM contract for {symbol}: {e}")
+            return None
+    
+    def _try_expiry_fallback(
+        self,
+        symbol: str,
+        side: str,
+        policy: str,
+        original_expiry: str,
+        min_oi: int,
+        min_vol: int,
+        max_spread_pct: float
+    ) -> Optional[ContractInfo]:
+        """Try to find contracts with fallback expiry within 2 trading days.
+        
+        Args:
+            symbol: Underlying symbol
+            side: Option type ('CALL' or 'PUT')
+            policy: Original expiry policy
+            original_expiry: Original target expiry date
+            min_oi: Minimum open interest
+            min_vol: Minimum volume
+            max_spread_pct: Maximum spread percentage
+            
+        Returns:
+            ContractInfo if fallback contract found, None otherwise
+        """
+        try:
+            from datetime import datetime, timedelta
+            
+            # Get available expiration dates
+            today = datetime.now().date()
+            original_date = datetime.strptime(original_expiry, "%Y-%m-%d").date()
+            
+            # Generate potential fallback dates (next 2 trading days)
+            fallback_dates = []
+            current_date = original_date + timedelta(days=1)
+            
+            for _ in range(5):  # Check up to 5 days ahead to find 2 trading days
+                # Skip weekends
+                if current_date.weekday() < 5:  # Monday=0, Friday=4
+                    fallback_dates.append(current_date)
+                    if len(fallback_dates) >= 2:
+                        break
+                current_date += timedelta(days=1)
+            
+            # Try each fallback date
+            for fallback_date in fallback_dates:
+                fallback_expiry = fallback_date.strftime("%Y-%m-%d")
+                days_ahead = (fallback_date - today).days
+                
+                if days_ahead <= 2:  # Within 2 trading days
+                    logger.warning(f"{symbol}: No {policy} contracts found for {original_expiry}; trying fallback to {fallback_expiry} ({days_ahead} days ahead)")
+                    
+                    # Try to find contracts for this fallback date
+                    contract_type = ContractType.CALL if side == 'CALL' else ContractType.PUT
+                    
+                    request = GetOptionContractsRequest(
+                        underlying_symbols=[symbol],
+                        status="active",
+                        expiration_date=fallback_expiry,
+                        contract_type=contract_type,
+                        exercise_style=ExerciseStyle.AMERICAN
+                    )
+                    
+                    try:
+                        contracts = self.client.get_option_contracts(request)
+                        if contracts and hasattr(contracts, 'option_contracts') and contracts.option_contracts:
+                            logger.info(f"Found {len(contracts.option_contracts)} {side} contracts for {symbol} expiring {fallback_expiry}")
+                            
+                            # Use the same contract selection logic as the main method
+                            return self._select_best_contract_from_list(
+                                contracts.option_contracts, 
+                                symbol, 
+                                side, 
+                                fallback_expiry, 
+                                min_oi, 
+                                min_vol, 
+                                max_spread_pct
+                            )
+                    except APIError as e:
+                        logger.warning(f"API error checking fallback expiry {fallback_expiry}: {e}")
+                        continue
+            
+            logger.warning(f"{symbol}: No suitable fallback contracts found within 2 trading days")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in expiry fallback for {symbol}: {e}")
+            return None
+
+    def _select_best_contract_from_list(
+        self,
+        contract_list: List,
+        symbol: str,
+        side: str,
+        expiry_date: str,
+        min_oi: int,
+        min_vol: int,
+        max_spread_pct: float
+    ) -> Optional[ContractInfo]:
+        """Select best contract from a list using the same logic as find_atm_contract."""
+        try:
+            # Get current stock price for ATM calculation
+            from utils.alpaca_client import AlpacaClient
+            alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
+            current_price = alpaca_data.get_current_price(symbol)
+            
+            if not current_price:
+                logger.error(f"Could not get current price for {symbol}")
+                return None
+            
+            # Filter and score contracts (same logic as main method)
+            candidates = []
+            
+            for contract in contract_list:
+                try:
+                    # Get quote data using correct Alpaca API
+                    quote_request = OptionLatestQuoteRequest(symbol_or_symbols=contract.symbol)
+                    quote_response = self.data_client.get_option_latest_quote(quote_request)
+                    
+                    if not quote_response or contract.symbol not in quote_response:
+                        continue
+                    
+                    quote = quote_response[contract.symbol]
+                    
+                    # Calculate metrics
+                    bid = float(quote.bid) if quote.bid else 0.0
+                    ask = float(quote.ask) if quote.ask else 0.0
+                    mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0.0
+                    spread = ask - bid if bid > 0 and ask > 0 else float('inf')
+                    spread_pct = (spread / mid * 100) if mid > 0 else float('inf')
+                    
+                    # Apply filters
+                    if contract.open_interest < min_oi:
+                        continue
+                    if spread_pct > max_spread_pct:
+                        continue
+                    if mid <= 0:
+                        continue
+                    
+                    # Calculate ATM score (distance from current price)
+                    strike = float(contract.strike_price)
+                    atm_distance = abs(strike - current_price)
+                    atm_score = 1 / (1 + atm_distance)  # Higher score for closer to ATM
+                    
+                    candidates.append({
+                        'contract': contract,
+                        'bid': bid,
+                        'ask': ask,
+                        'mid': mid,
+                        'spread': spread,
+                        'spread_pct': spread_pct,
+                        'volume': getattr(quote, 'volume', 0),
+                        'delta': getattr(quote, 'delta', 0.5),
+                        'atm_score': atm_score,
+                        'strike': strike
+                    })
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing contract {contract.symbol}: {e}")
+                    continue
+            
+            if not candidates:
+                logger.warning(f"No suitable {side} contracts found for {symbol} after filtering")
+                return None
+            
+            # Sort by ATM score (closest to current price first)
+            candidates.sort(key=lambda x: x['atm_score'], reverse=True)
+            best = candidates[0]
+            contract = best['contract']
+            
+            logger.info(f"Selected {side} contract: {contract.symbol} @ ${best['mid']:.2f} (spread: {best['spread_pct']:.1f}%, OI: {contract.open_interest})")
+            
+            return ContractInfo(
+                symbol=contract.symbol,
+                underlying_symbol=symbol,
+                strike=float(contract.strike_price),
+                expiry=expiry_date,
+                option_type=side,
+                bid=best['bid'],
+                ask=best['ask'],
+                mid=best['mid'],
+                spread=best['spread'],
+                spread_pct=best['spread_pct'],
+                open_interest=contract.open_interest,
+                volume=best['volume'],
+                delta=best['delta']
+            )
+            
+        except Exception as e:
+            logger.error(f"Error selecting best contract from list: {e}")
             return None
 
     def place_market_order(
@@ -427,25 +624,7 @@ class AlpacaOptionsTrader:
         side: str = "BUY",
         client_order_id: Optional[str] = None
     ) -> Optional[str]:
-        """Place market order for option contract.
-        
-        Args:
-            contract_symbol: OCC-formatted contract symbol
-            qty: Number of contracts
-            side: Order side ('BUY' or 'SELL')
-            client_order_id: Optional client order ID
-            
-        Returns:
-            Order ID if successful, None otherwise
-        """
-        # Check emergency stop before placing any orders
-        from .kill_switch import is_trading_halted
-        if is_trading_halted():
-            logger.error("[KILL-SWITCH] Emergency stop active - blocking order execution")
-            raise RuntimeError("Emergency stop active - trading halted")
-        
-        # Use recovery system for order placement
-        from .recovery import retry_with_recovery
+        """Place market order for option contract."""
         
         def _submit_order():
             order_side = OrderSide.BUY if side == "BUY" else OrderSide.SELL

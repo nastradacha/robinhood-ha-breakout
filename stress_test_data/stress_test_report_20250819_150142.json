@@ -1,0 +1,310 @@
+{
+  "timestamp": "2025-08-19T15:01:42.113950",
+  "summary": {
+    "total_tests": 11,
+    "passed_tests": 11,
+    "failed_tests": 0,
+    "success_rate": 100.0
+  },
+  "categories": {
+    "VIX Stress": {
+      "passed": 2,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "VIX Extreme Spike",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T15:01:42.085251",
+          "end_time": "2025-08-19T15:01:42.093428",
+          "duration": 0.008177,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "vix_level": 80.0,
+            "adjustment": 0.3
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.093422",
+              "level": "INFO",
+              "message": "VIX=80, Position adjustment: 0.3"
+            }
+          ]
+        },
+        {
+          "test_name": "VIX Regime Changes",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T15:01:42.093443",
+          "end_time": "2025-08-19T15:01:42.094052",
+          "duration": 0.000609,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "vix_cycle": [
+              15.0,
+              25.0,
+              35.0,
+              50.0,
+              25.0,
+              15.0
+            ],
+            "adjustments": [
+              1.0,
+              0.8,
+              0.6,
+              0.29999999999999993,
+              0.8,
+              1.0
+            ]
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.093660",
+              "level": "INFO",
+              "message": "VIX=15.0, Adjustment=1.0"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.093754",
+              "level": "INFO",
+              "message": "VIX=25.0, Adjustment=0.8"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.093833",
+              "level": "INFO",
+              "message": "VIX=35.0, Adjustment=0.6"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.093906",
+              "level": "INFO",
+              "message": "VIX=50.0, Adjustment=0.29999999999999993"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.093979",
+              "level": "INFO",
+              "message": "VIX=25.0, Adjustment=0.8"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.094047",
+              "level": "INFO",
+              "message": "VIX=15.0, Adjustment=1.0"
+            }
+          ]
+        }
+      ]
+    },
+    "Circuit Breaker": {
+      "passed": 2,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "Daily Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T15:01:42.094057",
+          "end_time": "2025-08-19T15:01:42.102837",
+          "duration": 0.00878,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "loss_percent": 6.0,
+            "threshold": 5.0
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.102832",
+              "level": "INFO",
+              "message": "Trading blocked: False, Reason: Daily circuit breaker active: 6.00% loss exceeds 5.0% threshold"
+            }
+          ]
+        },
+        {
+          "test_name": "Weekly Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T15:01:42.102849",
+          "end_time": "2025-08-19T15:01:42.111263",
+          "duration": 0.008414,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "weekly_loss_percent": 16.0,
+            "threshold": 15.0
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.111258",
+              "level": "INFO",
+              "message": "Weekly trading allowed: False, Reason: Daily circuit breaker active: 6.00% loss exceeds 5.0% threshold"
+            }
+          ]
+        }
+      ]
+    },
+    "Emergency Stop": {
+      "passed": 2,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "Emergency Stop File",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T15:01:42.111282",
+          "end_time": "2025-08-19T15:01:42.112258",
+          "duration": 0.000976,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "emergency_file_detected": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.112263",
+              "level": "INFO",
+              "message": "Emergency stop file correctly detected"
+            }
+          ]
+        },
+        {
+          "test_name": "Programmatic Kill Switch",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T15:01:42.112719",
+          "end_time": "2025-08-19T15:01:42.113126",
+          "duration": 0.000407,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "activation": true,
+            "deactivation": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.113122",
+              "level": "INFO",
+              "message": "Kill switch activation result: False"
+            }
+          ]
+        }
+      ]
+    },
+    "Data Failure": {
+      "passed": 2,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "Alpaca API Failure",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T15:01:42.113139",
+          "end_time": "2025-08-19T15:01:42.113332",
+          "duration": 0.000193,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "data_quality": "poor"
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.113327",
+              "level": "INFO",
+              "message": "Validation quality: DataQuality.POOR"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.113329",
+              "level": "INFO",
+              "message": "Recommendation: Use fallback data source"
+            }
+          ]
+        },
+        {
+          "test_name": "Data Staleness Detection",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T15:01:42.113337",
+          "end_time": "2025-08-19T15:01:42.113474",
+          "duration": 0.000137,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "staleness_seconds": 300
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.113472",
+              "level": "INFO",
+              "message": "Staleness classification: Stale"
+            }
+          ]
+        }
+      ]
+    },
+    "System Health": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "Low Disk Space",
+          "category": "System Health",
+          "start_time": "2025-08-19T15:01:42.113479",
+          "end_time": "2025-08-19T15:01:42.113624",
+          "duration": 0.000145,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "disk_usage_percent": 90,
+            "trading_disabled": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.113620",
+              "level": "INFO",
+              "message": "Overall health: HealthStatus.CRITICAL"
+            },
+            {
+              "timestamp": "2025-08-19T15:01:42.113622",
+              "level": "INFO",
+              "message": "Trading allowed: False"
+            }
+          ]
+        },
+        {
+          "test_name": "High CPU Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T15:01:42.113630",
+          "end_time": "2025-08-19T15:01:42.113762",
+          "duration": 0.000132,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "cpu_usage_percent": 95
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.113761",
+              "level": "INFO",
+              "message": "CPU usage health: HealthStatus.WARNING"
+            }
+          ]
+        },
+        {
+          "test_name": "High Memory Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T15:01:42.113768",
+          "end_time": "2025-08-19T15:01:42.113915",
+          "duration": 0.000147,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "memory_usage_percent": 95
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T15:01:42.113913",
+              "level": "INFO",
+              "message": "Overall health: HealthStatus.WARNING"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "All stress tests passed - system appears robust under adverse conditions",
+    "Consider running extended stress tests with real market data",
+    "Monitor system behavior during actual market volatility events"
+  ]
+}

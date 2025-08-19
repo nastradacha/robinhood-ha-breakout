@@ -19,6 +19,7 @@ from datetime import datetime
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+from collections import Counter
 
 from .data import fetch_market_data, calculate_heikin_ashi, analyze_breakout_pattern
 from .llm import LLMClient, TradeDecision
@@ -33,7 +34,8 @@ class MultiSymbolScanner:
     Multi-symbol breakout scanner for diversified trading opportunities.
     """
 
-    def __init__(self, config: Dict, llm_client, slack_notifier=None, env: str = "paper"):
+    def __init__(self, config: Dict, llm_client, slack_notifier=None, env: str = "paper", 
+                 weekly_pnl_tracker=None, drawdown_circuit_breaker=None, vix_monitor=None, health_monitor=None):
         """
         Initialize multi-symbol scanner.
 
@@ -42,11 +44,21 @@ class MultiSymbolScanner:
             llm_client: LLM client for trade decisions
             slack_notifier: Slack notification client
             env: Alpaca environment - "paper" or "live" (default: "paper")
+            weekly_pnl_tracker: Pre-initialized weekly P&L tracker
+            drawdown_circuit_breaker: Pre-initialized circuit breaker
+            vix_monitor: Pre-initialized VIX monitor
+            health_monitor: Pre-initialized health monitor
         """
         self.config = config
         self.llm_client = llm_client
         self.slack_notifier = slack_notifier
         self.env = env
+        
+        # Use pre-initialized monitors to avoid repeated initialization
+        self.weekly_pnl_tracker = weekly_pnl_tracker
+        self.drawdown_circuit_breaker = drawdown_circuit_breaker
+        self.vix_monitor = vix_monitor
+        self.health_monitor = health_monitor
 
         # Multi-symbol configuration
         self.symbols = config.get("SYMBOLS", ["SPY"])
@@ -95,14 +107,28 @@ class MultiSymbolScanner:
                 symbol = future_to_symbol[future]
                 try:
                     symbol_opportunities = future.result()
-                    if symbol_opportunities:
+                    # Handle tuple return (opportunities, rejection_reason)
+                    if isinstance(symbol_opportunities, tuple):
+                        opportunities_list, rejection_reason = symbol_opportunities
+                        if opportunities_list:
+                            opportunities.extend(opportunities_list)
+                            logger.info(
+                                f"[MULTI-SYMBOL] {symbol}: Found {len(opportunities_list)} opportunities"
+                            )
+                        else:
+                            rejection_reasons.append(f"{symbol}: {rejection_reason}")
+                            logger.info(f"[MULTI-SYMBOL] {symbol}: No opportunities found")
+                    elif symbol_opportunities:
                         opportunities.extend(symbol_opportunities)
                         logger.info(
                             f"[MULTI-SYMBOL] {symbol}: Found {len(symbol_opportunities)} opportunities"
                         )
                     else:
-                        # Try to get rejection reason from the scan result
-                        rejection_reason = getattr(future, '_rejection_reason', 'No opportunities')
+                        # Extract opportunities and rejection reason from result
+                        if isinstance(symbol_opportunities, tuple):
+                            opportunities_list, rejection_reason = symbol_opportunities
+                        else:
+                            opportunities_list, rejection_reason = symbol_opportunities, 'No opportunities found'
                         rejection_reasons.append(f"{symbol}: {rejection_reason}")
                         logger.info(f"[MULTI-SYMBOL] {symbol}: No opportunities found")
                 except Exception as e:
@@ -136,30 +162,44 @@ class MultiSymbolScanner:
         return sorted_opportunities
 
     def _summarize_rejection_reasons(self, rejection_reasons: List[str]) -> str:
-        """Summarize rejection reasons for logging and Slack alerts."""
+        """Summarize rejection reasons for logging and Slack alerts with concrete buckets."""
         if not rejection_reasons:
             return "Unknown reasons"
         
-        # Count rejection types
-        reason_counts = {}
+        # Count rejection types with concrete buckets
+        reason_counts = Counter()
+        
         for reason in rejection_reasons:
-            if "True range too low" in reason:
-                reason_counts["TR below threshold"] = reason_counts.get("TR below threshold", 0) + 1
+            if "TIME_WINDOW_CLOSED" in reason or "Trading window closed" in reason:
+                reason_counts["TIME_WINDOW_CLOSED"] += 1
+            elif "CIRCUIT_BREAKER" in reason or "circuit breaker" in reason.lower():
+                reason_counts["CIRCUIT_BREAKER"] += 1
+            elif "PAUSED_SYMBOL" in reason or "paused" in reason.lower():
+                reason_counts["PAUSED_SYMBOL"] += 1
+            elif "Data validation blocked" in reason or "validation" in reason.lower():
+                reason_counts["DATA_VALIDATION"] += 1
+            elif "Staleness check blocked" in reason or "staleness" in reason.lower():
+                reason_counts["STALE_DATA"] += 1
+            elif "Pre-LLM gate" in reason or "true range" in reason.lower():
+                reason_counts["PRE_LLM_GATE"] += 1
+            elif "LLM recommends NO_TRADE" in reason or "NO_TRADE" in reason:
+                reason_counts["LLM_NO_TRADE"] += 1
             elif "401" in reason or "authorization" in reason.lower():
-                reason_counts["Options auth error"] = reason_counts.get("Options auth error", 0) + 1
-            elif "Error" in reason:
-                reason_counts["API errors"] = reason_counts.get("API errors", 0) + 1
+                reason_counts["AUTH_ERROR"] += 1
+            elif "Error" in reason or "error" in reason.lower():
+                reason_counts["API_ERROR"] += 1
+            elif "No data available" in reason:
+                reason_counts["NO_DATA"] += 1
+            elif "Market closed" in reason or "PRE-OPEN-GATE" in reason:
+                reason_counts["MARKET_CLOSED"] += 1
             else:
-                reason_counts["Other"] = reason_counts.get("Other", 0) + 1
+                reason_counts["OTHER"] += 1
         
-        # Format summary
-        summary_parts = []
-        for reason_type, count in reason_counts.items():
-            summary_parts.append(f"{count} {reason_type}")
-        
-        return "; ".join(summary_parts)
+        # Format summary with concrete reason names
+        summary_parts = [f"{reason} {count}" for reason, count in reason_counts.items()]
+        return ", ".join(summary_parts)
 
-    def _scan_single_symbol(self, symbol: str) -> List[Dict]:
+    def _scan_single_symbol(self, symbol: str) -> tuple[List[Dict], str]:
         """
         Scan a single symbol for breakout opportunities.
 
@@ -167,8 +207,9 @@ class MultiSymbolScanner:
             symbol: Stock symbol to scan
 
         Returns:
-            List of opportunities for this symbol
+            Tuple of (opportunities list, rejection reason if no opportunities)
         """
+        rejection_reason = None
         try:
             # Early market hours check - skip heavy processing if market is closed
             from datetime import datetime
@@ -180,14 +221,16 @@ class MultiSymbolScanner:
                 current_et = datetime.now(et_tz)
                 can_trade, market_reason = validate_trading_time(current_et)
                 if not can_trade:
+                    rejection_reason = f"Market closed: {market_reason}"
                     logger.debug(f"[PRE-OPEN-GATE] {symbol}: {market_reason}")
-                    return []
+                    return [], rejection_reason
             except Exception as e:
                 # Fallback to basic weekend check if market calendar fails
                 current_et = datetime.now(pytz.timezone('US/Eastern'))
                 if current_et.weekday() >= 5:  # Weekend
+                    rejection_reason = "Market closed (weekend)"
                     logger.debug(f"[PRE-OPEN-GATE] {symbol}: Market closed (weekend)")
-                    return []
+                    return [], rejection_reason
                 logger.debug(f"[PRE-OPEN-GATE] {symbol}: Market calendar check failed, proceeding: {e}")
 
             logger.info(f"[MULTI-SYMBOL] Analyzing {symbol}...")
@@ -201,8 +244,9 @@ class MultiSymbolScanner:
             )
 
             if df is None or df.empty:
+                rejection_reason = "No data available"
                 logger.warning(f"[MULTI-SYMBOL] No data available for {symbol}")
-                return []
+                return [], rejection_reason
 
             # Calculate Heikin-Ashi candles
             ha_df = calculate_heikin_ashi(df)
@@ -222,22 +266,25 @@ class MultiSymbolScanner:
             # Data quality validation gate
             data_allowed, data_reason = check_trading_allowed(symbol)
             if not data_allowed:
+                rejection_reason = f"Data validation blocked: {data_reason}"
                 logger.warning(f"[MULTI-SYMBOL] {symbol}: Data validation blocked trade - {data_reason}")
-                return []
+                return [], rejection_reason
             else:
                 logger.info(f"[MULTI-SYMBOL] {symbol}: Data quality check passed - {data_reason}")
 
             # Enhanced staleness detection with retry
             staleness_allowed, staleness_reason = check_symbol_staleness(symbol, with_retry=True)
             if not staleness_allowed:
+                rejection_reason = f"Staleness check blocked: {staleness_reason}"
                 logger.warning(f"[MULTI-SYMBOL] {symbol}: Staleness check blocked trade - {staleness_reason}")
-                return []
+                return [], rejection_reason
             else:
                 logger.info(f"[MULTI-SYMBOL] {symbol}: Data freshness check passed - {staleness_reason}")
 
             # Pre-LLM hard gate: check for obvious NO_TRADE conditions
             proceed, gate_reason = self._pre_llm_hard_gate(market_data, self.config)
             if not proceed:
+                rejection_reason = f"Pre-LLM gate: {gate_reason}"
                 logger.info(f"[MULTI-SYMBOL] {symbol}: Pre-LLM gate blocked trade - {gate_reason}")
                 
                 # Log decision for analytics with unified format
@@ -256,7 +303,7 @@ class MultiSymbolScanner:
                     formatted_reason,
                     market_data.get("current_price", 0.0),
                 )
-                return []
+                return [], rejection_reason
 
             # Get LLM trade decision with retry logic
             trade_decision_result = self._robust_llm_decision(market_data, symbol)
@@ -268,6 +315,7 @@ class MultiSymbolScanner:
 
             # Check if LLM recommends a trade
             if trade_decision["decision"] == "NO_TRADE":
+                rejection_reason = f"LLM recommends NO_TRADE: {trade_decision.get('reason', 'No reason provided')}"
                 logger.info(f"[MULTI-SYMBOL] {symbol}: LLM recommends NO_TRADE")
 
                 # Log individual symbol decision for analytics with unified format
@@ -287,7 +335,7 @@ class MultiSymbolScanner:
                     formatted_reason,
                     market_data.get("current_price", 0.0),
                 )
-                return []
+                return [], rejection_reason
 
             # Check confidence threshold
             confidence = trade_decision.get("confidence", 0.0)
@@ -315,7 +363,8 @@ class MultiSymbolScanner:
                     formatted_reason,
                     market_data.get("current_price", 0.0),
                 )
-                return []
+                rejection_reason = f"Confidence {confidence:.2f} below threshold {min_confidence}"
+                return [], rejection_reason
 
             # Apply consecutive-loss throttle (stricter requirements after losses)
             throttle_proceed, throttle_reason = self._apply_consecutive_loss_throttle(market_data, confidence)
@@ -406,11 +455,12 @@ class MultiSymbolScanner:
             # Log opportunity using deterministic serialization
             self._log_opportunity(opportunity)
             
-            return [opportunity]
+            return [opportunity], None
 
         except Exception as e:
+            rejection_reason = f"Error analyzing symbol: {str(e)}"
             logger.error(f"[MULTI-SYMBOL] Error analyzing {symbol}: {e}")
-            return []
+            return [], rejection_reason
 
     def _prepare_market_data(
         self,

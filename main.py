@@ -1953,6 +1953,10 @@ def run_multi_symbol_loop(
     llm_client,
     slack_notifier,
     end_time: Optional[datetime],
+    weekly_pnl_tracker,
+    drawdown_circuit_breaker,
+    vix_monitor,
+    health_monitor,
 ):
     """
     Execute multi-symbol scanning in continuous loop mode.
@@ -1968,9 +1972,18 @@ def run_multi_symbol_loop(
         end_time: Optional end time for the loop
     """
 
-    # Initialize multi-symbol scanner
+    # Initialize multi-symbol scanner with pre-initialized monitors
     alpaca_env = getattr(args, 'alpaca_env', 'paper')
-    scanner = MultiSymbolScanner(config, llm_client, slack_notifier, env=alpaca_env)
+    scanner = MultiSymbolScanner(
+        config, 
+        llm_client, 
+        slack_notifier, 
+        env=alpaca_env,
+        weekly_pnl_tracker=weekly_pnl_tracker,
+        drawdown_circuit_breaker=drawdown_circuit_breaker,
+        vix_monitor=vix_monitor,
+        health_monitor=health_monitor
+    )
 
     # Send startup notification
     symbols_str = ", ".join(config.get("SYMBOLS", ["SPY"]))
@@ -1993,9 +2006,9 @@ def run_multi_symbol_loop(
             
             # Step 0: System Health Check - Critical Safety Gate
             logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: Performing system health check...")
-            health_status = perform_system_health_check()
+            health_status = health_monitor.perform_health_check()
             
-            if not is_system_healthy():
+            if not health_status.trading_allowed:
                 logger.error(f"[HEALTH] System health check failed: {health_status.overall_status}")
                 logger.error("[HEALTH] Multi-symbol scanning blocked due to critical system health issues")
                 logger.info("[HEALTH] Waiting 60 seconds before next health check...")
@@ -2004,11 +2017,14 @@ def run_multi_symbol_loop(
             
             logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: System health check passed: {health_status.overall_status}")
 
-            # Check if we should end
+            # Hard-stop time gate check at top of each loop iteration
             if end_time and current_time >= end_time:
-                logger.info(
-                    f"[MULTI-SYMBOL-LOOP] Reached end time {end_time.strftime('%H:%M')}"
-                )
+                logger.info(f"[TIME-GATE] Trading window closed at {end_time.strftime('%H:%M %Z')}. Stopping loop.")
+                if slack_notifier:
+                    try:
+                        slack_notifier.send_message(f"⏰ [TIME-GATE] Trading window closed at {end_time.strftime('%H:%M %Z')} — stopping.")
+                    except:
+                        pass
                 break
 
             logger.info(
@@ -2311,6 +2327,17 @@ def main():
         action="store_true",
         help="Required flag when using Alpaca live trading",
     )
+    parser.add_argument(
+        "--strict-validation",
+        action="store_true",
+        help="Enable strict validation mode - skip symbols on any validation failure",
+    )
+    parser.add_argument(
+        "--pause-on-validate-fail",
+        type=str,
+        metavar="DURATION",
+        help="Auto-pause symbols with validation failures for duration (e.g., 30m, 1h)",
+    )
 
     args = parser.parse_args()
 
@@ -2319,6 +2346,19 @@ def main():
     if args.end_at:
         try:
             end_time = parse_end_time(args.end_at)
+            # Hard-stop check: Exit immediately if past end time
+            from zoneinfo import ZoneInfo
+            ET = ZoneInfo("America/New_York")
+            now = datetime.now(ET)
+            if now >= end_time:
+                logger.info(f"[TIME-GATE] Trading window closed (now {now.strftime('%H:%M %Z')} >= end-at {end_time.strftime('%H:%M %Z')}). Exiting.")
+                if args.slack_notify:
+                    try:
+                        slack = EnhancedSlackIntegration()
+                        slack.send_message(f"⏰ [TIME-GATE] Trading window closed at {end_time.strftime('%H:%M %Z')} — stopping.")
+                    except:
+                        pass
+                sys.exit(0)
         except ValueError as e:
             print(f"Error: {e}")
             sys.exit(1)
@@ -2342,6 +2382,15 @@ def main():
     if args.max_trades != 1:
         config["multi_symbol"]["max_concurrent_trades"] = args.max_trades
         logger.info(f"CLI override: Max concurrent trades set to {args.max_trades}")
+
+    # Handle validation CLI overrides
+    if args.strict_validation:
+        config["DATA_STRICT_VALIDATION"] = True
+        logger.info("CLI override: Strict validation mode enabled")
+
+    if args.pause_on_validate_fail:
+        config["DATA_PAUSE_ON_VALIDATE_FAIL"] = args.pause_on_validate_fail
+        logger.info(f"CLI override: Auto-pause on validation fail: {args.pause_on_validate_fail}")
 
     # Handle broker/environment CLI overrides
     if args.broker:
@@ -2410,6 +2459,17 @@ def main():
         logger.info(f"[SCOPED] Trade history: {scoped_paths['trade_history']}")
 
         llm_client = LLMClient(config["MODEL"])
+        
+        # Initialize singleton monitors once at startup to avoid repeated initialization
+        from utils.weekly_pnl_tracker import WeeklyPnLTracker
+        from utils.drawdown_circuit_breaker import DrawdownCircuitBreaker
+        from utils.vix_monitor import VIXMonitor
+        from utils.health_monitor import SystemHealthMonitor
+        
+        weekly_pnl_tracker = WeeklyPnLTracker()
+        drawdown_circuit_breaker = DrawdownCircuitBreaker(config)
+        vix_monitor = VIXMonitor(config)
+        health_monitor = SystemHealthMonitor(config)
 
         # Initialize enhanced Slack integration with charts
         slack = EnhancedSlackIntegration()
@@ -2434,6 +2494,10 @@ def main():
                 llm_client,
                 slack_notifier,
                 end_time,
+                weekly_pnl_tracker,
+                drawdown_circuit_breaker,
+                vix_monitor,
+                health_monitor,
             )
             return
         elif config.get("multi_symbol", {}).get("enabled", False) or args.multi_symbol:
@@ -2449,6 +2513,10 @@ def main():
                     llm_client,
                     slack_notifier,
                     end_time,
+                    weekly_pnl_tracker,
+                    drawdown_circuit_breaker,
+                    vix_monitor,
+                    health_monitor,
                 )
                 return
             else:
@@ -2460,6 +2528,10 @@ def main():
                     portfolio_manager,
                     llm_client,
                     slack_notifier,
+                    weekly_pnl_tracker,
+                    drawdown_circuit_breaker,
+                    vix_monitor,
+                    health_monitor,
                 )
                 return
         elif args.loop:
@@ -3003,33 +3075,34 @@ def main():
             logger.info("[CLEANUP] Stopping all monitor processes...")
             cleanup_all_monitors()
             logger.info("[CLEANUP] Monitor cleanup complete")
-        except Exception as cleanup_error:
-            logger.error(f"[CLEANUP] Error during monitor cleanup: {cleanup_error}")
-
-        if slack_notifier:
-            slack_notifier.send_error_alert(
-                "User Interrupt", "Script was interrupted by user (Ctrl+C)"
-            )
+        except:
+            pass
     except Exception as e:
         logger.error(f"[ERROR] Unexpected error: {e}", exc_info=True)
-        if slack_notifier:
-            slack_notifier.send_error_alert("System Error", str(e))
+        try:
+            if 'slack_notifier' in locals() and slack_notifier:
+                slack_notifier.send_error_alert("System Error", str(e))
+        except:
+            pass
     finally:
         logger.info("[COMPLETE] Script execution completed")
 
         # Send completion summary
-        if slack_notifier:
-            session_summary = {
-                "trades_analyzed": 1,
-                "decisions_made": 1,
-                "final_bankroll": (
-                    bankroll_manager.get_current_bankroll()
-                    if "bankroll_manager" in locals()
-                    else 0
-                ),
-                "duration": "N/A",
-            }
-            slack_notifier.send_completion_summary(session_summary)
+        try:
+            if 'slack_notifier' in locals() and slack_notifier:
+                session_summary = {
+                    "trades_analyzed": 1,
+                    "decisions_made": 1,
+                    "final_bankroll": (
+                        bankroll_manager.get_current_bankroll()
+                        if "bankroll_manager" in locals()
+                        else 0
+                    ),
+                    "duration": "N/A",
+                }
+                slack_notifier.send_completion_summary(session_summary)
+        except:
+            pass
 
 
 if __name__ == "__main__":

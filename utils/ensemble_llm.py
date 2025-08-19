@@ -213,21 +213,37 @@ class EnsembleLLM:
         Returns:
             Final ensemble decision dict
         """
-        # Count votes for each decision type
-        vote_counts = Counter(d["decision"] for d in decisions)
+        # Filter out ABSTAIN votes - they don't participate in voting
+        voting_decisions = [d for d in decisions if d["decision"] != "ABSTAIN"]
+        abstain_count = len(decisions) - len(voting_decisions)
+        
+        if abstain_count > 0:
+            logger.info(f"[ENSEMBLE] {abstain_count} models abstained from voting")
+        
+        # If all models abstained, default to NO_TRADE
+        if not voting_decisions:
+            logger.warning("[ENSEMBLE] All models abstained - defaulting to NO_TRADE")
+            return {
+                "decision": "NO_TRADE",
+                "confidence": 0.0,
+                "reason": "All models abstained from voting due to parse failures"
+            }
+        
+        # Count votes for each decision type (excluding ABSTAIN)
+        vote_counts = Counter(d["decision"] for d in voting_decisions)
         max_votes = max(vote_counts.values())
         winners = [decision for decision, count in vote_counts.items() if count == max_votes]
         
-        logger.info(f"[ENSEMBLE] Vote counts: {dict(vote_counts)}")
+        logger.info(f"[ENSEMBLE] Vote counts: {dict(vote_counts)} (abstained: {abstain_count})")
         
         # Case 1: Clear majority winner
         if len(winners) == 1:
             winning_decision = winners[0]
-            winning_votes = [d for d in decisions if d["decision"] == winning_decision]
+            winning_votes = [d for d in voting_decisions if d["decision"] == winning_decision]
             avg_confidence = sum(d["confidence"] for d in winning_votes) / len(winning_votes)
             
             reasons = [d["reason"] for d in winning_votes]
-            combined_reason = f"Majority vote: {winning_decision} ({len(winning_votes)}/{len(decisions)} models). " + \
+            combined_reason = f"Majority vote: {winning_decision} ({len(winning_votes)}/{len(voting_decisions)} voting models). " + \
                             f"Reasons: {'; '.join(reasons)}"
             
             logger.info(f"[ENSEMBLE] Majority winner: {winning_decision} (conf: {avg_confidence:.3f})")
@@ -242,11 +258,11 @@ class EnsembleLLM:
         logger.info(f"[ENSEMBLE] Tie between: {winners}, breaking by highest confidence")
         
         # Find the highest confidence among tied decisions
-        tied_decisions = [d for d in decisions if d["decision"] in winners]
+        tied_decisions = [d for d in voting_decisions if d["decision"] in winners]
         best_decision = max(tied_decisions, key=lambda x: x["confidence"])
         
         # Get all votes for the winning decision
-        winning_votes = [d for d in decisions if d["decision"] == best_decision["decision"]]
+        winning_votes = [d for d in voting_decisions if d["decision"] == best_decision["decision"]]
         avg_confidence = sum(d["confidence"] for d in winning_votes) / len(winning_votes)
         
         reasons = [d["reason"] for d in winning_votes]

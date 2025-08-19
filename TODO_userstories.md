@@ -386,14 +386,26 @@ Enhance data staleness detection with automatic retry mechanisms, exponential ba
 
 ## 🧪 TESTING & VALIDATION
 
-### US-FA-013: Stress Testing Framework
-- [ ] **As a developer**, I want comprehensive stress tests so that I can validate system behavior under adverse conditions
-- [ ] **Acceptance Criteria:**
-  - Simulate VIX spikes and market volatility
-  - Test drawdown circuit breakers with mock losses
-  - Validate emergency stop mechanisms
-  - Test data source failures and recovery
-  - Document all stress test scenarios and results
+### US-FA-013: Stress Testing Framework ✅ COMPLETED
+- [x] **As a developer**, I want comprehensive stress tests so that I can validate system behavior under adverse conditions
+- [x] **Acceptance Criteria:**
+  - ✅ Simulate VIX spikes and market volatility
+  - ✅ Test drawdown circuit breakers with mock losses
+  - ✅ Validate emergency stop mechanisms
+  - ✅ Test data source failures and recovery
+  - ✅ Document all stress test scenarios and results
+
+**Implementation Details:**
+- `utils/stress_testing.py` - Complete StressTestFramework with comprehensive test scenarios
+- **VIX Stress Tests**: Extreme spike simulation (VIX=80) and volatility regime changes
+- **Circuit Breaker Tests**: Daily (5% threshold) and weekly (15% threshold) drawdown validation
+- **Emergency Stop Tests**: File-based and programmatic kill switch activation
+- **Data Failure Tests**: Alpaca API failure simulation and data staleness detection
+- **System Health Tests**: Low disk space (90% full) and high memory usage (95%) simulation
+- Comprehensive test suite: `tests/test_stress_testing.py` with 16 passing tests
+- Automated report generation with JSON output and recommendations
+- CLI interface: `python -m utils.stress_testing --all` for complete test suite
+- Test data directory: `stress_test_data/` with timestamped reports
 
 ### US-FA-014: Full Automation Dry Run
 - [ ] **As a trader**, I want to run the fully automated system in paper trading mode for extended periods so that I can validate reliability before live deployment

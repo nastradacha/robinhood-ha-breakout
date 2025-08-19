@@ -1,0 +1,186 @@
+{
+  "timestamp": "2025-08-19T12:34:56.361134",
+  "summary": {
+    "total_tests": 11,
+    "passed_tests": 2,
+    "failed_tests": 9,
+    "success_rate": 18.181818181818183
+  },
+  "categories": {
+    "VIX Stress": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "VIX Extreme Spike",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:34:56.338959",
+          "end_time": "2025-08-19T12:34:56.339310",
+          "duration": 0.000351,
+          "passed": false,
+          "error_message": "VIX stress test failed: <module 'utils.vix_monitor' from 'C:\\\\Users\\\\nastr\\\\Documents\\\\robinhood-ha-breakout\\\\utils\\\\vix_monitor.py'> does not have the attribute 'load_config'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "VIX Regime Changes",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:34:56.339316",
+          "end_time": "2025-08-19T12:34:56.339328",
+          "duration": 1.2e-05,
+          "passed": false,
+          "error_message": "VIX regime test failed: <module 'utils.vix_monitor' from 'C:\\\\Users\\\\nastr\\\\Documents\\\\robinhood-ha-breakout\\\\utils\\\\vix_monitor.py'> does not have the attribute 'load_config'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Circuit Breaker": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "Daily Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:34:56.339332",
+          "end_time": "2025-08-19T12:34:56.350005",
+          "duration": 0.010673,
+          "passed": false,
+          "error_message": "Daily circuit breaker test failed: get_daily_pnl_tracker() missing 1 required positional argument: 'config'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Weekly Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:34:56.350011",
+          "end_time": "2025-08-19T12:34:56.358717",
+          "duration": 0.008706,
+          "passed": false,
+          "error_message": "Weekly circuit breaker test failed: get_daily_pnl_tracker() missing 1 required positional argument: 'config'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Emergency Stop": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Emergency Stop File",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:34:56.358730",
+          "end_time": "2025-08-19T12:34:56.359810",
+          "duration": 0.00108,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "emergency_file_detected": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:34:56.359815",
+              "level": "INFO",
+              "message": "Emergency stop file correctly detected"
+            }
+          ]
+        },
+        {
+          "test_name": "Programmatic Kill Switch",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:34:56.360248",
+          "end_time": "2025-08-19T12:34:56.360520",
+          "duration": 0.000272,
+          "passed": false,
+          "error_message": "Kill switch activation failed",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Data Failure": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Alpaca API Failure",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:34:56.360530",
+          "end_time": "2025-08-19T12:34:56.360581",
+          "duration": 5.1e-05,
+          "passed": false,
+          "error_message": "Alpaca API failure test failed: <class 'utils.data_validation.DataValidator'> does not have the attribute 'validate_data'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Data Staleness Detection",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:34:56.360583",
+          "end_time": "2025-08-19T12:34:56.360713",
+          "duration": 0.00013,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "staleness_seconds": 300
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:34:56.360709",
+              "level": "INFO",
+              "message": "Staleness classification: Stale"
+            }
+          ]
+        }
+      ]
+    },
+    "System Health": {
+      "passed": 0,
+      "failed": 3,
+      "tests": [
+        {
+          "test_name": "Low Disk Space",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:34:56.360719",
+          "end_time": "2025-08-19T12:34:56.360860",
+          "duration": 0.000141,
+          "passed": false,
+          "error_message": "Low disk space test failed: cannot import name 'HealthReport' from 'utils.health_monitor' (C:\\Users\\nastr\\Documents\\robinhood-ha-breakout\\utils\\health_monitor.py)",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "High CPU Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:34:56.360862",
+          "end_time": "2025-08-19T12:34:56.360969",
+          "duration": 0.000107,
+          "passed": false,
+          "error_message": "High CPU usage test failed: cannot import name 'HealthReport' from 'utils.health_monitor' (C:\\Users\\nastr\\Documents\\robinhood-ha-breakout\\utils\\health_monitor.py)",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "High Memory Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:34:56.360970",
+          "end_time": "2025-08-19T12:34:56.361107",
+          "duration": 0.000137,
+          "passed": false,
+          "error_message": "High memory usage test failed: cannot import name 'HealthReport' from 'utils.health_monitor' (C:\\Users\\nastr\\Documents\\robinhood-ha-breakout\\utils\\health_monitor.py)",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "Address 9 failed test(s) before live deployment",
+    "Review VIX position sizing logic - system may not be responding appropriately to volatility spikes",
+    "Circuit breaker mechanisms need attention - risk controls may not be functioning properly",
+    "Emergency stop mechanisms require immediate attention - critical safety feature compromised",
+    "Improve data source resilience and fallback mechanisms",
+    "System health monitoring needs enhancement - may not detect critical system issues"
+  ]
+}

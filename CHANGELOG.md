@@ -2,6 +2,50 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.12.0] - 2025-01-15
+
+### Added - Trading System Robustness Enhancements
+- **Time Gate Enforcement** - Hard-stop checks before loop start and at each iteration with `--end-at` CLI flag
+- **Strict Validation Mode** - `--strict-validation` with auto-pause for chronic validation failures via `--pause-on-validate-fail`
+- **Enhanced Multi-Symbol Scanner** - Concrete rejection reason tracking with detailed categorization (MARKET_CLOSED, DATA_VALIDATION, LLM_NO_TRADE)
+- **Secret Masking** - Slack bot token masking in logs to prevent credential leakage
+- **Defensive Exception Handling** - Safe Slack notifier usage to prevent UnboundLocalError cascades
+
+### Fixed
+- **VIXMonitor Initialization** - Added missing logger attribute and proper _initialized flag handling
+- **Health Monitor Usage** - Corrected method calls to use `perform_health_check()` instead of non-existent methods
+- **Multi-Symbol Rejection Tracking** - Fixed return type mismatch by returning tuple (opportunities, rejection_reason)
+- **Emergency Stop Test** - Fixed test name matching in stress testing framework
+
+### Enhanced
+- **Timezone Handling** - Proper Eastern Time enforcement for all time gate checks
+- **Concurrent Execution** - Improved thread-safe rejection reason handling in multi-symbol scanner
+- **Error Recovery** - Robust exception handling with graceful degradation
+- **Logging Quality** - Enhanced log messages with concrete rejection reasons instead of vague categories
+
+## [2.11.0] - 2025-08-19
+
+### Added - Comprehensive Stress Testing Framework (US-FA-013)
+- **StressTestFramework** - Complete stress testing system for validating system behavior under adverse conditions
+- **VIX stress tests** - Extreme volatility spike simulation (VIX=80) and regime change validation
+- **Circuit breaker stress tests** - Daily (5%) and weekly (15%) drawdown threshold validation with mock losses
+- **Emergency stop stress tests** - File-based and programmatic kill switch activation under stress
+- **Data failure stress tests** - API failure simulation and data staleness detection validation
+- **System health stress tests** - Low disk space (90%) and high memory usage (95%) simulation
+- **Automated reporting** - JSON report generation with comprehensive metrics and recommendations
+- **CLI interface** - Command-line stress test execution with category-specific options
+
+### Implementation
+- `utils/stress_testing.py` - Complete framework with 5 test categories and comprehensive scenarios
+- `tests/test_stress_testing.py` - Full test suite with 16 passing tests covering all functionality
+- `stress_test_data/` - Dedicated directory for test reports with timestamped JSON files
+- CLI usage: `python -m utils.stress_testing --all` for complete validation
+
+### Enhanced
+- **System validation** - Comprehensive pre-deployment testing capabilities
+- **Risk assessment** - Automated identification of system weaknesses under stress
+- **Quality assurance** - Institutional-grade testing framework for trading system reliability
+
 ## [2.10.0] - 2025-08-19
 
 ### Added - System Stability & Efficiency Improvements

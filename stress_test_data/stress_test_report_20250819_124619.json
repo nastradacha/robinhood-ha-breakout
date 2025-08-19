@@ -1,0 +1,271 @@
+{
+  "timestamp": "2025-08-19T12:46:19.254788",
+  "summary": {
+    "total_tests": 11,
+    "passed_tests": 7,
+    "failed_tests": 4,
+    "success_rate": 63.63636363636363
+  },
+  "categories": {
+    "VIX Stress": {
+      "passed": 2,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "VIX Extreme Spike",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:46:19.225646",
+          "end_time": "2025-08-19T12:46:19.234202",
+          "duration": 0.008556,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "vix_level": 80.0,
+            "adjustment": 0.3
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.234195",
+              "level": "INFO",
+              "message": "VIX=80, Position adjustment: 0.3"
+            }
+          ]
+        },
+        {
+          "test_name": "VIX Regime Changes",
+          "category": "VIX Stress",
+          "start_time": "2025-08-19T12:46:19.234220",
+          "end_time": "2025-08-19T12:46:19.235043",
+          "duration": 0.000823,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "vix_cycle": [
+              15.0,
+              25.0,
+              35.0,
+              50.0,
+              25.0,
+              15.0
+            ],
+            "adjustments": [
+              1.0,
+              0.8,
+              0.6,
+              0.29999999999999993,
+              0.8,
+              1.0
+            ]
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.234448",
+              "level": "INFO",
+              "message": "VIX=15.0, Adjustment=1.0"
+            },
+            {
+              "timestamp": "2025-08-19T12:46:19.234537",
+              "level": "INFO",
+              "message": "VIX=25.0, Adjustment=0.8"
+            },
+            {
+              "timestamp": "2025-08-19T12:46:19.234615",
+              "level": "INFO",
+              "message": "VIX=35.0, Adjustment=0.6"
+            },
+            {
+              "timestamp": "2025-08-19T12:46:19.234822",
+              "level": "INFO",
+              "message": "VIX=50.0, Adjustment=0.29999999999999993"
+            },
+            {
+              "timestamp": "2025-08-19T12:46:19.234940",
+              "level": "INFO",
+              "message": "VIX=25.0, Adjustment=0.8"
+            },
+            {
+              "timestamp": "2025-08-19T12:46:19.235036",
+              "level": "INFO",
+              "message": "VIX=15.0, Adjustment=1.0"
+            }
+          ]
+        }
+      ]
+    },
+    "Circuit Breaker": {
+      "passed": 0,
+      "failed": 2,
+      "tests": [
+        {
+          "test_name": "Daily Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:46:19.235051",
+          "end_time": "2025-08-19T12:46:19.244641",
+          "duration": 0.00959,
+          "passed": false,
+          "error_message": "Daily circuit breaker test failed: get_daily_pnl_tracker() missing 1 required positional argument: 'config'",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Weekly Drawdown Circuit Breaker",
+          "category": "Circuit Breaker",
+          "start_time": "2025-08-19T12:46:19.244646",
+          "end_time": "2025-08-19T12:46:19.253011",
+          "duration": 0.008365,
+          "passed": false,
+          "error_message": "Weekly circuit breaker test failed: get_daily_pnl_tracker() missing 1 required positional argument: 'config'",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Emergency Stop": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Emergency Stop File",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:46:19.253026",
+          "end_time": "2025-08-19T12:46:19.253485",
+          "duration": 0.000459,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "emergency_file_detected": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.253490",
+              "level": "INFO",
+              "message": "Emergency stop file correctly detected"
+            }
+          ]
+        },
+        {
+          "test_name": "Programmatic Kill Switch",
+          "category": "Emergency Stop",
+          "start_time": "2025-08-19T12:46:19.253848",
+          "end_time": "2025-08-19T12:46:19.254101",
+          "duration": 0.000253,
+          "passed": false,
+          "error_message": "Kill switch activation failed",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Data Failure": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Alpaca API Failure",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:46:19.254111",
+          "end_time": "2025-08-19T12:46:19.254231",
+          "duration": 0.00012,
+          "passed": false,
+          "error_message": "Alpaca API failure test failed: ValidationResult.__init__() got an unexpected keyword argument 'discrepancy_percent'. Did you mean 'discrepancy_pct'?",
+          "metrics": {},
+          "logs": []
+        },
+        {
+          "test_name": "Data Staleness Detection",
+          "category": "Data Failure",
+          "start_time": "2025-08-19T12:46:19.254233",
+          "end_time": "2025-08-19T12:46:19.254353",
+          "duration": 0.00012,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "staleness_seconds": 300
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.254349",
+              "level": "INFO",
+              "message": "Staleness classification: Stale"
+            }
+          ]
+        }
+      ]
+    },
+    "System Health": {
+      "passed": 3,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "Low Disk Space",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:46:19.254358",
+          "end_time": "2025-08-19T12:46:19.254491",
+          "duration": 0.000133,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "disk_usage_percent": 90,
+            "trading_disabled": true
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.254487",
+              "level": "INFO",
+              "message": "Overall health: HealthStatus.CRITICAL"
+            },
+            {
+              "timestamp": "2025-08-19T12:46:19.254489",
+              "level": "INFO",
+              "message": "Trading allowed: False"
+            }
+          ]
+        },
+        {
+          "test_name": "High CPU Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:46:19.254497",
+          "end_time": "2025-08-19T12:46:19.254608",
+          "duration": 0.000111,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "cpu_usage_percent": 95
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.254606",
+              "level": "INFO",
+              "message": "CPU usage health: HealthStatus.WARNING"
+            }
+          ]
+        },
+        {
+          "test_name": "High Memory Usage",
+          "category": "System Health",
+          "start_time": "2025-08-19T12:46:19.254613",
+          "end_time": "2025-08-19T12:46:19.254757",
+          "duration": 0.000144,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "memory_usage_percent": 95
+          },
+          "logs": [
+            {
+              "timestamp": "2025-08-19T12:46:19.254755",
+              "level": "INFO",
+              "message": "Overall health: HealthStatus.WARNING"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "Address 4 failed test(s) before live deployment",
+    "Circuit breaker mechanisms need attention - risk controls may not be functioning properly",
+    "Emergency stop mechanisms require immediate attention - critical safety feature compromised",
+    "Improve data source resilience and fallback mechanisms"
+  ]
+}

@@ -619,13 +619,22 @@ Use the choose_trade function to respond.""",
                 if response.choices[0].message.tool_calls:
                     tool_call = response.choices[0].message.tool_calls[0]
                     if tool_call.function.name == "choose_trade":
-                        args = json.loads(tool_call.function.arguments)
-                        return TradeDecision(
-                            decision=args["decision"],
-                            confidence=args["confidence"],
-                            reason=args.get("reason"),
-                            tokens_used=tokens_used,
-                        )
+                        try:
+                            args = json.loads(tool_call.function.arguments)
+                            return TradeDecision(
+                                decision=args["decision"],
+                                confidence=args["confidence"],
+                                reason=args.get("reason"),
+                                tokens_used=tokens_used,
+                            )
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"OpenAI function call parse error: {e}")
+                            return TradeDecision(
+                                decision="ABSTAIN",
+                                confidence=0.0,
+                                reason="Parse failure - abstaining from vote",
+                                tokens_used=tokens_used,
+                            )
 
             else:  # DeepSeek
                 result = self._call_deepseek(messages, functions)
@@ -636,13 +645,22 @@ Use the choose_trade function to respond.""",
                 if response["choices"][0]["message"].get("function_call"):
                     func_call = response["choices"][0]["message"]["function_call"]
                     if func_call["name"] == "choose_trade":
-                        args = json.loads(func_call["arguments"])
-                        return TradeDecision(
-                            decision=args["decision"],
-                            confidence=args["confidence"],
-                            reason=args.get("reason"),
-                            tokens_used=tokens_used,
-                        )
+                        try:
+                            args = json.loads(func_call["arguments"])
+                            return TradeDecision(
+                                decision=args["decision"],
+                                confidence=args["confidence"],
+                                reason=args.get("reason"),
+                                tokens_used=tokens_used,
+                            )
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"DeepSeek function call parse error: {e}")
+                            return TradeDecision(
+                                decision="ABSTAIN",
+                                confidence=0.0,
+                                reason="Parse failure - abstaining from vote",
+                                tokens_used=tokens_used,
+                            )
 
             # Fallback if no function call
             logger.warning("No valid function call received, defaulting to NO_TRADE")

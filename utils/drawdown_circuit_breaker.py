@@ -44,14 +44,14 @@ class DrawdownCircuitBreaker:
             self.config = config_or_path
         else:
             self.config = load_config(config_or_path)
-        self.state_file = "circuit_breaker_state.json"
+        self.state_file = Path.cwd() / "circuit_breaker_state.json"
         self.slack = EnhancedSlackIntegration()
         
         # Load daily configuration
         self.enabled = self.config.get("DAILY_DRAWDOWN_ENABLED", True)
         self.threshold_percent = self.config.get("DAILY_DRAWDOWN_THRESHOLD_PERCENT", 5.0)
         self.post_threshold_percent = self.config.get("DAILY_DRAWDOWN_POST_THRESHOLD_PERCENT", 0.0)
-        self.require_manual_reset = self.config.get("DAILY_DRAWDOWN_REQUIRE_MANUAL_RESET", True)
+        self.require_manual_reset = self.config.get("DAILY_DRAWDOWN_REQUIRE_MANUAL_RESET", False)
         self.reset_time_str = self.config.get("DAILY_DRAWDOWN_RESET_TIME", "09:30")
         self.alert_levels = self.config.get("DAILY_DRAWDOWN_ALERT_LEVELS", [2.5, 4.0, 5.0])
         
@@ -140,12 +140,12 @@ class DrawdownCircuitBreaker:
             return True, "Circuit breakers disabled"
         
         # Check if manually disabled
-        if self.state.get("manually_disabled", False):
+        if self._state.get("manually_disabled", False):
             return False, "Trading manually disabled via circuit breaker"
         
         # Get current daily P&L if not provided
         if current_pnl_percent is None:
-            daily_tracker = get_daily_pnl_tracker()
+            daily_tracker = get_daily_pnl_tracker(self.config)
             current_pnl_percent = daily_tracker.get_current_pnl_percent()
         
         # Check if we should auto-reset (new trading day)
@@ -161,9 +161,9 @@ class DrawdownCircuitBreaker:
         
         # Check daily protection
         if self.enabled:
-            # Check if circuit breaker is already triggered
-            if self.state.get("triggered", False):
-                trigger_reason = self.state.get("trigger_reason", "Unknown")
+            # Check if circuit breaker is already active
+            if self._state.get("is_active", False):
+                trigger_reason = self._state.get("trigger_reason", "Unknown")
                 return False, f"Daily circuit breaker active: {trigger_reason}"
             
             # Check if current loss exceeds threshold
@@ -183,12 +183,12 @@ class DrawdownCircuitBreaker:
     
     def _should_auto_reset(self) -> bool:
         """Check if we should reset circuit breaker for new trading day"""
-        if not self.state.get("activation_date"):
+        if not self._state.get("activation_date"):
             return False
             
         now_et = datetime.now(ET_TZ)
         current_date = now_et.strftime("%Y-%m-%d")
-        activation_date = self.state.get("activation_date")
+        activation_date = self._state.get("activation_date")
         
         return current_date != activation_date
     
@@ -197,8 +197,8 @@ class DrawdownCircuitBreaker:
         logger.info(f"[CIRCUIT-BREAKER] Resetting circuit breaker (auto-reset: {auto_reset})")
         
         # Reset state
-        self.state = self._create_new_state()
-        self._save_state()
+        self._state = self._create_new_state()
+        self._save_state(self._state)
         
         # Send Slack alert for circuit breaker reset
         try:
@@ -213,12 +213,13 @@ class DrawdownCircuitBreaker:
         logger.critical(f"[CIRCUIT-BREAKER] Triggered: {loss_percent:.2f}% loss exceeds {self.threshold_percent}% threshold")
         
         # Update state
-        self.state.update({
+        self._state.update({
+            "is_active": True,
             "triggered": True,
             "trigger_reason": f"{loss_percent:.2f}% loss exceeds {self.threshold_percent}% threshold",
             "last_updated": datetime.now(ET_TZ).isoformat()
         })
-        self._save_state()
+        self._save_state(self._state)
         
         # Send Slack alert for circuit breaker trigger
         try:
@@ -246,8 +247,8 @@ class DrawdownCircuitBreaker:
         """Check weekly drawdown protection"""
         try:
             # Check if weekly system is disabled
-            if self.state.get("weekly_disabled", False):
-                disable_reason = self.state.get("weekly_disable_reason", "Weekly threshold exceeded")
+            if self._state.get("weekly_disabled", False):
+                disable_reason = self._state.get("weekly_disable_reason", "Weekly threshold exceeded")
                 return False, f"Weekly protection active: {disable_reason}"
             
             # Get weekly performance
@@ -281,24 +282,24 @@ class DrawdownCircuitBreaker:
         logger.critical(f"[CIRCUIT-BREAKER] Weekly protection triggered: {weekly_loss_percent:.2f}% loss exceeds {self.weekly_threshold_percent}% threshold")
         
         # Update state
-        self.state.update({
+        self._state.update({
             "weekly_disabled": True,
             "weekly_disable_reason": f"{weekly_loss_percent:.2f}% weekly loss exceeds {self.weekly_threshold_percent}% threshold",
             "weekly_disable_date": datetime.now(ET_TZ).isoformat(),
             "weekly_disable_performance": weekly_performance,
-            "weekly_disable_count": self.state.get("weekly_disable_count", 0) + 1,
+            "weekly_disable_count": self._state.get("weekly_disable_count", 0) + 1,
             "last_updated": datetime.now(ET_TZ).isoformat()
         })
-        self._save_state()
+        self._save_state(self._state)
         
         # Send critical Slack alert
         try:
             alert_data = {
-                "disable_reason": self.state["weekly_disable_reason"],
+                "disable_reason": self._state["weekly_disable_reason"],
                 "threshold_percent": self.weekly_threshold_percent,
                 "disable_weekly_pnl_percent": weekly_loss_percent,
                 "performance_summary": weekly_performance,
-                "disable_count": self.state["weekly_disable_count"]
+                "disable_count": self._state["weekly_disable_count"]
             }
             self.slack.send_weekly_system_disable_alert(alert_data)
         except Exception as e:
@@ -307,12 +308,12 @@ class DrawdownCircuitBreaker:
     def _check_weekly_alert_levels(self, weekly_loss_percent: float):
         """Check for weekly alert levels"""
         for alert_level in self.weekly_alert_levels:
-            if weekly_loss_percent >= alert_level and not self.state.get(f"weekly_alert_{alert_level}_sent", False):
+            if weekly_loss_percent >= alert_level and not self._state.get(f"weekly_alert_{alert_level}_sent", False):
                 logger.warning(f"[CIRCUIT-BREAKER] Weekly alert level reached: {weekly_loss_percent:.2f}% loss exceeds {alert_level}% threshold")
                 
                 # Mark alert as sent to avoid spam
-                self.state[f"weekly_alert_{alert_level}_sent"] = True
-                self._save_state()
+                self._state[f"weekly_alert_{alert_level}_sent"] = True
+                self._save_state(self._state)
                 
                 # Send Slack alert for weekly alert level
                 try:
@@ -329,7 +330,7 @@ class DrawdownCircuitBreaker:
     
     def reset_weekly_protection(self, reason: str = "Manual intervention"):
         """Manually reset weekly drawdown protection"""
-        if not self.state.get("weekly_disabled", False):
+        if not self._state.get("weekly_disabled", False):
             logger.info("[CIRCUIT-BREAKER] Weekly protection not active, no reset needed")
             return False, "Weekly protection not active"
         
@@ -337,19 +338,19 @@ class DrawdownCircuitBreaker:
         
         # Store previous disable info for alert
         previous_disable = {
-            "disable_date": self.state.get("weekly_disable_date"),
-            "disable_reason": self.state.get("weekly_disable_reason"),
-            "disable_weekly_pnl_percent": self.state.get("weekly_disable_performance", {}).get("weekly_pnl_percent", 0.0)
+            "disable_date": self._state.get("weekly_disable_date"),
+            "disable_reason": self._state.get("weekly_disable_reason"),
+            "disable_weekly_pnl_percent": self._state.get("weekly_disable_performance", {}).get("weekly_pnl_percent", 0.0)
         }
         
         # Reset weekly protection state
-        weekly_keys_to_remove = [k for k in self.state.keys() if k.startswith("weekly_")]
+        weekly_keys_to_remove = [k for k in self._state.keys() if k.startswith("weekly_")]
         for key in weekly_keys_to_remove:
             if key != "weekly_disable_count":  # Keep disable count for tracking
-                del self.state[key]
+                del self._state[key]
         
-        self.state["last_updated"] = datetime.now(ET_TZ).isoformat()
-        self._save_state()
+        self._state["last_updated"] = datetime.now(ET_TZ).isoformat()
+        self._save_state(self._state)
         
         # Send re-enable alert
         try:

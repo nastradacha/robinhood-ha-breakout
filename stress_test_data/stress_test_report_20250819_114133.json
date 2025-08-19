@@ -1,0 +1,61 @@
+{
+  "timestamp": "2025-08-19T11:41:33.443059",
+  "summary": {
+    "total_tests": 3,
+    "passed_tests": 2,
+    "failed_tests": 1,
+    "success_rate": 66.66666666666666
+  },
+  "categories": {
+    "Category A": {
+      "passed": 1,
+      "failed": 1,
+      "tests": [
+        {
+          "test_name": "Test 1",
+          "category": "Category A",
+          "start_time": "2025-08-19T11:41:33.443037",
+          "end_time": "2025-08-19T11:41:33.443039",
+          "duration": 2e-06,
+          "passed": true,
+          "error_message": null,
+          "metrics": {
+            "test": 1
+          },
+          "logs": []
+        },
+        {
+          "test_name": "Test 2",
+          "category": "Category A",
+          "start_time": "2025-08-19T11:41:33.443041",
+          "end_time": "2025-08-19T11:41:33.443042",
+          "duration": 1e-06,
+          "passed": false,
+          "error_message": "Test failed",
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    },
+    "Category B": {
+      "passed": 1,
+      "failed": 0,
+      "tests": [
+        {
+          "test_name": "Test 3",
+          "category": "Category B",
+          "start_time": "2025-08-19T11:41:33.443042",
+          "end_time": "2025-08-19T11:41:33.443043",
+          "duration": 1e-06,
+          "passed": true,
+          "error_message": null,
+          "metrics": {},
+          "logs": []
+        }
+      ]
+    }
+  },
+  "recommendations": [
+    "Address 1 failed test(s) before live deployment"
+  ]
+}
