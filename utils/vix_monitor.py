@@ -64,7 +64,13 @@ class VIXMonitor:
         if config_or_path is None:
             return {}
         if isinstance(config_or_path, dict):
-            return config_or_path
+            # Handle dict config with risk section
+            risk_config = config_or_path.get('risk', {})
+            return {
+                'VIX_SPIKE_THRESHOLD': risk_config.get('vix_halt_threshold', 30.0),
+                'VIX_CACHE_MINUTES': risk_config.get('vix_cache_minutes', 5),
+                'VIX_ENABLED': risk_config.get('vix_enabled', True)
+            }
         # assume path-like
         try:
             with open(config_or_path, 'r') as f:

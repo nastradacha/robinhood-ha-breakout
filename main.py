@@ -2004,7 +2004,13 @@ def run_multi_symbol_loop(
             scan_count += 1
             current_time = datetime.now(tz)  # Use timezone-aware datetime
             
-            # Step 0: System Health Check - Critical Safety Gate
+            # Step 0: Emergency Stop Check - Critical Safety Gate
+            from utils.safety_hooks import check_emergency_stop
+            if check_emergency_stop(config, slack_notifier):
+                logger.error("[EMERGENCY-STOP] Emergency stop file detected - terminating")
+                break
+            
+            # Step 1: System Health Check - Critical Safety Gate
             logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: Performing system health check...")
             health_status = health_monitor.perform_health_check()
             

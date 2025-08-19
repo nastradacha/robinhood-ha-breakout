@@ -1,0 +1,89 @@
+# DRY RUN CONFIG — US-FA-014
+# Full Automation Dry Run Configuration for 2-week validation period
+
+app:
+  mode: dryrun
+  end_at: "15:30"          # also pass via CLI for redundancy
+  interval_min: 2
+  multi_symbol: true
+  symbols: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "DIA", "XLK", "XLF", "XLE"]
+
+broker:
+  name: alpaca
+  env: paper               # verify ALPACA_ENV=paper in .env
+  position_sizing_pct: 0.5 # 50% sizing for dryrun
+  max_concurrent_trades: 1
+
+validation:
+  strict: true
+  price_discrepancy_pct: 0.35       # tighten if you want
+  staleness:
+    fresh_seconds: 30
+    acceptable_seconds: 120
+    stale_seconds: 300
+  enabled: true
+  pause_on_validate_fail: 30  # minutes to pause on validation failure
+  allow_extended_hours: false       # block outside RTH for dryrun
+
+risk:
+  circuit_breakers:
+    daily_drawdown_pct: 5
+    weekly_drawdown_pct: 15
+  vix_halt_threshold: 30
+  emergency_stop_file: "EMERGENCY_STOP.txt"
+
+logging:
+  level: INFO
+  file_prefix: "logs/dryrun"
+  rotate_mb: 10
+  backups: 7
+  json_metrics_file: "logs/dryrun_metrics.jsonl"
+  hourly_health_snapshot: true
+
+# Main.py compatibility
+LOG_FILE: "logs/dryrun.log"
+
+# Multi-symbol configuration
+multi_symbol:
+  enabled: true
+  symbols: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "DIA", "XLK", "XLF", "XLE"]
+  max_concurrent_trades: 1
+
+# Required config keys for main.py
+START_CAPITAL: 1000
+START_CAPITAL_DEFAULT: 500
+SLACK_BOT_TOKEN_ENV: "SLACK_BOT_TOKEN"
+CONTRACT_QTY: 1
+LOOKBACK_BARS: 20
+MODEL: "gpt-4o-mini"
+RISK_FRACTION: 0.90
+SIZE_RULE: "fixed-qty"
+BANKROLL_FILE: "bankroll.json"
+MEMORY_DEPTH: 5
+GAMMA_FEED_PATH: "data/spotgamma_dummy.csv"
+TIMEFRAME: "5m"
+DATA_SOURCE: "alpaca"
+SYMBOL: "SPY"
+SYMBOLS: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "DIA", "XLK", "XLF", "XLE"]
+
+notifiers:
+  slack:
+    enabled: true
+    channel: "#trading-dryrun-alerts"
+    # token provided via env var (SLACK_BOT_TOKEN)
+  email:
+    enabled: true
+    to: ["ops@example.com"]     # optional fallback for downtime
+    # SMTP settings pulled from env
+
+monitoring:
+  uptime_dashboard: true
+  track:
+    - latency_api_ms
+    - loop_duration_ms
+    - cpu_pct
+    - rss_mb
+    - open_positions
+    - rejected_trades
+    - circuit_breaker_state
+    - slack_delivery_ok

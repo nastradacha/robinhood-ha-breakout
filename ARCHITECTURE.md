@@ -15,7 +15,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
     (19 Symbols)           (Advanced ML)      (Alpaca API)           (Live P&L)            (15% Targets)
 ```
 
-**Current v2.9.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation:
+**Current v2.13.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation and comprehensive dry run validation:
 - **🎯 Complete Automation**: From market scanning to profit-taking, zero manual intervention
 - **🏦 Alpaca API Integration**: Professional-grade execution with real-time market data
 - **📊 Multi-Symbol Intelligence**: 19 symbols with symbol-specific risk management
@@ -31,6 +31,9 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
 - **🚨 VIX Spike Protection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - **🔒 Environment Safety**: Separate paper/live environments with explicit risk acknowledgment
 - **📊 Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
+- **🧪 Full Automation Dry Run**: Comprehensive validation system with emergency stops and safety monitoring
+- **⏰ Time Gate Enforcement**: Hard end-time limits with clean shutdown procedures
+- **🛑 Emergency Stop System**: File-based emergency halt with immediate trading cessation
 
 The system operates as a cohesive automated trading platform with specialized components handling market analysis, execution, monitoring, and risk management.
 
@@ -914,6 +917,54 @@ VIX_ALERT_ON_REGIME_CHANGE: true
    - Health checks
    - Performance metrics
    - Error rate tracking
+
+---
+
+## 🧪 Full Automation Dry Run System (US-FA-014)
+
+### **Comprehensive Validation Framework for Production Readiness**
+
+The Full Automation Dry Run system provides institutional-grade validation and monitoring capabilities to ensure system reliability before live deployment.
+
+**Key Components:**
+
+1. **📋 Dry Run Configuration** (`config/config_dryrun.yaml`)
+   - Conservative 50% position sizing for safety
+   - 30-minute validation auto-pause on failures
+   - Circuit breaker thresholds: 5% daily, 15% weekly
+   - VIX halt threshold: 30
+   - Emergency stop file detection enabled
+
+2. **🛡️ Safety Mechanisms** (`utils/safety_hooks.py`)
+   - **Time Gate Enforcement**: Hard end-time limits with clean shutdown
+   - **Emergency Stop Detection**: File-based halt with immediate cessation
+   - **Session Phase Detection**: Pre-market, RTH, After-hours labeling
+   - **Validation Auto-Pause**: Automatic trading pause on data quality issues
+
+3. **📊 Enhanced Logging** (`utils/logging_setup.py`)
+   - Rotating log files with configurable size limits
+   - JSON metrics logging for system health snapshots
+   - Incident tracking with CSV-based audit trail
+   - Hourly health snapshots for monitoring
+
+4. **🔍 Validation Tools**
+   - **Dry Run Launcher** (`utils/dry_run_launcher.py`): Pre-flight validation and launch
+   - **Validation Checklist** (`utils/dry_run_checklist.py`): Automated hourly/daily/weekly checks
+   - **Smoke Test Suite**: 6 critical safety paths validated
+     - End-time hard exit
+     - Emergency stop file detection
+     - Strict validation auto-pause
+     - VIX halt monitoring
+     - Circuit breaker monitoring
+     - Session labeling outside RTH
+
+5. **📈 Monitoring & Alerting**
+   - Real-time Slack notifications for all safety events
+   - Comprehensive incident logging and tracking
+   - System health metrics collection
+   - Performance analysis and reporting
+
+**Status**: Production-ready with all smoke tests passing. Ready for 72-hour intensive monitoring phase.
 
 ---
 

@@ -4,7 +4,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: Personal](https://img.shields.io/badge/license-Personal-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.12.0-brightgreen.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.13.0-brightgreen.svg)](CHANGELOG.md)
 [![Multi-Symbol](https://img.shields.io/badge/multi--symbol-19%20Symbols-orange.svg)](#-multi-symbol-trading)
 [![Real-Time Data](https://img.shields.io/badge/data-Alpaca%20API-blue.svg)](#-real-time-market-data)
 [![Automated Execution](https://img.shields.io/badge/execution-Fully%20Automated-green.svg)](#-automated-execution)
@@ -26,7 +26,7 @@
 
 **This is a complete automated trading system** - from market analysis to trade execution, position monitoring, and profit-taking, all running autonomously with your oversight.
 
-### 🚀 **Current Features (v2.12.0 - SYSTEM ROBUSTNESS ENHANCEMENTS!)**
+### 🚀 **Current Features (v2.13.0 - FULL AUTOMATION DRY RUN COMPLETE!)**
 - 🚨 **Weekly Drawdown Protection**: Automatic system disable when weekly losses exceed 15% threshold
 - 🚨 **Daily Drawdown Circuit Breaker**: Automatic trading halt when daily losses exceed 5% threshold
 - 🚨 **VIX-Adjusted Position Sizing**: Dynamic position size reduction based on market volatility (VIX levels)
@@ -52,6 +52,13 @@
   - 🚨 **Weekly Drawdown Protection**: System-wide disable at 15% weekly loss with manual reset requirement
   - 🚨 **Daily Drawdown Circuit Breaker**: Halts trading when daily losses exceed 5% threshold
   - 🚨 **VIX-Adjusted Position Sizing**: Dynamic position size reduction (50-75%) during high volatility periods
+- 🧪 **Full Automation Dry Run System**: Production-ready validation framework
+  - ✅ **Emergency Stop System**: File-based emergency halt with immediate trading cessation
+  - ✅ **Time Gate Enforcement**: Hard end-time limits with clean shutdown procedures
+  - ✅ **Validation Auto-Pause**: 30-minute trading pause on data quality issues
+  - ✅ **Comprehensive Safety Testing**: All 6 critical safety paths validated
+  - ✅ **Enhanced Logging & Monitoring**: Rotating logs, JSON metrics, incident tracking
+  - ✅ **Smoke Test Suite**: End-time exit, emergency stop, validation pause, VIX halt, circuit breakers, session labeling
   - 🚨 **VIX Spike Protection**: Blocks new trades when volatility > 30 (configurable)
   - 🕒 **Market Hours Validation**: Holiday and early close detection prevents invalid trades
   - 📊 **Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements

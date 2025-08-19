@@ -1,0 +1,3 @@
+timestamp,event_type,severity,symbol,context,action,ttr_seconds,notes
+2025-08-19T16:32:08Z,validation_fail,warning,GLD,"8.4% price discrepancy","auto_pause_30m",0,"Paused scanning for GLD"
+2025-08-19T21:28:22.915013+00:00,test_incident,info,TEST,"Unit test","none",0,"Test incident"

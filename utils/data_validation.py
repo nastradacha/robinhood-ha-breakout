@@ -357,8 +357,8 @@ class DataValidator:
         else:
             price_comparison = f"{result.primary_data.value:.2f} (no validation data)"
         
-        # Create single actionable log message
-        log_msg = f"[DATA-VALIDATION] {result.symbol}: {price_comparison} → {result.recommendation}"
+        # Create single actionable log message (using ASCII arrow for Windows compatibility)
+        log_msg = f"[DATA-VALIDATION] {result.symbol}: {price_comparison} -> {result.recommendation}"
         
         # Add specific issue context
         if result.issues:

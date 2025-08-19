@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-08-19T17:29:14.520629-04:00",
+  "check_type": "weekly_summary",
+  "metrics": {
+    "uptime_percent": 95.0,
+    "false_positive_rate": 0.0,
+    "safety_failures": 0,
+    "execution_alignment": 92.5,
+    "slack_delivery_rate": 100.0
+  },
+  "go_no_go": {
+    "criteria": {
+      "uptime_ok": false,
+      "false_positive_ok": true,
+      "safety_ok": true,
+      "execution_ok": true,
+      "slack_ok": true
+    },
+    "decision": "NO-GO",
+    "failing_criteria": [
+      "uptime_ok"
+    ]
+  }
+}

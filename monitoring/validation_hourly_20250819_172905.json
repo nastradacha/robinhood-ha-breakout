@@ -1,0 +1,20 @@
+{
+  "timestamp": "2025-08-19T17:29:04.972318-04:00",
+  "check_type": "hourly",
+  "results": {
+    "slack_delivery": false,
+    "health_snapshot": false,
+    "performance": {
+      "cpu_percent": 7.6,
+      "memory_mb": 23.48,
+      "cpu_ok": true,
+      "memory_ok": true
+    },
+    "critical_events": [
+      {
+        "pattern": "ERROR",
+        "line": "2025-08-19 17:26:43,490 - __main__ - ERROR - Missing required environment variables: ['ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'SLACK_BOT_TOKEN']"
+      }
+    ]
+  }
+}

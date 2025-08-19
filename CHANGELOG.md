@@ -2,6 +2,28 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.13.0] - 2025-08-19
+
+### Added - Full Automation Dry Run System (US-FA-014)
+- **Dry Run Configuration** - `config/config_dryrun.yaml` with conservative 50% position sizing and comprehensive safety settings
+- **Emergency Stop System** - File-based emergency halt (`EMERGENCY_STOP.txt`) with immediate trading cessation and Slack alerts
+- **Time Gate Enforcement** - Hard end-time limits with clean shutdown procedures using `--end-at` parameter
+- **Safety Hooks Framework** - `utils/safety_hooks.py` with session phase detection, validation auto-pause, and health snapshot management
+- **Enhanced Logging System** - `utils/logging_setup.py` with rotating logs, JSON metrics, and incident tracking
+- **Validation Tools** - Dry run launcher (`utils/dry_run_launcher.py`) and validation checklist (`utils/dry_run_checklist.py`)
+- **Comprehensive Smoke Tests** - All 6 critical safety paths validated: end-time exit, emergency stop, validation pause, VIX halt, circuit breakers, session labeling
+
+### Fixed
+- **Unicode Logging Error** - Fixed Unicode arrow character (`→`) causing CP1252 encoding errors on Windows
+- **Emergency Stop Integration** - Added emergency stop detection to main trading loop
+- **Dry Run Config Compatibility** - Added missing config keys (`LOG_FILE`, `multi_symbol`, `START_CAPITAL`) for main.py compatibility
+
+### Enhanced
+- **Production Readiness** - Complete validation framework with institutional-grade safety mechanisms
+- **Monitoring & Alerting** - Real-time Slack notifications for all safety events with comprehensive incident logging
+- **System Health Tracking** - Hourly health snapshots and performance metrics collection
+- **Validation Auto-Pause** - 30-minute trading pause on data quality issues with configurable thresholds
+
 ## [2.12.0] - 2025-01-15
 
 ### Added - Trading System Robustness Enhancements
