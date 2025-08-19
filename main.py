@@ -68,6 +68,7 @@ from utils.alpaca_options import AlpacaOptionsTrader, create_alpaca_trader
 from utils.kill_switch import get_kill_switch, is_trading_halted
 from utils.circuit_breaker_reset import check_and_process_file_reset
 from utils.data_validation import check_trading_allowed
+from utils.staleness_monitor import check_symbol_staleness
 
 # Load environment variables
 load_dotenv()
@@ -1160,6 +1161,15 @@ def run_one_shot_mode(
             return result
         else:
             logger.info(f"[DATA_VALIDATION] Data quality check passed: {data_reason}")
+        
+        # Step 3.6: Enhanced staleness detection with retry
+        staleness_allowed, staleness_reason = check_symbol_staleness(symbol, with_retry=True)
+        if not staleness_allowed:
+            logger.warning(f"[STALENESS] Trade blocked due to data staleness: {staleness_reason}")
+            log_blocked_trade(config, decision, analysis, current_bankroll, "DATA_STALENESS")
+            return result
+        else:
+            logger.info(f"[STALENESS] Data freshness check passed: {staleness_reason}")
         
         # Step 4: Execute trade using appropriate broker
         logger.info(f"[TRADE] Executing {decision.decision} trade...")

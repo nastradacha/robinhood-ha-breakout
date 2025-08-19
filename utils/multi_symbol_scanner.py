@@ -23,6 +23,7 @@ import time
 from .data import fetch_market_data, calculate_heikin_ashi, analyze_breakout_pattern
 from .llm import LLMClient, TradeDecision
 from .data_validation import check_trading_allowed
+from .staleness_monitor import check_symbol_staleness
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,14 @@ class MultiSymbolScanner:
                 return []
             else:
                 logger.info(f"[MULTI-SYMBOL] {symbol}: Data quality check passed - {data_reason}")
+
+            # Enhanced staleness detection with retry
+            staleness_allowed, staleness_reason = check_symbol_staleness(symbol, with_retry=True)
+            if not staleness_allowed:
+                logger.warning(f"[MULTI-SYMBOL] {symbol}: Staleness check blocked trade - {staleness_reason}")
+                return []
+            else:
+                logger.info(f"[MULTI-SYMBOL] {symbol}: Data freshness check passed - {staleness_reason}")
 
             # Pre-LLM hard gate: check for obvious NO_TRADE conditions
             proceed, gate_reason = self._pre_llm_hard_gate(market_data, self.config)

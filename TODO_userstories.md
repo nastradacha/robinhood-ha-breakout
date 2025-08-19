@@ -245,13 +245,63 @@ Implement robust cross-source data validation to ensure trading decisions are ba
 - **Mitigation**: ✅ Configurable thresholds and quality-based recommendations
 
 ### US-FA-008: Real-Time Data Staleness Detection
-- [ ] **As a trader**, I want the system to detect when market data is stale so that I don't make decisions on outdated information
-- [ ] **Acceptance Criteria:**
-  - Check timestamp of last data update for each symbol
-  - Block trades when data is > 2 minutes old during market hours
-  - Send Slack alert when data staleness detected
-  - Automatic retry with exponential backoff
-  - Log data freshness metrics for monitoring
+
+**Status**: ✅ Completed  
+**Priority**: High  
+**Estimated Effort**: 2-3 days  
+**Dependencies**: US-FA-007 (Cross-Source Data Validation)
+
+### Description
+Enhance data staleness detection with automatic retry mechanisms, exponential backoff, and comprehensive data freshness metrics for improved trading safety.
+
+### Acceptance Criteria
+- [x] **Timestamp Monitoring**: Check timestamp of last data update for each symbol
+- [x] **Trading Gates**: Block trades when data is > 2 minutes old during market hours
+- [x] **Slack Alerts**: Send notifications when data staleness detected
+- [x] **Exponential Backoff**: Automatic retry with exponential backoff and jitter
+- [x] **Metrics Logging**: Log data freshness metrics for monitoring and analysis
+
+### Definition of Done
+- ✅ **Enhanced Staleness Module**: `utils/staleness_monitor.py` with 5-tier staleness classification
+- ✅ **Retry Logic**: Exponential backoff with configurable parameters and jitter
+- ✅ **Configuration**: 13 new config keys for comprehensive staleness control
+- ✅ **Integration**: Main trading logic and multi-symbol scanner enhanced with staleness checks
+- ✅ **Testing**: 21 comprehensive unit tests covering all scenarios (100% pass rate)
+- ✅ **Metrics System**: JSON-based metrics logging with data freshness tracking
+- ✅ **Slack Integration**: Real-time alerts for staleness issues with detailed context
+
+### Implementation Summary
+**Enhanced Staleness Monitor (`utils/staleness_monitor.py`)**:
+- 5-tier staleness classification: Fresh/Acceptable/Stale/Very Stale/Critical
+- Exponential backoff retry with configurable delays and jitter
+- Comprehensive metrics tracking with success rates and failure counts
+- Singleton pattern for efficient monitoring across the system
+- JSON-based metrics logging for analysis and monitoring
+
+**Configuration Keys Added**:
+- `STALENESS_MONITORING_ENABLED`: Enable/disable enhanced monitoring (default: true)
+- `STALENESS_FRESH_SECONDS`: Fresh data threshold (default: 30s)
+- `STALENESS_ACCEPTABLE_SECONDS`: Acceptable data threshold (default: 120s)
+- `STALENESS_STALE_SECONDS`: Stale data threshold (default: 300s)
+- `STALENESS_VERY_STALE_SECONDS`: Very stale threshold (default: 600s)
+- `STALENESS_BLOCK_TRADING`: Block trading on stale data (default: true)
+- `STALENESS_ALERT_ENABLED`: Send Slack alerts (default: true)
+- `STALENESS_METRICS_LOGGING`: Log metrics to file (default: true)
+- `STALENESS_RETRY_*`: Retry configuration (delay, backoff, max attempts, jitter)
+
+**Integration Points**:
+- `main.py`: Enhanced staleness gate with retry before trade execution
+- `utils/multi_symbol_scanner.py`: Pre-LLM staleness checks with retry logic
+- Builds upon US-FA-007 data validation for comprehensive data quality assurance
+- Metrics logged to `logs/staleness_metrics.json` for monitoring
+
+**Risk Assessment**:
+- **Risk**: Retry delays could slow down trading decisions
+- **Mitigation**: ✅ Configurable retry parameters and intelligent backoff
+- **Risk**: False positives during temporary network issues
+- **Mitigation**: ✅ Multi-tier classification and graceful degradation
+- **Risk**: Metrics file growth over time
+- **Mitigation**: ✅ Automatic cleanup keeping only last 1000 entries
 
 ### US-FA-009: System Health Monitoring
 - [ ] **As a trader**, I want continuous monitoring of system health so that trading stops automatically if critical components fail
