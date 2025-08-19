@@ -1,0 +1,12 @@
+{
+  "is_system_disabled": false,
+  "disable_date": null,
+  "disable_time": null,
+  "disable_weekly_pnl_percent": null,
+  "disable_reason": null,
+  "last_updated": "2025-08-18T21:46:34.899230-04:00",
+  "manual_reenable_required": false,
+  "disable_count": 0,
+  "performance_summary_at_disable": null,
+  "reenable_history": []
+}

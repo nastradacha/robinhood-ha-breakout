@@ -2,6 +2,32 @@
 
 **Complete reference for all CLI commands and usage patterns (v2.9.0)**
 
+## 🚨 VIX-Adjusted Position Sizing Commands
+
+### **VIX Configuration Testing**
+```bash
+# Test VIX position sizing with dry run
+python main.py --dry-run --log-level DEBUG --symbol SPY
+
+# Monitor VIX levels and position adjustments
+python -c "from utils.vix_position_sizing import get_vix_position_sizer; sizer = get_vix_position_sizer(); print(sizer.get_volatility_regime())"
+
+# Test VIX-adjusted position calculation
+python -c "from utils.vix_position_sizing import calculate_vix_adjusted_size; print(calculate_vix_adjusted_size(1000, 'SPY'))"
+```
+
+### **VIX Testing Suite**
+```bash
+# Run VIX position sizing tests
+python -m pytest tests/test_vix_position_sizing.py -v
+
+# Quick VIX functionality test
+python tests/test_vix_position_sizing.py quick
+
+# Test specific VIX scenarios
+python -m pytest tests/test_vix_position_sizing.py::TestVIXPositionSizing::test_moderate_vix_reduced_sizing -v
+```
+
 ---
 
 ## 📋 Quick Reference

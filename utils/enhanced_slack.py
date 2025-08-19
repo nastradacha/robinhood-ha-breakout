@@ -902,10 +902,85 @@ class EnhancedSlackIntegration:
             
             # Send as info alert
             self.basic_notifier.send_message(message)
-            logger.info(f"[ENHANCED-SLACK] Weekly system re-enable alert sent")
+            logger.info(f"[SLACK-WEEKLY] Weekly system re-enable alert sent")
             
         except Exception as e:
-            logger.error(f"[ENHANCED-SLACK] Failed to send weekly re-enable alert: {e}")
+            logger.error(f"[SLACK-WEEKLY] Failed to send weekly re-enable alert: {e}")
+    
+    def send_vix_regime_change_alert(self, old_regime: str, new_regime: str, vix_value: float, adjustment_factor: float):
+        """Send alert when VIX volatility regime changes affecting position sizing"""
+        if not self.enabled:
+            return
+        
+        try:
+            # Determine alert urgency based on regime change
+            if new_regime in ["HIGH", "EXTREME"]:
+                urgency = "🚨 CRITICAL"
+                color = "#FF4444"  # Red
+            elif new_regime == "MODERATE":
+                urgency = "⚠️ WARNING"
+                color = "#FFA500"  # Orange
+            else:
+                urgency = "ℹ️ INFO"
+                color = "#36A64F"  # Green
+            
+            # Calculate size reduction percentage
+            size_reduction_pct = (1 - adjustment_factor) * 100
+            
+            message = (
+                f"{urgency} **VIX REGIME CHANGE**\n\n"
+                f"**Volatility Regime:** {old_regime} → **{new_regime}**\n"
+                f"**VIX Level:** {vix_value:.1f}\n"
+                f"**Position Sizing:** {adjustment_factor:.0%} of normal\n"
+                f"**Size Reduction:** {size_reduction_pct:.0f}%\n\n"
+                f"*Position sizes automatically adjusted for new volatility regime*"
+            )
+            
+            self.send_alert(message)
+            logger.info(f"[SLACK-VIX] VIX regime change alert sent: {old_regime} → {new_regime}")
+            
+        except Exception as e:
+            logger.error(f"[SLACK-VIX] Failed to send VIX regime change alert: {e}")
+    
+    def send_vix_spike_alert(self, vix_value: float, threshold: float):
+        """Send alert when VIX spikes above threshold"""
+        if not self.enabled:
+            return
+        
+        try:
+            message = (
+                f"🚨 **VIX SPIKE DETECTED**\n\n"
+                f"**VIX Level:** {vix_value:.1f}\n"
+                f"**Threshold:** {threshold:.1f}\n"
+                f"**Status:** High volatility - reduced position sizing active\n\n"
+                f"*Trading continues with reduced position sizes*"
+            )
+            
+            self.send_alert(message)
+            logger.info(f"[SLACK-VIX] VIX spike alert sent: {vix_value:.1f}")
+            
+        except Exception as e:
+            logger.error(f"[SLACK-VIX] Failed to send VIX spike alert: {e}")
+    
+    def send_vix_normalized_alert(self, vix_value: float, threshold: float):
+        """Send alert when VIX returns to normal levels"""
+        if not self.enabled:
+            return
+        
+        try:
+            message = (
+                f"✅ **VIX NORMALIZED**\n\n"
+                f"**VIX Level:** {vix_value:.1f}\n"
+                f"**Threshold:** {threshold:.1f}\n"
+                f"**Status:** Normal volatility - full position sizing restored\n\n"
+                f"*Trading resumed with normal position sizes*"
+            )
+            
+            self.send_heartbeat(message)
+            logger.info(f"[SLACK-VIX] VIX normalized alert sent: {vix_value:.1f}")
+            
+        except Exception as e:
+            logger.error(f"[SLACK-VIX] Failed to send VIX normalized alert: {e}")
     
     def send_weekly_system_reenable_notification(self, notification_data: Dict):
         """Send notification for weekly system re-enable via reset manager"""

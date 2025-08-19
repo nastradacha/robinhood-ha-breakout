@@ -1,6 +1,34 @@
 {
-  "daily_history": [],
-  "last_updated": "2025-08-18T20:58:19.477630-04:00",
+  "daily_history": [
+    {
+      "date": "2025-08-18",
+      "pnl_amount": 0.0,
+      "pnl_percent": 0.0,
+      "breakdown": {
+        "alpaca:paper": {
+          "start_balance": 0.0,
+          "current_balance": 0.0,
+          "pnl": 0.0,
+          "pnl_percent": 0.0
+        },
+        "alpaca:live": {
+          "start_balance": 0.0,
+          "current_balance": 0.0,
+          "pnl": 0.0,
+          "pnl_percent": 0.0
+        },
+        "robinhood:live": {
+          "start_balance": 0.0,
+          "current_balance": 0.0,
+          "pnl": 0.0,
+          "pnl_percent": 0.0
+        }
+      },
+      "timestamp": "2025-08-18T21:46:34.900218-04:00",
+      "last_updated": "2025-08-18T21:46:34.915575-04:00"
+    }
+  ],
+  "last_updated": "2025-08-18T21:46:34.915575-04:00",
   "weekly_summary": {
     "current_week_pnl": 0.0,
     "current_week_percent": 0.0,

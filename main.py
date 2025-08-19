@@ -505,6 +505,7 @@ def execute_multi_symbol_trade(
             risk_fraction=config["RISK_FRACTION"],
             size_rule=config["SIZE_RULE"],
             fixed_qty=config["CONTRACT_QTY"],
+            symbol=symbol,
         )
 
         # Validate position size against bankroll
@@ -676,6 +677,7 @@ def execute_alpaca_multi_symbol_trade(
             risk_fraction=config["RISK_FRACTION"],
             size_rule=config["SIZE_RULE"],
             fixed_qty=config["CONTRACT_QTY"],
+            symbol=symbol,
         )
         
         # Validate position size
@@ -897,6 +899,7 @@ def run_once(
             risk_fraction=config["RISK_FRACTION"],
             size_rule=config["SIZE_RULE"],
             fixed_qty=config["CONTRACT_QTY"],
+            symbol=symbol,
         )
 
     # Return trade result data
@@ -1001,6 +1004,7 @@ def execute_alpaca_options_trade(
             risk_fraction=config["RISK_FRACTION"],
             size_rule=config["SIZE_RULE"],
             fixed_qty=config["CONTRACT_QTY"],
+            symbol=symbol,
         )
         
         total_cost = contract.mid * contracts * 100  # Options multiplier
@@ -1555,6 +1559,7 @@ def main_loop(
                                         risk_fraction=config["RISK_FRACTION"],
                                         size_rule=config["SIZE_RULE"],
                                         fixed_qty=config["CONTRACT_QTY"],
+                                        symbol=symbol,
                                     )
 
                                     # Pre-fill order and stop at Review
@@ -2471,6 +2476,7 @@ def main():
                 risk_fraction=config["RISK_FRACTION"],
                 size_rule=config["SIZE_RULE"],
                 fixed_qty=config["CONTRACT_QTY"],
+                symbol=symbol,
             )
 
         # Send trade decision to Slack
@@ -2558,6 +2564,7 @@ def main():
                 risk_fraction=config["RISK_FRACTION"],
                 size_rule=config["SIZE_RULE"],
                 fixed_qty=config["CONTRACT_QTY"],
+                symbol=symbol,
             )
 
             trade_data = {
@@ -2688,6 +2695,7 @@ def main():
                     risk_fraction=config["RISK_FRACTION"],
                     size_rule=config["SIZE_RULE"],
                     fixed_qty=config["CONTRACT_QTY"],
+                    symbol=symbol,
                 )
 
                 if quantity == 0:

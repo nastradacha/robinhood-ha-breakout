@@ -203,4 +203,13 @@ WEEKLY_DRAWDOWN_ALERT_LEVELS: [10.0, 12.5, 15.0]  # Alert at these weekly loss p
 WEEKLY_DRAWDOWN_PERFORMANCE_WINDOW: 7          # Rolling 7-day performance window
 WEEKLY_DRAWDOWN_MIN_TRADING_DAYS: 3            # Minimum trading days before weekly protection activates
 
+# VIX-Adjusted Position Sizing (US-FA-006)
+VIX_POSITION_SIZING_ENABLED: true              # Enable VIX-based position size adjustments
+VIX_NORMAL_THRESHOLD: 20.0                     # VIX < 20 = low volatility (normal sizing)
+VIX_MODERATE_THRESHOLD: 25.0                   # VIX > 25 = moderate volatility (50% size reduction)
+VIX_HIGH_THRESHOLD: 35.0                       # VIX > 35 = high volatility (75% size reduction)
+VIX_MODERATE_REDUCTION: 0.5                    # Position size multiplier for moderate volatility
+VIX_HIGH_REDUCTION: 0.25                       # Position size multiplier for high volatility
+VIX_ALERT_ON_REGIME_CHANGE: true               # Send Slack alerts when volatility regime changes
+
 # CHROME_MAJOR: 138

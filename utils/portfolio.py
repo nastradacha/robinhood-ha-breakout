@@ -365,7 +365,7 @@ class PortfolioManager:
         trade_log_file: str = "logs/trade_history.csv",
     ) -> None:
         """
-        Log a completed trade with realized P/L to the trade log.
+        Log a completed trade with realized P/L to the trade log with VIX context.
 
         Args:
             position: The closed position
@@ -376,7 +376,27 @@ class PortfolioManager:
         try:
             from .logging_utils import log_trade_decision
 
-            # Map to 15-field scoped ledger schema
+            # Get VIX context for trade logging
+            vix_level = None
+            vix_adjustment_factor = 1.0
+            vix_regime = "UNKNOWN"
+            
+            try:
+                from .vix_position_sizing import get_vix_position_sizer
+                vix_sizer = get_vix_position_sizer()
+                
+                # Get VIX data
+                factor, reason, vix_value = vix_sizer.get_vix_adjustment_factor()
+                regime, _ = vix_sizer.get_volatility_regime()
+                
+                vix_level = vix_value
+                vix_adjustment_factor = factor
+                vix_regime = regime
+                
+            except Exception as vix_error:
+                logger.debug(f"[VIX-LOG] Could not get VIX context: {vix_error}")
+
+            # Map to 18-field scoped ledger schema with VIX data
             trade_data = {
                 "timestamp": datetime.now().isoformat(),
                 "symbol": position.symbol,
@@ -393,12 +413,16 @@ class PortfolioManager:
                 "pnl_pct": "",
                 "pnl_amount": realized_pnl,
                 "exit_reason": "",
+                "vix_level": vix_level,
+                "vix_adjustment_factor": vix_adjustment_factor,
+                "vix_regime": vix_regime,
             }
 
             log_trade_decision(trade_log_file, trade_data)
 
             logger.info(
-                f"Logged realized trade: {position.symbol} {position.side} P/L: ${realized_pnl:.2f}"
+                f"Logged realized trade: {position.symbol} {position.side} P/L: ${realized_pnl:.2f} "
+                f"(VIX: {vix_level:.1f} {vix_regime})" if vix_level else f"Logged realized trade: {position.symbol} {position.side} P/L: ${realized_pnl:.2f}"
             )
 
         except Exception as e:

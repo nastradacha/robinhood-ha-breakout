@@ -144,14 +144,41 @@ As a trader, I want the system to automatically disable trading when weekly loss
 - **Risk:** Complex interaction with daily protection
 - **Mitigation:** ✅ Clear precedence rules implemented (weekly > daily)
 
-### US-FA-006: VIX-Adjusted Position Sizing
-- [ ] **As a trader**, I want position sizes to automatically adjust based on market volatility so that I take smaller positions during volatile periods
-- [ ] **Acceptance Criteria:**
-  - Reduce position size by 50% when VIX > 25
-  - Reduce position size by 75% when VIX > 35
-  - Use normal sizing when VIX < 20
-  - Log VIX level and sizing adjustment in trade records
-  - Make VIX thresholds and adjustments configurable
+### US-FA-006: VIX-Adjusted Position Sizing ✅ **COMPLETED**
+- [x] **As a trader**, I want position sizes to automatically adjust based on market volatility so that I take smaller positions during volatile periods
+- [x] **Acceptance Criteria:**
+  - [x] Reduce position size by 50% when VIX > 25
+  - [x] Reduce position size by 75% when VIX > 35
+  - [x] Use normal sizing when VIX < 20
+  - [x] Log VIX level and sizing adjustment in trade records
+  - [x] Make VIX thresholds and adjustments configurable
+
+**Definition of Done:**
+- [x] VIX position sizing module implemented with configurable thresholds
+- [x] Bankroll integration applies VIX adjustments automatically
+- [x] Trade logging enhanced with VIX context (level, factor, regime)
+- [x] Slack alerts for volatility regime changes and spikes
+- [x] Comprehensive test suite with 18 passing tests
+- [x] Documentation updated (README, ARCHITECTURE, COMMANDS)
+
+**Implementation Summary:**
+- **VIXPositionSizer:** Dynamic position size adjustment based on volatility thresholds
+- **Bankroll Integration:** Seamless VIX adjustment in calculate_position_size method
+- **Enhanced Logging:** VIX level, adjustment factor, and regime logged with each trade
+- **Slack Alerts:** Regime change notifications and spike/normalization alerts
+- **Configuration:** VIX_POSITION_SIZING_* settings in config.yaml
+- **Testing:** Complete test coverage including edge cases and integration tests
+
+**Dependencies:**
+- ✅ Leverages existing VIX monitor (utils/vix_monitor.py)
+- ✅ Integration with bankroll management system
+- ✅ Enhanced Slack notification system
+
+**Risk Assessment:**
+- **Risk:** VIX data unavailability could affect position sizing
+- **Mitigation:** ✅ Graceful fallback to normal sizing with error logging
+- **Risk:** Over-conservative sizing during extended volatile periods
+- **Mitigation:** ✅ Configurable thresholds and manual override capability
 
 ---
 

@@ -158,21 +158,26 @@ class BankrollManager:
         risk_fraction: float = 0.5,
         size_rule: str = "fixed-qty",
         fixed_qty: int = 1,
+        symbol: str = "SPY",
+        apply_vix_adjustment: bool = True,
     ) -> int:
         """
-        Calculate position size based on bankroll and risk management rules.
+        Calculate position size based on bankroll and risk management rules with VIX adjustment.
 
         Args:
             premium: Option premium per contract
             risk_fraction: Maximum fraction of bankroll to risk
             size_rule: "fixed-qty" or "dynamic-qty"
             fixed_qty: Fixed quantity for fixed-qty rule
+            symbol: Trading symbol for VIX adjustment context
+            apply_vix_adjustment: Whether to apply VIX-based position sizing
 
         Returns:
-            Number of contracts to trade
+            Number of contracts to trade (VIX-adjusted)
         """
         current_bankroll = self.get_current_bankroll()
 
+        # Calculate base position size using existing logic
         if size_rule == "fixed-qty":
             # Check if fixed quantity exceeds risk limits
             total_risk = premium * fixed_qty * 100
@@ -181,16 +186,43 @@ class BankrollManager:
                     f"Fixed quantity ${total_risk:.2f} exceeds risk limit ${current_bankroll * risk_fraction:.2f}"
                 )
                 return 0  # Block the trade
-            return fixed_qty
+            base_quantity = fixed_qty
 
         elif size_rule == "dynamic-qty":
             # Calculate maximum contracts based on risk fraction
             max_risk = current_bankroll * risk_fraction
             max_contracts = int(max_risk // (premium * 100))
-            return max(1, max_contracts)  # At least 1 contract
+            base_quantity = max(1, max_contracts)  # At least 1 contract
 
         else:
             raise ValueError(f"Unknown size rule: {size_rule}")
+
+        # Apply VIX adjustment if enabled
+        if apply_vix_adjustment:
+            try:
+                from .vix_position_sizing import calculate_vix_adjusted_size
+                
+                # Calculate VIX-adjusted position size
+                base_dollar_size = premium * base_quantity * 100
+                adjusted_dollar_size, vix_info = calculate_vix_adjusted_size(base_dollar_size, symbol)
+                
+                # Convert back to contract quantity
+                adjusted_quantity = int(adjusted_dollar_size // (premium * 100))
+                adjusted_quantity = max(0, adjusted_quantity)  # Ensure non-negative
+                
+                # Log VIX adjustment if applied
+                if vix_info.get("adjustment_factor", 1.0) < 1.0:
+                    logger.info(f"[VIX-SIZING] {symbol}: {base_quantity} → {adjusted_quantity} contracts "
+                               f"(VIX {vix_info.get('vix_value', 'N/A'):.1f}, "
+                               f"{vix_info.get('adjustment_factor', 1.0):.0%} sizing)")
+                
+                return adjusted_quantity
+                
+            except Exception as e:
+                logger.warning(f"[VIX-SIZING] VIX adjustment failed, using base size: {e}")
+                return base_quantity
+        
+        return base_quantity
 
     def validate_trade_risk(
         self, premium: float, quantity: int, max_risk_pct: float = 50.0

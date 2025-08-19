@@ -27,6 +27,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
 - **🛡️ Advanced Risk Management**: Multi-layered protection systems
 - **🚨 Weekly Drawdown Protection**: System-wide disable when weekly losses exceed 15% threshold
 - **🚨 Daily Drawdown Circuit Breaker**: Halts trading when daily losses exceed 5% threshold
+- **🚨 VIX-Adjusted Position Sizing**: Dynamic position size reduction based on market volatility levels
 - **🚨 VIX Spike Protection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - **🔒 Environment Safety**: Separate paper/live environments with explicit risk acknowledgment
 - **📊 Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
@@ -798,6 +799,60 @@ System Events → Message Formatting → Slack API → Your Phone/Computer
    - Native mobile interface
    - Push notifications
    - Remote control capabilities
+
+---
+
+## 🚨 VIX-Adjusted Position Sizing (US-FA-006)
+
+### **Dynamic Risk Management Based on Market Volatility**
+
+The VIX-Adjusted Position Sizing system automatically reduces position sizes during periods of high market volatility, providing an additional layer of risk protection beyond traditional position sizing rules.
+
+**Key Components:**
+
+1. **📊 VIX Data Integration** (`utils/vix_monitor.py`)
+   - Real-time VIX data from Yahoo Finance
+   - Cached data with 5-minute refresh intervals
+   - Automatic fallback handling for data unavailability
+
+2. **🎯 Position Size Calculator** (`utils/vix_position_sizing.py`)
+   - **VIX < 20**: Normal position sizing (100%)
+   - **VIX 20-25**: Normal position sizing (100%)
+   - **VIX 25-35**: Moderate reduction (50% of normal size)
+   - **VIX > 35**: High reduction (25% of normal size)
+
+3. **🔗 Bankroll Integration** (`utils/bankroll.py`)
+   - Seamless integration with existing position sizing logic
+   - VIX adjustment applied after base position calculation
+   - Symbol-aware sizing for future enhancements
+
+4. **📊 Enhanced Logging** (`utils/logging_utils.py`, `utils/portfolio.py`)
+   - VIX level recorded with each trade
+   - Adjustment factor and volatility regime logged
+   - Complete audit trail for performance analysis
+
+5. **📱 Slack Alerts** (`utils/enhanced_slack.py`)
+   - Regime change notifications (NORMAL → MODERATE → HIGH)
+   - VIX spike alerts with current levels
+   - Normalization alerts when volatility subsides
+
+**Configuration Options:**
+```yaml
+VIX_POSITION_SIZING_ENABLED: true
+VIX_NORMAL_THRESHOLD: 20.0
+VIX_MODERATE_THRESHOLD: 25.0
+VIX_HIGH_THRESHOLD: 35.0
+VIX_MODERATE_REDUCTION: 0.5  # 50% reduction
+VIX_HIGH_REDUCTION: 0.25     # 75% reduction
+VIX_ALERT_ON_REGIME_CHANGE: true
+```
+
+**Benefits:**
+- **Automatic Risk Reduction**: Smaller positions during volatile markets
+- **Transparent Operation**: All adjustments logged and reported
+- **Configurable Thresholds**: Customizable volatility levels and reductions
+- **Real-Time Monitoring**: Immediate alerts on regime changes
+- **Backward Compatible**: Can be disabled without affecting existing functionality
 
 ---
 

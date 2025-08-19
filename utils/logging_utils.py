@@ -75,6 +75,9 @@ def log_trade_decision(log_file: str, trade_data: Dict):
         "pnl_pct",
         "pnl_amount",
         "exit_reason",
+        "vix_level",
+        "vix_adjustment_factor",
+        "vix_regime",
     ]
 
     file_exists = os.path.exists(log_file)
@@ -83,7 +86,7 @@ def log_trade_decision(log_file: str, trade_data: Dict):
         if not file_exists:
             writer.writerow(header)
 
-        # Map incoming trade_data to the 15-field scoped schema
+        # Map incoming trade_data to the 18-field scoped schema with VIX data
         row = [
             trade_data.get("timestamp", ""),
             trade_data.get("symbol", ""),
@@ -100,6 +103,9 @@ def log_trade_decision(log_file: str, trade_data: Dict):
             trade_data.get("pnl_pct", ""),
             trade_data.get("pnl_amount", trade_data.get("realized_pnl", "")),
             trade_data.get("exit_reason", ""),
+            trade_data.get("vix_level", ""),
+            trade_data.get("vix_adjustment_factor", ""),
+            trade_data.get("vix_regime", ""),
         ]
 
         writer.writerow(row)

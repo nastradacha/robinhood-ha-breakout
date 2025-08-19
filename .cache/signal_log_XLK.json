@@ -1,13 +1,5 @@
 [
   {
-    "timestamp": "2025-08-18T14:23:11.081015",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0860% < 0.2000% minimum)",
-    "price": 265.78,
-    "scanner_env": "paper"
-  },
-  {
     "timestamp": "2025-08-18T14:24:37.039947",
     "decision": "NO_TRADE",
     "confidence": 0.0,
@@ -396,6 +388,14 @@
     "decision": "NO_TRADE",
     "confidence": 0.0,
     "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 21:08, cutoff: 15:15 ET)",
+    "price": 266.5083,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-18T21:38:37.161497",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 21:38, cutoff: 15:15 ET)",
     "price": 266.5083,
     "scanner_env": "paper"
   }

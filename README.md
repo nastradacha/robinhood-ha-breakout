@@ -29,6 +29,7 @@
 ### 🚀 **Current Features (v2.9.0 - WEEKLY DRAWDOWN PROTECTION!)**
 - 🚨 **Weekly Drawdown Protection**: Automatic system disable when weekly losses exceed 15% threshold
 - 🚨 **Daily Drawdown Circuit Breaker**: Automatic trading halt when daily losses exceed 5% threshold
+- 🚨 **VIX-Adjusted Position Sizing**: Dynamic position size reduction based on market volatility (VIX levels)
 - 🚨 **VIX Spike Detection**: Automatic volatility monitoring blocks new trades when VIX > 30
 - 🕒 **Market Hours Validation**: Enhanced validation with holidays and early close detection
 - 📊 **Earnings Calendar Blocking**: Prevents trades within 24h of earnings announcements
@@ -50,6 +51,7 @@
 - 🔒 **Enterprise-Grade Risk Management**: Multi-layered safety systems
   - 🚨 **Weekly Drawdown Protection**: System-wide disable at 15% weekly loss with manual reset requirement
   - 🚨 **Daily Drawdown Circuit Breaker**: Halts trading when daily losses exceed 5% threshold
+  - 🚨 **VIX-Adjusted Position Sizing**: Dynamic position size reduction (50-75%) during high volatility periods
   - 🚨 **VIX Spike Protection**: Blocks new trades when volatility > 30 (configurable)
   - 🕒 **Market Hours Validation**: Holiday and early close detection prevents invalid trades
   - 📊 **Earnings Calendar Protection**: Blocks trades within 24h of earnings announcements
