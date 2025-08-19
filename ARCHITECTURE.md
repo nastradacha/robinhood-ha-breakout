@@ -484,7 +484,7 @@ graph TD
     
     %% Automated Trade Execution Path
     V --> W[🔍 Find ATM Contract via Alpaca API]
-    W --> X[💰 Calculate Position Size (100x multiplier)]
+    W --> X[💰 Calculate Position Size 100x multiplier]
     X --> Y[🚀 AUTOMATED: Submit Order to Alpaca]
     Y --> Z[⏱️ Poll for Fill Status (90s)]
     Z --> AA[✅ Order Filled Successfully]
