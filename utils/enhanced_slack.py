@@ -51,9 +51,18 @@ class EnhancedSlackIntegration:
     Provides a single interface for all Slack communications with rich
     chart integration and professional mobile-friendly formatting.
     """
-
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self):
-        """Initialize enhanced Slack integration."""
+        """Initialize enhanced Slack integration (singleton)"""
+        if self._initialized:
+            return
         # Initialize components
         self.basic_notifier = SlackNotifier()
         self.chart_generator = SlackChartGenerator()
@@ -64,6 +73,7 @@ class EnhancedSlackIntegration:
         self.enabled = self.basic_notifier.enabled
         self.charts_enabled = self.enabled and os.getenv("SLACK_BOT_TOKEN")
 
+        self._initialized = True
         logger.info(
             f"[ENHANCED-SLACK] Initialized (enabled: {self.enabled}, charts: {self.charts_enabled})"
         )

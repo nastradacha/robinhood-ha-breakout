@@ -37,6 +37,11 @@ class DailyPnLTracker:
         self.config = config
         self.state_file = Path("daily_pnl_tracker.json")
         self.market_open_time = time(9, 30)  # 9:30 AM ET
+        
+        # Get current broker and environment from config
+        self.current_broker = config.get("BROKER", "robinhood")
+        self.current_env = config.get("ALPACA_ENV", "paper") if self.current_broker == "alpaca" else "live"
+        
         self._state = self._load_state()
         
     def _load_state(self) -> Dict:
@@ -100,25 +105,26 @@ class DailyPnLTracker:
         return False
     
     def _get_all_broker_environments(self) -> list:
-        """Get list of all broker/environment combinations"""
-        environments = []
-        
-        # Add Alpaca environments
-        for env in ["paper", "live"]:
-            environments.append(("alpaca", env))
-        
-        # Add Robinhood environment
-        environments.append(("robinhood", "live"))
-        
-        return environments
+        """Get list of current active broker/environment combination only"""
+        # Only return the currently active environment to avoid logging inactive environments
+        return [(self.current_broker, self.current_env)]
     
     def _get_current_balance(self, broker: str, env: str) -> float:
         """Get current balance for a specific broker/environment"""
         try:
-            bankroll_manager = BankrollManager(broker, env)
+            bankroll_manager = BankrollManager(broker=broker, env=env)
             current_balance = bankroll_manager.get_current_bankroll()
+            
+            # Ensure balance is a float for formatting
+            if isinstance(current_balance, str):
+                try:
+                    current_balance = float(current_balance)
+                except ValueError:
+                    logger.warning(f"[DAILY-PNL] Invalid balance format for {broker}:{env}: {current_balance}")
+                    return 0.0
+            
             logger.debug(f"[DAILY-PNL] {broker}:{env} current balance: ${current_balance:.2f}")
-            return current_balance
+            return float(current_balance)
         except Exception as e:
             logger.warning(f"[DAILY-PNL] Error getting balance for {broker}:{env}: {e}")
             return 0.0

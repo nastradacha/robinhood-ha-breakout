@@ -82,7 +82,9 @@ class SlackNotifier:
             self.enabled = False
         else:
             self.enabled = True
-            self.logger.info("Slack notifications enabled")
+            if not hasattr(self.__class__, '_logged_init'):
+                self.logger.info("Slack notifications enabled")
+                self.__class__._logged_init = True
 
     def _send_message(self, payload: Dict[str, Any]) -> bool:
         """Send message to Slack webhook."""

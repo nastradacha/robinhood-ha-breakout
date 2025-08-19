@@ -2,6 +2,30 @@
 
 All notable changes to the Robinhood HA Breakout system will be documented in this file.
 
+## [2.10.0] - 2025-08-19
+
+### Added - System Stability & Efficiency Improvements
+- **Pre-market efficiency gate** added to main trading loop and multi-symbol scanner to skip heavy processing when market is closed
+- **Circuit breaker state initialization fix** resolved missing `_state` attribute error in DrawdownCircuitBreaker
+- **Daily PnL tracker balance format fix** corrected BankrollManager parameter passing to show actual balances instead of environment names
+- **Environment-specific logging** fixed daily PnL tracker to only log active environment instead of all environments
+
+### Enhanced
+- **Trading efficiency** - system now short-circuits expensive operations (data fetching, Heikin-Ashi calculations, LLM calls) when market is closed
+- **Risk control stability** - circuit breaker now properly initializes state and functions without attribute errors
+- **Logging accuracy** - paper trading mode now correctly shows "paper" environment in logs instead of "live"
+- **Resource optimization** - reduced API calls and processing overhead during non-trading hours
+
+### Fixed
+- **DrawdownCircuitBreaker**: Fixed `_state` attribute initialization in constructor
+- **DailyPnLTracker**: Fixed BankrollManager instantiation with proper keyword arguments
+- **Environment detection**: Fixed tracker to only monitor active broker/environment combination
+- **Alpaca options import**: Fixed `OptionLatestQuoteRequest` class name for live quote fetching
+- **Enhanced Slack charts**: Added robust fallback for missing OHLC and Heikin-Ashi columns
+- **Positions file loading**: Added graceful handling for missing or malformed `entry_time` columns
+- **Staleness metrics**: Added Windows-specific permission handling for JSON file writes
+- **Recovery escalation**: Fixed EnhancedSlackIntegration singleton instantiation
+
 ## [2.9.0] - 2025-08-18
 
 ### Added - Weekly Drawdown Protection (US-FA-005)

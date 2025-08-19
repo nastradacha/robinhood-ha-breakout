@@ -307,6 +307,6 @@ def is_market_open() -> Tuple[bool, str]:
     """Convenience function to check if market is open"""
     return market_calendar.is_market_open()
 
-def validate_trading_time() -> Tuple[bool, str]:
+def validate_trading_time(check_time: datetime = None) -> Tuple[bool, str]:
     """Convenience function to validate trading time"""
-    return market_calendar.validate_trading_time()
+    return market_calendar.validate_trading_time(check_time)

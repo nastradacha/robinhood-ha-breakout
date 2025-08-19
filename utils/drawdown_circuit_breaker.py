@@ -38,9 +38,12 @@ class DrawdownCircuitBreaker:
     - Detailed logging and audit trail
     """
     
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_or_path = "config.yaml"):
         """Initialize the circuit breaker with configuration"""
-        self.config = load_config(config_path)
+        if isinstance(config_or_path, dict):
+            self.config = config_or_path
+        else:
+            self.config = load_config(config_or_path)
         self.state_file = "circuit_breaker_state.json"
         self.slack = EnhancedSlackIntegration()
         
@@ -68,7 +71,7 @@ class DrawdownCircuitBreaker:
         self.weekly_tracker = WeeklyPnLTracker() if self.weekly_enabled else None
         
         # Initialize state
-        self.state = self._load_state()
+        self._state = self._load_state()
         
         logger.info(f"[CIRCUIT-BREAKER] Initialized - Daily: {self.enabled} ({self.threshold_percent}%), Weekly: {self.weekly_enabled} ({self.weekly_threshold_percent}%)")
         

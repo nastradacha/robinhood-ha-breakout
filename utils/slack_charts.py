@@ -74,7 +74,8 @@ class SlackChartGenerator:
             "marker_size": 8,  # Larger markers
         }
 
-        logger.info("[CHARTS] Slack chart generator initialized")
+        logger.info("[CHARTS] Slack chart generator initialized") if not hasattr(self.__class__, '_logged_init') else None
+        self.__class__._logged_init = True
 
     def create_breakout_chart(
         self, market_data: pd.DataFrame, analysis: Dict, symbol: str = "SPY"

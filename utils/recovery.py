@@ -180,22 +180,29 @@ class RecoveryManager:
                 
                 backoff.next_attempt()
                 
-                # Attempt operation
-                logger.info(f"[RECOVERY] Attempting {operation_name} (attempt {backoff.current_attempt})")
+                # Only log attempt message if this is a retry (not first attempt)
+                if backoff.current_attempt > 1:
+                    logger.info(f"[RECOVERY] Attempting {operation_name} (attempt {backoff.current_attempt})")
+                
                 result = operation(**kwargs)
                 
-                # Success
+                # Success - only log recovery details if there were actual retries
                 duration = (datetime.now() - start_time).total_seconds()
-                attempt = RecoveryAttempt(
-                    timestamp=start_time,
-                    failure_type=failure_type,
-                    component=component,
-                    attempt_number=backoff.current_attempt,
-                    status=RecoveryStatus.SUCCESS,
-                    details=f"{operation_name} succeeded after {backoff.current_attempt} attempts",
-                    duration_seconds=duration
-                )
-                self.log_recovery_attempt(attempt)
+                if backoff.current_attempt > 1:
+                    # This was a recovery after failures
+                    attempt = RecoveryAttempt(
+                        timestamp=start_time,
+                        failure_type=failure_type,
+                        component=component,
+                        attempt_number=backoff.current_attempt,
+                        status=RecoveryStatus.SUCCESS,
+                        details=f"{operation_name} succeeded after {backoff.current_attempt} attempts",
+                        duration_seconds=duration
+                    )
+                    self.log_recovery_attempt(attempt)
+                else:
+                    # First attempt success - just log debug message
+                    logger.debug(f"[RECOVERY] {operation_name} succeeded on first attempt")
                 
                 return result
                 
@@ -388,7 +395,7 @@ class RecoveryManager:
             # Try to send Slack alert
             from .enhanced_slack import EnhancedSlackIntegration
             
-            slack = EnhancedSlackIntegration({})
+            slack = EnhancedSlackIntegration.get_instance()
             if slack.enabled:
                 alert_msg = (
                     f"🚨 *ESCALATION REQUIRED*\n"

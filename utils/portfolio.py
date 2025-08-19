@@ -179,12 +179,21 @@ class PortfolioManager:
             with open(self.positions_file, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    if row["entry_time"]:  # Skip empty rows
-                        positions.append(Position.from_dict(row))
+                    # Check if row has required columns and is not empty
+                    if row.get("entry_time") and any(row.values()):
+                        try:
+                            positions.append(Position.from_dict(row))
+                        except KeyError as ke:
+                            logger.warning(f"Skipping position row missing column {ke}: {row}")
+                        except Exception as pe:
+                            logger.warning(f"Skipping malformed position row: {pe}")
 
             logger.info(f"Loaded {len(positions)} open positions")
             return positions
 
+        except FileNotFoundError:
+            logger.info("No positions file found, starting with empty positions")
+            return positions
         except Exception as e:
             logger.error(f"Error loading positions: {e}")
             return []

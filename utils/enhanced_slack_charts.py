@@ -70,7 +70,8 @@ class EnhancedSlackChartSender:
         # Enhanced chart configuration for maximum clarity
         self.setup_chart_styling()
         
-        logger.info(f"[ENHANCED-CHARTS] Initialized (enabled: {self.enabled})")
+        logger.info(f"[ENHANCED-CHARTS] Initialized (enabled: {self.enabled})") if not hasattr(self.__class__, '_logged_init') else None
+        self.__class__._logged_init = True
     
     def setup_chart_styling(self):
         """Setup professional chart styling for maximum clarity and mobile optimization."""
@@ -248,8 +249,13 @@ class EnhancedSlackChartSender:
         # Plot enhanced Heikin-Ashi candles with maximum mobile visibility
         for i, (idx, row) in enumerate(ha_data.iterrows()):
             # Use HA columns if available, otherwise fall back to regular OHLC
-            open_val = row.get("HA_Open", row.get("Open", row["open"]))
-            close_val = row.get("HA_Close", row.get("Close", row["close"]))
+            try:
+                open_val = row.get("HA_Open", row.get("Open", row.get("open", 0)))
+                close_val = row.get("HA_Close", row.get("Close", row.get("close", 0)))
+            except KeyError:
+                # Fallback to index-based access if column names fail
+                open_val = row.iloc[0] if len(row) > 0 else 0
+                close_val = row.iloc[3] if len(row) > 3 else open_val
             
             is_bullish = close_val >= open_val
             color = self.colors["bullish"] if is_bullish else self.colors["bearish"]
@@ -267,32 +273,52 @@ class EnhancedSlackChartSender:
             
             # Thicker, more visible wicks - with fallback to regular OHLC
             try:
-                low_val = row["HA_Low"] if "HA_Low" in row else row["Low"]
-                high_val = row["HA_High"] if "HA_High" in row else row["High"]
+                low_val = row.get("HA_Low", row.get("Low", row.get("low", 0)))
+                high_val = row.get("HA_High", row.get("High", row.get("high", 0)))
                 ax.plot([i, i], [low_val, high_val], 
                        color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
-            except KeyError as e:
-                logger.warning(f"[ENHANCED-CHARTS] Missing column {e}, using regular OHLC")
-                ax.plot([i, i], [row["Low"], row["High"]], 
-                       color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
+            except (KeyError, AttributeError):
+                # Fallback to index-based access
+                try:
+                    low_val = row.iloc[2] if len(row) > 2 else open_val
+                    high_val = row.iloc[1] if len(row) > 1 else close_val
+                    ax.plot([i, i], [low_val, high_val], 
+                           color=color, linewidth=3, alpha=0.8, solid_capstyle='round')
+                except Exception:
+                    # Skip wick if all else fails
+                    pass
         
         # Add multiple moving averages for better analysis
         if len(data) >= 20:
-            sma_20 = data["Close"].rolling(20).mean()
-            ax.plot(range(len(sma_20)), sma_20, 
-                   color=self.colors["sma"], 
-                   linewidth=self.chart_config["line_width"],
-                   alpha=0.9, label="SMA(20)", linestyle='-')
+            try:
+                close_col = data.get("Close", data.get("close", data.iloc[:, 3] if len(data.columns) > 3 else None))
+                if close_col is not None:
+                    sma_20 = close_col.rolling(20).mean()
+                    ax.plot(range(len(sma_20)), sma_20, 
+                           color=self.colors["sma"], 
+                           linewidth=self.chart_config["line_width"],
+                           alpha=0.9, label="SMA(20)", linestyle='-')
+            except Exception:
+                pass  # Skip SMA if column access fails
         
         if len(data) >= 50:
-            sma_50 = data["Close"].rolling(50).mean()
-            ax.plot(range(len(sma_50)), sma_50, 
-                   color=self.colors["ema"], 
-                   linewidth=self.chart_config["line_width"] - 1,
-                   alpha=0.8, label="SMA(50)", linestyle='--')
+            try:
+                close_col = data.get("Close", data.get("close", data.iloc[:, 3] if len(data.columns) > 3 else None))
+                if close_col is not None:
+                    sma_50 = close_col.rolling(50).mean()
+                    ax.plot(range(len(sma_50)), sma_50, 
+                           color=self.colors["ema"], 
+                           linewidth=self.chart_config["line_width"] - 1,
+                           alpha=0.8, label="SMA(50)", linestyle='--')
+            except Exception:
+                pass  # Skip SMA if column access fails
         
         # Enhanced current price visualization
-        current_price = analysis.get("current_price", data["Close"].iloc[-1])
+        try:
+            close_col = data.get("Close", data.get("close", data.iloc[:, 3] if len(data.columns) > 3 else None))
+            current_price = analysis.get("current_price", close_col.iloc[-1] if close_col is not None else 0)
+        except Exception:
+            current_price = analysis.get("current_price", 0)
         trend = analysis.get("trend_direction", "NEUTRAL")
         
         # Prominent current price line with glow effect

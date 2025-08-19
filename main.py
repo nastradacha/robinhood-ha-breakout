@@ -194,6 +194,9 @@ def initialize_trade_log(log_file: str):
 # Import shared logging utility
 from utils.logging_utils import log_trade_decision
 
+# Import health monitoring
+from utils.health_monitor import is_system_healthy, perform_system_health_check
+
 
 def format_expiry_display(expiry_date: str, policy: str = None) -> str:
     """Format expiry date for display with policy context.
@@ -811,6 +814,29 @@ def run_once(
         - Logs all activities for audit
     """
 
+    # Step 0: System Health Check - Critical Safety Gate
+    logger.info("[HEALTH] Performing system health check before trading...")
+    health_status = perform_system_health_check()
+    
+    if not is_system_healthy():
+        logger.error(f"[HEALTH] System health check failed: {health_status.overall_status}")
+        logger.error("[HEALTH] Trading blocked due to critical system health issues")
+        
+        # Return early with health failure status
+        return {
+            "analysis": {"current_price": 0, "trend_direction": "UNKNOWN"},
+            "decision": type('obj', (object,), {
+                'decision': 'NO_TRADE', 
+                'confidence': 0.0, 
+                'reason': f'System health check failed: {health_status.overall_status}'
+            })(),
+            "current_bankroll": 0,
+            "position_size": 0,
+            "status": "HEALTH_CHECK_FAILED"
+        }
+    
+    logger.info(f"[HEALTH] System health check passed: {health_status.overall_status}")
+
     # Get current bankroll
     current_bankroll = bankroll_manager.get_current_bankroll()
     logger.info(f"[BANKROLL] Current bankroll: ${current_bankroll:.2f}")
@@ -1100,77 +1126,49 @@ def run_one_shot_mode(
     portfolio_manager,
     llm_client,
     slack_notifier,
-) -> Dict:
-    """Execute a single trading cycle with full workflow."""
-    logger.info("[ONE-SHOT] Starting single trading cycle")
-    
-    try:
-        # Step 1: Get trade decision from run_once
-        result = run_once(
-            config=config,
-            args=args,
-            env_vars=env_vars,
-            bankroll_manager=bankroll_manager,
-            portfolio_manager=portfolio_manager,
-            llm_client=llm_client,
-            slack_notifier=slack_notifier,
+):
+    """Execute the original one-shot trading mode."""
+    logger = logging.getLogger(__name__)
+
+    # Execute one trading cycle
+    result = run_once(
+        config,
+        args,
+        env_vars,
+        bankroll_manager,
+        portfolio_manager,
+        llm_client,
+        slack_notifier,
+    )
+
+    analysis = result["analysis"]
+    decision = result["decision"]
+    current_bankroll = result["current_bankroll"]
+    position_size = result["position_size"]
+
+    # Send market analysis to Slack
+    if slack_notifier:
+        slack_notifier.send_market_analysis(
+            {
+                "trend": analysis["trend_direction"],
+                "current_price": analysis["current_price"],
+                "body_percentage": analysis["candle_body_pct"],
+                "support_count": len(analysis.get("support_levels", [])),
+                "resistance_count": len(analysis.get("resistance_levels", [])),
+            }
         )
-        
-        analysis = result["analysis"]
-        decision = result["decision"]
-        current_bankroll = result["current_bankroll"]
-        position_size = result["position_size"]
-        
-        # Step 2: Send trade decision to Slack
-        if slack_notifier:
-            slack_notifier.send_trade_decision(
-                decision=decision.decision,
-                confidence=decision.confidence,
-                reason=decision.reason or "No specific reason provided",
-                bankroll=current_bankroll,
-                position_size=position_size,
-            )
-        
-        # Step 3: Risk management checks
-        if decision.decision == "NO_TRADE":
-            logger.info("[NO_TRADE] No trade signal - ending session")
-            log_no_trade_decision(config, decision, analysis, current_bankroll)
-            return result
-        
-        # Validate confidence threshold
-        if decision.confidence < config["MIN_CONFIDENCE"]:
-            logger.warning(
-                f"[LOW_CONFIDENCE] Confidence {decision.confidence:.2f} below threshold "
-                f"{config['MIN_CONFIDENCE']:.2f} - blocking trade"
-            )
-            log_blocked_trade(config, decision, analysis, current_bankroll, "LOW_CONFIDENCE")
-            return result
-        
-        # Validate position limits
-        if not portfolio_manager.can_add_position():
-            logger.warning("[POSITION_LIMIT] Maximum positions reached - blocking trade")
-            log_blocked_trade(config, decision, analysis, current_bankroll, "POSITION_LIMIT")
-            return result
-        
-        # Step 3.5: Data quality validation
-        symbol = config.get("SYMBOL", "SPY")
-        data_allowed, data_reason = check_trading_allowed(symbol)
-        if not data_allowed:
-            logger.warning(f"[DATA_VALIDATION] Trade blocked due to data quality: {data_reason}")
-            log_blocked_trade(config, decision, analysis, current_bankroll, "DATA_QUALITY")
-            return result
-        else:
-            logger.info(f"[DATA_VALIDATION] Data quality check passed: {data_reason}")
-        
-        # Step 3.6: Enhanced staleness detection with retry
-        staleness_allowed, staleness_reason = check_symbol_staleness(symbol, with_retry=True)
-        if not staleness_allowed:
-            logger.warning(f"[STALENESS] Trade blocked due to data staleness: {staleness_reason}")
-            log_blocked_trade(config, decision, analysis, current_bankroll, "DATA_STALENESS")
-            return result
-        else:
-            logger.info(f"[STALENESS] Data freshness check passed: {staleness_reason}")
-        
+
+    # Send trade decision to Slack
+    if slack_notifier:
+        slack_notifier.send_trade_decision(
+            decision=decision.decision,
+            confidence=decision.confidence,
+            reason=decision.reason or "No specific reason provided",
+            bankroll=current_bankroll,
+            position_size=position_size,
+        )
+
+    try:
         # Step 4: Execute trade using appropriate broker
         logger.info(f"[TRADE] Executing {decision.decision} trade...")
         trade_result = execute_trade_by_broker(
@@ -1374,6 +1372,40 @@ def main_loop(
         while True:
             loop_count += 1
             cycle_start = datetime.now(tz)
+            
+            # Step 0: Pre-Market Gate - Skip heavy processing if market is closed
+            try:
+                from utils.market_calendar import validate_trading_time
+                import pytz
+                
+                et_tz = pytz.timezone('US/Eastern')
+                current_et = datetime.now(et_tz)
+                can_trade, market_reason = validate_trading_time(current_et)
+                if not can_trade:
+                    logger.info(f"[PRE-OPEN-GATE] Loop {loop_count}: {market_reason} - sleeping {args.interval}m")
+                    time.sleep(args.interval * 60)
+                    continue
+            except Exception as e:
+                # Fallback to basic weekend check if market calendar fails
+                current_et = datetime.now(pytz.timezone('US/Eastern'))
+                if current_et.weekday() >= 5:  # Weekend
+                    logger.info(f"[PRE-OPEN-GATE] Loop {loop_count}: Market closed (weekend) - sleeping {args.interval}m")
+                    time.sleep(args.interval * 60)
+                    continue
+                logger.debug(f"[PRE-OPEN-GATE] Loop {loop_count}: Market calendar check failed, proceeding: {e}")
+
+            # Step 1: System Health Check - Critical Safety Gate
+            logger.info(f"[HEALTH] Loop {loop_count}: Performing system health check...")
+            health_status = perform_system_health_check()
+            
+            if not is_system_healthy():
+                logger.error(f"[HEALTH] System health check failed: {health_status.overall_status}")
+                logger.error("[HEALTH] Trading loop blocked due to critical system health issues")
+                logger.info("[HEALTH] Waiting 60 seconds before next health check...")
+                time.sleep(60)
+                continue
+            
+            logger.info(f"[HEALTH] Loop {loop_count}: System health check passed: {health_status.overall_status}")
 
             # Check for emergency stop file trigger
             kill_switch.check_file_trigger()
@@ -1847,6 +1879,17 @@ def run_multi_symbol_once(
     logger = logging.getLogger(__name__)
 
     try:
+        # Step 0: System Health Check - Critical Safety Gate
+        logger.info("[HEALTH] Performing system health check before multi-symbol scanning...")
+        health_status = perform_system_health_check()
+        
+        if not is_system_healthy():
+            logger.error(f"[HEALTH] System health check failed: {health_status.overall_status}")
+            logger.error("[HEALTH] Multi-symbol scanning blocked due to critical system health issues")
+            return
+        
+        logger.info(f"[HEALTH] System health check passed: {health_status.overall_status}")
+
         # Initialize multi-symbol scanner
         alpaca_env = getattr(args, 'alpaca_env', 'paper')
         scanner = MultiSymbolScanner(config, llm_client, slack_notifier, env=alpaca_env)
@@ -1947,6 +1990,19 @@ def run_multi_symbol_loop(
         while True:
             scan_count += 1
             current_time = datetime.now(tz)  # Use timezone-aware datetime
+            
+            # Step 0: System Health Check - Critical Safety Gate
+            logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: Performing system health check...")
+            health_status = perform_system_health_check()
+            
+            if not is_system_healthy():
+                logger.error(f"[HEALTH] System health check failed: {health_status.overall_status}")
+                logger.error("[HEALTH] Multi-symbol scanning blocked due to critical system health issues")
+                logger.info("[HEALTH] Waiting 60 seconds before next health check...")
+                time.sleep(60)
+                continue
+            
+            logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: System health check passed: {health_status.overall_status}")
 
             # Check if we should end
             if end_time and current_time >= end_time:

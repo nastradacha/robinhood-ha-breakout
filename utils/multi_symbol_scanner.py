@@ -118,13 +118,20 @@ class MultiSymbolScanner:
             )
             self._send_multi_symbol_alert(sorted_opportunities)
         else:
-            # Create summary of rejection reasons
-            reason_summary = self._summarize_rejection_reasons(rejection_reasons)
-            logger.info(
-                f"[MULTI-SYMBOL] No trading opportunities found across all symbols. Reasons: {reason_summary}"
-            )
-            # Send Slack heartbeat with NO_TRADE reasons summary
-            self._send_no_trade_heartbeat(rejection_reasons)
+            # Check if all symbols were blocked by pre-open gate
+            pre_open_blocks = sum(1 for reason in rejection_reasons if "PRE-OPEN-GATE" in reason or "Market closed" in reason or "Trading blocked" in reason)
+            
+            if pre_open_blocks == len(self.symbols):
+                # All symbols blocked by market hours - just log once
+                logger.info("[MULTI-SYMBOL] Pre-market: All symbols blocked (market closed)")
+            else:
+                # Create summary of rejection reasons
+                reason_summary = self._summarize_rejection_reasons(rejection_reasons)
+                logger.info(
+                    f"[MULTI-SYMBOL] No trading opportunities found across all symbols. Reasons: {reason_summary}"
+                )
+                # Send Slack heartbeat with NO_TRADE reasons summary
+                self._send_no_trade_heartbeat(rejection_reasons)
 
         return sorted_opportunities
 
@@ -163,6 +170,26 @@ class MultiSymbolScanner:
             List of opportunities for this symbol
         """
         try:
+            # Early market hours check - skip heavy processing if market is closed
+            from datetime import datetime
+            import pytz
+            
+            try:
+                from .market_calendar import validate_trading_time
+                et_tz = pytz.timezone('US/Eastern')
+                current_et = datetime.now(et_tz)
+                can_trade, market_reason = validate_trading_time(current_et)
+                if not can_trade:
+                    logger.debug(f"[PRE-OPEN-GATE] {symbol}: {market_reason}")
+                    return []
+            except Exception as e:
+                # Fallback to basic weekend check if market calendar fails
+                current_et = datetime.now(pytz.timezone('US/Eastern'))
+                if current_et.weekday() >= 5:  # Weekend
+                    logger.debug(f"[PRE-OPEN-GATE] {symbol}: Market closed (weekend)")
+                    return []
+                logger.debug(f"[PRE-OPEN-GATE] {symbol}: Market calendar check failed, proceeding: {e}")
+
             logger.info(f"[MULTI-SYMBOL] Analyzing {symbol}...")
 
             # Fetch market data

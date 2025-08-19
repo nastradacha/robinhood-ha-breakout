@@ -443,50 +443,67 @@ graph TD
     D --> E[💰 Load Scoped Bankroll & Portfolio]
     E --> F[🎯 Initialize AlpacaOptionsTrader]
     
+    %% Pre-Market Gate (NEW v2.10.0)
+    F --> PRE[🚪 Pre-Market Gate: Market Hours Check]
+    PRE -->|Market Closed| SLEEP[😴 Sleep Until Next Interval]
+    SLEEP --> PRE
+    PRE -->|Market Open| G
+    
+    %% System Health Check (US-FA-009)
+    G[🏥 System Health Check] --> HEALTH{System Healthy?}
+    HEALTH -->|Failed| ALERT[🚨 Critical Health Alert]
+    ALERT --> DISABLE[❌ Disable Trading]
+    DISABLE --> SLEEP
+    HEALTH -->|Passed| H
+    
     %% Multi-Symbol Scanning Loop
-    F --> G[📊 Multi-Symbol Scanner: 19 Symbols]
-    G --> H[📊 Alpaca: Real-time Market Data]
-    H --> I[🔍 Calculate Technical Indicators]
-    I --> J[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
-    J --> K[🧠 Context Memory: Recent Trades]
+    H[📊 Multi-Symbol Scanner: 19 Symbols] --> I[📊 Alpaca: Real-time Market Data]
+    I --> J[🔍 Data Validation & Staleness Check]
+    J --> K[🔍 Calculate Technical Indicators]
+    K --> L[📈 Enhanced Features: VWAP, Delta, OI, Gamma]
+    L --> M[🧠 Context Memory: Recent Trades]
     
     %% AI Decision Engine
-    K --> L[🤖 AI Decision Engine]
-    L --> M[🧠 Advanced Market Analysis]
-    M --> N{Trade Signal?}
+    M --> N[🤖 AI Decision Engine]
+    N --> O[🧠 Advanced Market Analysis]
+    O --> P{Trade Signal?}
     
     %% No Trade Path
-    N -->|NO_TRADE| O[📱 Slack: Heartbeat Message]
-    O --> P[⏰ Wait for Next Interval]
-    P --> G
+    P -->|NO_TRADE| Q[📱 Slack: Heartbeat Message]
+    Q --> R[⏰ Wait for Next Interval]
+    R --> PRE
+    
+    %% Risk Control Gates
+    P -->|CALL/PUT Signal| S[💰 Risk & Position Size Check]
+    S --> T[🛡️ Circuit Breaker Check]
+    T --> U[📊 VIX Position Sizing]
+    U --> V[🎯 Market Hours Validation]
     
     %% Automated Trade Execution Path
-    N -->|CALL/PUT Signal| Q[💰 Risk & Position Size Check]
-    Q --> R[🎯 Market Hours Validation]
-    R --> S[🔍 Find ATM Contract via Alpaca API]
-    S --> T[💰 Calculate Position Size (100x multiplier)]
-    T --> U[🚀 AUTOMATED: Submit Order to Alpaca]
-    U --> V[⏱️ Poll for Fill Status (90s)]
-    V --> W[✅ Order Filled Successfully]
-    W --> X[📱 Slack: Trade Execution Alert]
-    X --> Y[📋 Record Trade in Bankroll]
-    Y --> Z[📈 Add Position to Tracking]
-    Z --> AA[🚀 AUTO-START: Position Monitor]
+    V --> W[🔍 Find ATM Contract via Alpaca API]
+    W --> X[💰 Calculate Position Size (100x multiplier)]
+    X --> Y[🚀 AUTOMATED: Submit Order to Alpaca]
+    Y --> Z[⏱️ Poll for Fill Status (90s)]
+    Z --> AA[✅ Order Filled Successfully]
+    AA --> BB[📱 Slack: Trade Execution Alert]
+    BB --> CC[📋 Record Trade in Bankroll]
+    CC --> DD[📈 Add Position to Tracking]
+    DD --> EE[🚀 AUTO-START: Position Monitor]
     
     %% Automated Position Monitoring
-    AA --> BB[📊 Monitor: Real-time P&L Tracking]
-    BB --> CC{Profit Target Reached?}
-    CC -->|No| DD{Stop Loss Hit?}
-    DD -->|No| EE{End of Day?}
-    EE -->|No| FF[⏰ Wait 2 Minutes]
-    FF --> BB
+    EE --> FF[📊 Monitor: Real-time P&L Tracking]
+    FF --> GG{Profit Target Reached?}
+    GG -->|No| HH{Stop Loss Hit?}
+    HH -->|No| II{End of Day?}
+    II -->|No| JJ[⏰ Wait 2 Minutes]
+    JJ --> FF
     
     %% Automated Exit Management
-    CC -->|15% Profit| GG[📱 Slack: Profit Target Alert]
-    GG --> HH[👤 Interactive Exit Confirmation]
-    HH --> II{User Chooses [S]?}
-    II -->|Yes| JJ[🚀 AUTOMATED: Submit Sell Order]
-    II -->|No| BB
+    GG -->|15% Profit| KK[📱 Slack: Profit Target Alert]
+    KK --> LL[👤 Interactive Exit Confirmation]
+    LL --> MM{User Chooses [S]?}
+    MM -->|Yes| NN[🚀 AUTOMATED: Submit Sell Order]
+    MM -->|No| FF
     JJ --> KK[⏱️ Poll for Sell Fill]
     KK --> LL[✅ Position Closed Successfully]
     LL --> MM[📱 Slack: Exit Confirmation]

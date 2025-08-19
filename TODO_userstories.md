@@ -303,14 +303,24 @@ Enhance data staleness detection with automatic retry mechanisms, exponential ba
 - **Risk**: Metrics file growth over time
 - **Mitigation**: ✅ Automatic cleanup keeping only last 1000 entries
 
-### US-FA-009: System Health Monitoring
-- [ ] **As a trader**, I want continuous monitoring of system health so that trading stops automatically if critical components fail
-- [ ] **Acceptance Criteria:**
-  - Monitor API connectivity (Alpaca, Slack, data sources)
-  - Check disk space and memory usage
-  - Validate configuration file integrity
-  - Auto-disable trading on health check failures
-  - Send critical alerts for system issues
+### US-FA-009: System Health Monitoring ✅ COMPLETED
+- [x] **As a trader**, I want continuous monitoring of system health so that trading stops automatically if critical components fail
+- [x] **Acceptance Criteria:**
+  - ✅ Monitor API connectivity (Alpaca, Slack, data sources)
+  - ✅ Check disk space and memory usage
+  - ✅ Validate configuration file integrity
+  - ✅ Auto-disable trading on health check failures
+  - ✅ Send critical alerts for system issues
+
+**Implementation Details:**
+- `utils/health_monitor.py` - Complete SystemHealthMonitor class with singleton pattern
+- Comprehensive health checks: API connectivity, system resources, config integrity, data sources, process health
+- Automatic trading disable on health failures with configurable thresholds
+- Slack alert integration with cooldown management
+- Health metrics logging and persistence
+- Integration in main.py: health checks before every trading cycle and multi-symbol scan
+- Comprehensive test suite: `tests/test_health_monitoring.py` with 100% coverage
+- Convenience functions: `perform_system_health_check()`, `is_system_healthy()`, `get_health_summary()`
 
 ---
 

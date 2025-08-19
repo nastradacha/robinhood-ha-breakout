@@ -88,15 +88,27 @@ class DataValidator:
     """
     Cross-source data validation system for market data quality assurance
     """
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, config: Dict = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, config: Dict = None):
-        """Initialize data validator with configuration"""
+        """Initialize data validator with configuration (singleton)"""
+        if self._initialized:
+            return
+            
         self.config = config or {}
         
-        # Validation thresholds
+        # Configuration
+        self.validation_enabled = self.config.get("DATA_VALIDATION_ENABLED", True)
         self.max_discrepancy_pct = self.config.get("DATA_MAX_DISCREPANCY_PCT", 1.0)
         self.max_staleness_seconds = self.config.get("DATA_MAX_STALENESS_SECONDS", 120)
-        self.validation_enabled = self.config.get("DATA_VALIDATION_ENABLED", True)
+        self.prioritize_alpaca = self.config.get("DATA_PRIORITIZE_ALPACA", True)
+        self.alert_on_discrepancy = self.config.get("DATA_ALERT_ON_DISCREPANCY", True)
         self.require_validation = self.config.get("DATA_REQUIRE_VALIDATION", False)
         
         # Initialize clients
@@ -105,15 +117,18 @@ class DataValidator:
         
         try:
             self.alpaca_client = AlpacaClient()
-            logger.info("[DATA-VALIDATION] Alpaca client initialized")
+            logger.debug("[DATA-VALIDATION] Alpaca client initialized")
         except Exception as e:
             logger.warning(f"[DATA-VALIDATION] Alpaca client unavailable: {e}")
         
         try:
             self.slack = EnhancedSlackIntegration()
-            logger.info("[DATA-VALIDATION] Slack integration initialized")
+            logger.debug("[DATA-VALIDATION] Slack integration initialized")
         except Exception as e:
             logger.warning(f"[DATA-VALIDATION] Slack unavailable: {e}")
+            
+        self._initialized = True
+        logger.info(f"[DATA-VALIDATION] Initialized (enabled: {self.validation_enabled})")
     
     def get_alpaca_price(self, symbol: str) -> Optional[DataPoint]:
         """Get current price from Alpaca API"""
@@ -158,11 +173,36 @@ class DataValidator:
         return None
     
     def calculate_discrepancy(self, primary: DataPoint, validation: DataPoint) -> float:
-        """Calculate percentage discrepancy between two data points"""
-        if primary.value == 0:
+        """Calculate percentage discrepancy between two data points using max denominator"""
+        if primary.value == 0 or validation.value == 0:
             return float('inf')
         
-        return abs(primary.value - validation.value) / primary.value * 100.0
+        # Use max(p1, p2) as denominator for more accurate discrepancy calculation
+        return abs(primary.value - validation.value) / max(primary.value, validation.value) * 100.0
+    
+    def detect_split_mismatch(self, primary: DataPoint, validation: DataPoint) -> Tuple[bool, str]:
+        """Detect potential stock split mismatches between data sources"""
+        if not primary or not validation or primary.value == 0 or validation.value == 0:
+            return False, ""
+        
+        # Calculate ratio between prices
+        ratio = max(primary.value, validation.value) / min(primary.value, validation.value)
+        
+        # Common split ratios: 2:1, 3:1, 4:1, 5:1, 10:1, etc.
+        common_splits = [2.0, 3.0, 4.0, 5.0, 10.0, 20.0]
+        
+        for split_ratio in common_splits:
+            # Allow 5% tolerance for split detection
+            if abs(ratio - split_ratio) / split_ratio < 0.05:
+                return True, f"SUSPECT_SPLIT_MISMATCH ({split_ratio}:1 ratio)"
+        
+        # Check for reverse splits (fractional ratios)
+        for split_ratio in common_splits:
+            reverse_ratio = 1.0 / split_ratio
+            if abs(ratio - reverse_ratio) / reverse_ratio < 0.05:
+                return True, f"SUSPECT_REVERSE_SPLIT ({split_ratio}:1 ratio)"
+        
+        return False, ""
     
     def validate_symbol_data(self, symbol: str) -> ValidationResult:
         """
@@ -199,11 +239,19 @@ class DataValidator:
         
         # Cross-source validation if both sources available
         discrepancy_pct = None
+        split_detected = False
+        split_reason = ""
+        
         if validation_data and not validation_data.is_stale(300):  # Allow 5min for Yahoo
             discrepancy_pct = self.calculate_discrepancy(primary_data, validation_data)
+            split_detected, split_reason = self.detect_split_mismatch(primary_data, validation_data)
             
-            if discrepancy_pct > self.max_discrepancy_pct:
-                issues.append(f"Price discrepancy {discrepancy_pct:.2f}% exceeds threshold {self.max_discrepancy_pct}%")
+            if split_detected:
+                issues.append(f"Potential split mismatch detected: {split_reason}")
+            elif discrepancy_pct > 10.0:  # Major discrepancy threshold
+                issues.append(f"Major price discrepancy {discrepancy_pct:.1f}% - possible data error")
+            elif discrepancy_pct > 2.0:  # Attention threshold
+                issues.append(f"Price discrepancy {discrepancy_pct:.1f}% requires attention")
         
         # Determine quality and recommendation
         quality, recommendation = self._assess_quality(primary_data, validation_data, discrepancy_pct, issues)
@@ -236,6 +284,16 @@ class DataValidator:
         if not primary:
             return DataQuality.CRITICAL, "BLOCK_TRADING"
         
+        # Check for split mismatch - always pause trading
+        split_issues = [issue for issue in issues if "split mismatch" in issue.lower()]
+        if split_issues:
+            return DataQuality.POOR, "PAUSE_SYMBOL"
+        
+        # Check for major discrepancies (>10%)
+        major_discrepancy = [issue for issue in issues if "Major price discrepancy" in issue]
+        if major_discrepancy:
+            return DataQuality.POOR, "PAUSE_SYMBOL"
+        
         # Poor: Stale primary data
         if primary.is_stale(self.max_staleness_seconds):
             if self.require_validation:
@@ -243,7 +301,12 @@ class DataValidator:
             else:
                 return DataQuality.POOR, "PROCEED_WITH_CAUTION"
         
-        # Poor: High discrepancy between sources
+        # Attention: Moderate discrepancy (2-10%)
+        attention_issues = [issue for issue in issues if "requires attention" in issue]
+        if attention_issues:
+            return DataQuality.ACCEPTABLE, "ATTENTION"
+        
+        # Poor: High discrepancy between sources (legacy check)
         if discrepancy_pct and discrepancy_pct > self.max_discrepancy_pct:
             if self.require_validation:
                 return DataQuality.POOR, "REQUIRE_MANUAL_APPROVAL"
@@ -251,7 +314,7 @@ class DataValidator:
                 return DataQuality.ACCEPTABLE, "PROCEED_WITH_CAUTION"
         
         # Excellent: Real-time primary + validated
-        if primary.source == "alpaca" and validation and discrepancy_pct is not None and discrepancy_pct <= self.max_discrepancy_pct:
+        if primary.source == "alpaca" and validation and discrepancy_pct is not None and discrepancy_pct <= 2.0:
             return DataQuality.EXCELLENT, "PROCEED_NORMAL"
         
         # Good: Real-time primary, no validation
@@ -262,20 +325,36 @@ class DataValidator:
         return DataQuality.ACCEPTABLE, "PROCEED_WITH_CAUTION"
     
     def _log_validation_result(self, result: ValidationResult):
-        """Log validation result with appropriate level"""
-        primary_info = f"{result.primary_data.source}:${result.primary_data.value:.2f}" if result.primary_data else "None"
-        validation_info = f"{result.validation_data.source}:${result.validation_data.value:.2f}" if result.validation_data else "None"
-        discrepancy_info = f"{result.discrepancy_pct:.2f}%" if result.discrepancy_pct else "N/A"
+        """Log validation result with clear, actionable information"""
+        if not result.primary_data:
+            logger.error(f"[DATA-VALIDATION] {result.symbol}: No data available → BLOCK_TRADING")
+            return
         
-        log_msg = (f"[DATA-VALIDATION] {result.symbol}: Quality={result.quality.value.upper()}, "
-                  f"Primary={primary_info}, Validation={validation_info}, "
-                  f"Discrepancy={discrepancy_info}, Recommendation={result.recommendation}")
+        # Build price comparison string
+        if result.validation_data:
+            price_comparison = f"{result.primary_data.value:.2f} vs {result.validation_data.value:.2f}"
+            if result.discrepancy_pct:
+                price_comparison += f" (diff {result.discrepancy_pct:.1f}%)"
+        else:
+            price_comparison = f"{result.primary_data.value:.2f} (no validation data)"
         
-        if result.quality in [DataQuality.CRITICAL, DataQuality.POOR]:
+        # Create single actionable log message
+        log_msg = f"[DATA-VALIDATION] {result.symbol}: {price_comparison} → {result.recommendation}"
+        
+        # Add specific issue context
+        if result.issues:
+            issue_context = result.issues[0]  # Show most important issue
+            if "split mismatch" in issue_context.lower():
+                log_msg += f" ({issue_context})"
+            elif "Major price discrepancy" in issue_context:
+                log_msg += f" (major discrepancy)"
+            elif "requires attention" in issue_context:
+                log_msg += f" (attention needed)"
+        
+        # Log at appropriate level
+        if result.recommendation in ["BLOCK_TRADING", "PAUSE_SYMBOL"]:
             logger.error(log_msg)
-            if result.issues:
-                logger.error(f"[DATA-VALIDATION] Issues: {', '.join(result.issues)}")
-        elif result.quality == DataQuality.ACCEPTABLE:
+        elif result.recommendation in ["ATTENTION", "PROCEED_WITH_CAUTION"]:
             logger.warning(log_msg)
         else:
             logger.info(log_msg)
@@ -344,10 +423,12 @@ class DataValidator:
         
         result = self.validate_symbol_data(symbol)
         
-        if result.recommendation == "BLOCK_TRADING":
-            return False, f"Data quality too poor: {', '.join(result.issues)}"
+        if result.recommendation in ["BLOCK_TRADING", "PAUSE_SYMBOL"]:
+            return False, f"Trading blocked: {', '.join(result.issues)}"
         elif result.recommendation == "REQUIRE_MANUAL_APPROVAL":
-            return False, f"Manual approval required: {result.discrepancy_pct:.2f}% discrepancy"
+            return False, f"Manual approval required: {result.discrepancy_pct:.1f}% discrepancy"
+        elif result.recommendation == "ATTENTION":
+            return False, f"Data requires attention: {result.discrepancy_pct:.1f}% discrepancy"
         else:
             return True, f"Data quality acceptable ({result.quality.value})"
 

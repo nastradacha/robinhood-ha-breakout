@@ -64,17 +64,21 @@ class RetryConfig:
 
 
 class StalenessMonitor:
-    """
-    Enhanced real-time data staleness detection and monitoring system
-    """
+    """Monitor data staleness across multiple symbols and sources"""
+    _instance = None
+    _initialized = False
+    _json_error_logged = False
+    
+    def __new__(cls, config: Dict = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, config: Dict = None):
-        """
-        Initialize staleness monitor with configuration
-        
-        Args:
-            config: Configuration dictionary with staleness settings
-        """
+        """Initialize staleness monitor with configuration (singleton)"""
+        if self._initialized:
+            return
+            
         if config is None:
             from .llm import load_config
             config = load_config()
@@ -111,7 +115,8 @@ class StalenessMonitor:
         # Ensure metrics directory exists
         self.metrics_file.parent.mkdir(exist_ok=True)
         
-        logger.info(f"[STALENESS] Monitor initialized - Fresh: {self.fresh_threshold}s, "
+        self._initialized = True
+        logger.info(f"[STALENESS] Initialized - Fresh: {self.fresh_threshold}s, "
                    f"Acceptable: {self.acceptable_threshold}s, Stale: {self.stale_threshold}s")
     
     def classify_staleness(self, age_seconds: float) -> StalenessLevel:
@@ -406,14 +411,24 @@ class StalenessMonitor:
             logger.error(f"[STALENESS] Failed to send alert: {e}")
     
     def _log_metrics(self, metrics: StalenessMetrics):
-        """Log staleness metrics to file"""
+        """Log staleness metrics to file with JSON error protection"""
         try:
-            # Load existing metrics
+            # Load existing metrics with robust error handling
+            all_metrics = []
             if self.metrics_file.exists():
-                with open(self.metrics_file, 'r') as f:
-                    all_metrics = json.load(f)
-            else:
-                all_metrics = []
+                try:
+                    with open(self.metrics_file, 'r') as f:
+                        content = f.read().strip()
+                        if content:  # Check if file has content
+                            all_metrics = json.loads(content)
+                        else:
+                            all_metrics = []  # Empty file, start fresh
+                except (json.JSONDecodeError, ValueError) as json_err:
+                    # Corrupted JSON file - reinitialize with empty list
+                    if not self._json_error_logged:
+                        logger.warning(f"[STALENESS] Corrupted metrics file, reinitializing: {json_err}")
+                        self.__class__._json_error_logged = True
+                    all_metrics = []
             
             # Add new metrics entry
             metrics_dict = {
@@ -434,12 +449,29 @@ class StalenessMonitor:
             if len(all_metrics) > 1000:
                 all_metrics = all_metrics[-1000:]
             
-            # Write back to file
-            with open(self.metrics_file, 'w') as f:
-                json.dump(all_metrics, f, indent=2)
+            # Write back to file with atomic operation
+            temp_file = self.metrics_file.with_suffix('.tmp')
+            try:
+                with open(temp_file, 'w') as f:
+                    json.dump(all_metrics, f, indent=2)
+                
+                # Atomic rename to prevent corruption during write
+                temp_file.replace(self.metrics_file)
+            except PermissionError:
+                # Handle Windows permission issues with temp files
+                try:
+                    if temp_file.exists():
+                        temp_file.unlink()
+                except:
+                    pass
+                # Fallback to direct write (less safe but functional)
+                with open(self.metrics_file, 'w') as f:
+                    json.dump(all_metrics, f, indent=2)
                 
         except Exception as e:
-            logger.error(f"[STALENESS] Failed to log metrics: {e}")
+            if not self._json_error_logged:
+                logger.error(f"[STALENESS] Failed to log metrics: {e}")
+                self.__class__._json_error_logged = True
 
 
 # Convenience functions for easy integration

@@ -34,9 +34,19 @@ class VIXMonitor:
     Fetches and caches VIX data to detect high volatility periods.
     Blocks new trading positions when VIX exceeds configured threshold.
     """
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, config_path: str = "config.yaml"):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self, config_path: str = "config.yaml"):
-        """Initialize VIX monitor with configuration."""
+        """Initialize VIX monitor with configuration (singleton)"""
+        if self._initialized:
+            return
+            
         self.config = self._load_config(config_path)
         self.vix_threshold = self.config.get('VIX_SPIKE_THRESHOLD', 30.0)
         self.cache_minutes = self.config.get('VIX_CACHE_MINUTES', 5)
@@ -45,8 +55,8 @@ class VIXMonitor:
         self._cached_vix: Optional[VIXData] = None
         self._last_spike_state = False  # Track spike state changes for alerts
         
-        logger.info(f"[VIX-MONITOR] Initialized: threshold={self.vix_threshold}, "
-                   f"cache={self.cache_minutes}min, enabled={self.enabled}")
+        self._initialized = True
+        logger.info(f"[VIX-MONITOR] Initialized (enabled: {self.enabled}, threshold: {self.vix_threshold})")
     
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from YAML file."""
@@ -81,7 +91,7 @@ class VIXMonitor:
         
         # Fetch fresh VIX data
         try:
-            logger.info("[VIX-MONITOR] Fetching fresh VIX data...")
+            logger.debug("[VIX-MONITOR] Fetching fresh VIX data...")
             vix_ticker = yf.Ticker("^VIX")
             vix_info = vix_ticker.history(period="1d", interval="1m")
             

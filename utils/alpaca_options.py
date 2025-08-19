@@ -692,7 +692,7 @@ class AlpacaOptionsTrader:
         from .recovery import retry_with_recovery
         
         def _get_quote():
-            request = LatestOptionQuoteRequest(symbol_or_symbols=symbol)
+            request = OptionLatestQuoteRequest(symbol_or_symbols=symbol)
             quotes = self.data_client.get_option_latest_quote(request)
             
             if symbol in quotes:

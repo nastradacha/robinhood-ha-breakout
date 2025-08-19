@@ -1,5 +1,5 @@
 {
-  "updated": "2025-08-18T15:35:57.321028",
+  "updated": "2025-08-19T09:54:04.372916",
   "holidays": {},
   "early_closes": {},
   "2025": {
@@ -19,25 +19,6 @@
       "2025-07-03": "Day before Independence Day",
       "2025-11-29": "Day after Thanksgiving",
       "2025-12-24": "Christmas Eve"
-    }
-  },
-  "2024": {
-    "holidays": {
-      "2024-01-01": "New Year's Day",
-      "2024-01-15": "Martin Luther King Jr. Day",
-      "2024-02-19": "Presidents' Day",
-      "2024-04-07": "Good Friday",
-      "2024-05-27": "Memorial Day",
-      "2024-06-19": "Juneteenth",
-      "2024-07-04": "Independence Day",
-      "2024-09-02": "Labor Day",
-      "2024-11-28": "Thanksgiving",
-      "2024-12-25": "Christmas Day"
-    },
-    "early_closes": {
-      "2024-07-03": "Day before Independence Day",
-      "2024-11-29": "Day after Thanksgiving",
-      "2024-12-24": "Christmas Eve"
     }
   }
 }
