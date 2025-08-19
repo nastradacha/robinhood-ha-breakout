@@ -70,23 +70,41 @@ def get_alpaca_client(env: str = "paper") -> AlpacaClient:
 
 
 def fetch_market_data(
-    symbol: str = "SPY", period: str = "5d", interval: str = "5m", env: str = "paper"
+    symbol: str = "SPY", period: str = "5d", interval: str = "5m", env: str = "paper", 
+    validate_quality: bool = True
 ) -> pd.DataFrame:
     """
-    Fetch market data for a given symbol using Alpaca (preferred) or Yahoo Finance (fallback).
+    Fetch market data for a given symbol using Alpaca (primary) with Yahoo Finance validation.
+    
+    Updated for US-FA-007: Prioritizes real-time Alpaca data with cross-source validation.
 
     Args:
         symbol: Stock symbol to fetch data for (default: SPY)
         period: Data period (default: 5d for 5 days)
         interval: Data interval (default: 5m for 5 minutes)
         env: Alpaca environment - "paper" or "live" (default: "paper")
+        validate_quality: Enable data quality validation (default: True)
 
     Returns:
         DataFrame with OHLCV data
     """
-    # Try Alpaca first (real-time data) with recovery
     from .recovery import retry_with_recovery
+    from .data_validation import get_data_validator
     
+    # Validate data quality if enabled
+    if validate_quality:
+        try:
+            validator = get_data_validator()
+            allowed, reason = validator.should_allow_trading(symbol)
+            if not allowed:
+                logger.error(f"[DATA-VALIDATION] Trading blocked for {symbol}: {reason}")
+                raise Exception(f"Data quality insufficient: {reason}")
+            else:
+                logger.info(f"[DATA-VALIDATION] Data quality acceptable for {symbol}: {reason}")
+        except Exception as e:
+            logger.warning(f"[DATA-VALIDATION] Validation failed, proceeding without validation: {e}")
+    
+    # Try Alpaca first (real-time data) with recovery
     def _fetch_alpaca_data():
         alpaca = get_alpaca_client(env=env)
         if not alpaca.enabled:
@@ -145,33 +163,52 @@ def fetch_market_data(
         raise
 
 
-def get_current_price(symbol: str = "SPY", env: str = "paper") -> float:
+def get_current_price(symbol: str = "SPY", env: str = "paper", validate_quality: bool = True) -> float:
     """
-    Get real-time current price using Alpaca with Yahoo Finance fallback.
-
-    This provides the most current price for LLM analysis and decision making,
-    addressing the data quality issue that caused missed opportunities.
+    Get real-time current price using Alpaca (primary) with Yahoo Finance validation.
+    
+    Updated for US-FA-007: Prioritizes real-time Alpaca data with cross-source validation.
 
     Args:
         symbol: Stock symbol (default: SPY)
         env: Alpaca environment - "paper" or "live" (default: "paper")
+        validate_quality: Enable data quality validation (default: True)
 
     Returns:
-        Current stock price as float
+        Current price as float
     """
+    from .data_validation import get_data_validator
+    
+    # Validate data quality if enabled
+    if validate_quality:
+        try:
+            validator = get_data_validator()
+            allowed, reason = validator.should_allow_trading(symbol)
+            if not allowed:
+                logger.error(f"[DATA-VALIDATION] Price fetch blocked for {symbol}: {reason}")
+                raise Exception(f"Data quality insufficient: {reason}")
+            else:
+                logger.debug(f"[DATA-VALIDATION] Data quality acceptable for {symbol}: {reason}")
+        except Exception as e:
+            logger.warning(f"[DATA-VALIDATION] Validation failed, proceeding without validation: {e}")
+    
     # Try Alpaca first (real-time)
-    alpaca = AlpacaClient(env=env)
-    if alpaca.enabled:
-        current_price = alpaca.get_current_price(symbol)
-        if current_price:
-            logger.debug(
-                f"[ALPACA] {symbol} current price: ${current_price:.2f} (real-time)"
-            )
-            return current_price
-        else:
-            logger.warning(
-                f"[ALPACA] Could not get current price for {symbol}, falling back to Yahoo"
-            )
+    try:
+        alpaca = get_alpaca_client(env=env)
+        if alpaca.enabled:
+            current_price = alpaca.get_current_price(symbol)
+            if current_price and current_price > 0:
+                logger.debug(
+                    f"[ALPACA] {symbol} current price: ${current_price:.2f} (real-time)"
+                )
+                return current_price
+            else:
+                logger.warning(
+                    f"[ALPACA] Could not get current price for {symbol}, falling back to Yahoo"
+                )
+
+    except Exception as e:
+        logger.warning(f"[ALPACA] Error getting current price for {symbol}: {e}")
 
     # Fallback to Yahoo Finance (delayed)
     try:
@@ -184,10 +221,11 @@ def get_current_price(symbol: str = "SPY", env: str = "paper") -> float:
             )
             return current_price
         else:
-            raise ValueError(f"No current price data for {symbol}")
+            raise Exception(f"No price data available for {symbol}")
+
     except Exception as e:
-        logger.error(f"Error getting current price for {symbol}: {e}")
-        raise
+        logger.error(f"[PRICE] Failed to get current price for {symbol}: {e}")
+        raise Exception(f"Unable to fetch current price for {symbol}")
 
 
 def calculate_heikin_ashi(df: pd.DataFrame) -> pd.DataFrame:

@@ -212,4 +212,10 @@ VIX_MODERATE_REDUCTION: 0.5                    # Position size multiplier for mo
 VIX_HIGH_REDUCTION: 0.25                       # Position size multiplier for high volatility
 VIX_ALERT_ON_REGIME_CHANGE: true               # Send Slack alerts when volatility regime changes
 
-# CHROME_MAJOR: 138
+# Cross-Source Data Validation Configuration (US-FA-007)
+DATA_VALIDATION_ENABLED: true
+DATA_MAX_DISCREPANCY_PCT: 1.0      # Maximum allowed price discrepancy between sources (%)
+DATA_MAX_STALENESS_SECONDS: 120    # Maximum data age before considered stale (seconds)
+DATA_REQUIRE_VALIDATION: false     # Require cross-source validation before trading
+DATA_PRIORITIZE_ALPACA: true       # Use Alpaca as primary source, Yahoo as validation
+DATA_ALERT_ON_DISCREPANCY: true    # Send Slack alerts for data quality issues

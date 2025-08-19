@@ -22,6 +22,7 @@ import time
 
 from .data import fetch_market_data, calculate_heikin_ashi, analyze_breakout_pattern
 from .llm import LLMClient, TradeDecision
+from .data_validation import check_trading_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,14 @@ class MultiSymbolScanner:
             market_data = self._prepare_market_data(
                 symbol, df, ha_df, breakout_analysis
             )
+
+            # Data quality validation gate
+            data_allowed, data_reason = check_trading_allowed(symbol)
+            if not data_allowed:
+                logger.warning(f"[MULTI-SYMBOL] {symbol}: Data validation blocked trade - {data_reason}")
+                return []
+            else:
+                logger.info(f"[MULTI-SYMBOL] {symbol}: Data quality check passed - {data_reason}")
 
             # Pre-LLM hard gate: check for obvious NO_TRADE conditions
             proceed, gate_reason = self._pre_llm_hard_gate(market_data, self.config)
