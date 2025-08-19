@@ -12,7 +12,7 @@ The Robinhood HA Breakout system is a **fully automated trading platform** that 
 
 ```
 📊 Multi-Symbol Scanning → 🧠 AI Analysis → 🚀 Automated Execution → 📊 Real-Time Monitoring → 💰 Automatic Profit-Taking
-    (19 Symbols)           (Advanced ML)      (Alpaca API)           (Live P&L)            (15% Targets)
+    19 Symbols             Advanced ML        Alpaca API             Live P&L              15% Targets
 ```
 
 **Current v2.13.0**: A **fully automated institutional-grade trading system** with complete end-to-end automation and comprehensive dry run validation:
@@ -39,20 +39,20 @@ The system operates as a cohesive automated trading platform with specialized co
 
 ---
 
-## 🏢 System Components (The "Departments")
+## 🏢 System Components - The Departments
 
 ### 1. 📈 **Data Department** (`utils/data.py` + `utils/alpaca_client.py`)
 **What it does**: Collects and prepares market information with professional-grade data quality
 
 **Think of it as**: Your research team with access to Wall Street-quality data feeds
-- **Primary**: Real-time data from Alpaca Markets (professional-grade)
-- **Fallback**: Yahoo Finance data (15-20 minute delays)
+- **Primary**: Real-time data from Alpaca Markets professional-grade
+- **Fallback**: Yahoo Finance data 15-20 minute delays
 - Converts regular price charts to smoother "Heikin-Ashi" charts
-- Finds important price levels (support and resistance)
+- Finds important price levels support and resistance
 - Packages everything into a neat report for the AI
 
 **Key Functions**:
-- `fetch_market_data()`: Downloads real-time stock prices (Alpaca → Yahoo fallback)
+- `fetch_market_data()`: Downloads real-time stock prices Alpaca to Yahoo fallback
 - `get_current_price()`: Gets real-time current price for analysis
 - `calculate_heikin_ashi()`: Makes charts easier to read
 - `analyze_breakout_pattern()`: Identifies trading opportunities
@@ -76,7 +76,7 @@ The system operates as a cohesive automated trading platform with specialized co
 **Key Functions**:
 - `scan_all_symbols()`: Coordinates multi-symbol analysis
 - `_prioritize_opportunities()`: Ranks opportunities by quality
-- `_calculate_priority_score()`: Scores based on confidence + technical factors
+- `_calculate_priority_score()`: Scores based on confidence plus technical factors
 - `_send_multi_symbol_alert()`: Enhanced Slack notifications with opportunity ranking
 
 ### 3. 🧠 **Enhanced AI Department** (`utils/llm.py` + `utils/data.py`) **ENHANCED v2.2.0!**
@@ -93,7 +93,7 @@ The system operates as a cohesive automated trading platform with specialized co
 **1. 📊 VWAP Deviation Analysis** (`build_llm_features()`):
 - **What**: Real-time deviation from 5-minute volume-weighted average price
 - **Why**: Identifies institutional buying/selling pressure
-- **How**: `((current_price - vwap) / vwap) * 100`
+- **How**: current_price minus vwap divided by vwap times 100
 - **Insight**: Positive = bullish momentum, negative = bearish pressure
 
 **2. 🎯 ATM Delta Calculation** (Black-Scholes):
@@ -106,7 +106,7 @@ The system operates as a cohesive automated trading platform with specialized co
 - **What**: Liquidity analysis for trade execution quality
 - **Why**: Prevents poor fills on illiquid options
 - **How**: Analyzes open interest for ATM strikes
-- **Insight**: High OI (10,000+) = tight spreads, easy entry/exit
+- **Insight**: High OI 10000+ equals tight spreads easy entry exit
 
 **4. 🏛️ Dealer Gamma Intelligence** (SpotGamma):
 - **What**: Market maker positioning and hedging flows
@@ -164,8 +164,8 @@ positions_robinhood_live.csv   # Robinhood positions
 ```
 
 **Key Functions**:
-- `AlpacaClient(env="paper"|"live")`: Environment-aware Alpaca client
-- `get_scoped_bankroll_path()`: Returns broker/environment-specific ledger path
+- `AlpacaClient(env=paper or live)`: Environment-aware Alpaca client
+- `get_scoped_bankroll_path()`: Returns broker environment-specific ledger path
 - `get_scoped_trade_history_path()`: Returns scoped trade history file path
 - `ensure_scoped_files_exist()`: Creates scoped files with proper headers
 - `migrate_legacy_files()`: Moves old files to scoped format
@@ -193,10 +193,10 @@ positions_robinhood_live.csv   # Robinhood positions
 
 **Key Functions**:
 - `BankrollManager(broker, env)`: Environment-aware bankroll management
-- `ledger_id()`: Returns "alpaca:paper" or "robinhood:live" identifier
+- `ledger_id()`: Returns alpaca paper or robinhood live identifier
 - `get_current_bankroll()`: Environment-specific capital tracking
 - `calculate_position_size()`: Risk management per environment
-- `update_bankroll()`: Records profits/losses to correct ledger
+- `update_bankroll()`: Records profits losses to correct ledger
 
 ### 4. 🌐 **Automation Department** (`utils/browser.py`)
 **What it does**: Controls your web browser to interact with Robinhood
@@ -231,12 +231,12 @@ positions_robinhood_live.csv   # Robinhood positions
 - **Chart Attachments**: Automatic breakout charts attached to trade alerts
 
 **Key Functions**:
-- `send_trade_decision()`: "Found a trade opportunity!" (with charts)
-- `send_multi_symbol_alert()`: "Scanned 3 symbols, found 2 opportunities"
-- `send_breakout_alert_with_chart()`: Trade alert + technical analysis chart
-- `send_heartbeat()`: "Still watching the market, no trades yet"
-- `send_position_alert()`: "Your SPY position is up 15% - consider selling!"
-- `send_error_alert()`: "Something went wrong, check the logs"
+- `send_trade_decision()`: Found a trade opportunity with charts
+- `send_multi_symbol_alert()`: Scanned 3 symbols found 2 opportunities
+- `send_breakout_alert_with_chart()`: Trade alert plus technical analysis chart
+- `send_heartbeat()`: Still watching the market no trades yet
+- `send_position_alert()`: Your SPY position is up 15% consider selling
+- `send_error_alert()`: Something went wrong check the logs
 
 ### 6. 📊 **Portfolio Department** (`utils/portfolio.py`)
 **What it does**: Tracks your open positions and manages closing trades
@@ -486,7 +486,7 @@ graph TD
     V --> W[🔍 Find ATM Contract via Alpaca API]
     W --> X[💰 Calculate Position Size 100x multiplier]
     X --> Y[🚀 AUTOMATED: Submit Order to Alpaca]
-    Y --> Z[⏱️ Poll for Fill Status (90s)]
+    Y --> Z[⏱️ Poll for Fill Status 90s]
     Z --> AA[✅ Order Filled Successfully]
     AA --> BB[📱 Slack: Trade Execution Alert]
     BB --> CC[📋 Record Trade in Bankroll]
