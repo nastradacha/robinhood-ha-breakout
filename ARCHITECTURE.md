@@ -504,35 +504,35 @@ graph TD
     %% Automated Exit Management
     GG -->|15% Profit| KK[📱 Slack: Profit Target Alert]
     KK --> LL[👤 Interactive Exit Confirmation]
-    LL --> MM{User Chooses [S]?}
+    LL --> MM{User Chooses S?}
     MM -->|Yes| NN[🚀 AUTOMATED: Submit Sell Order]
     MM -->|No| FF
-    JJ --> KK[⏱️ Poll for Sell Fill]
-    KK --> LL[✅ Position Closed Successfully]
-    LL --> MM[📱 Slack: Exit Confirmation]
-    MM --> NN[📋 Update Bankroll with P&L]
-    NN --> OO[🗑️ Remove from Position Tracking]
+    NN --> PP[⏱️ Poll for Sell Fill]
+    PP --> QQ[✅ Position Closed Successfully]
+    QQ --> RR[📱 Slack: Exit Confirmation]
+    RR --> SS[📋 Update Bankroll with P&L]
+    SS --> OO[🗑️ Remove from Position Tracking]
     
     %% Stop Loss & EOD Management
-    DD -->|25% Loss| PP[🚨 Slack: Stop Loss Alert]
-    PP --> HH
-    EE -->|3:45 PM ET| QQ[⚠️ Slack: EOD Warning]
-    QQ --> HH
+    DD -->|25% Loss| TT[🚨 Slack: Stop Loss Alert]
+    TT --> HH
+    EE -->|3:45 PM ET| UU[⚠️ Slack: EOD Warning]
+    UU --> HH
     
     %% Transaction Reconciliation
-    OO --> RR[🔄 Alpaca Transaction Sync]
-    RR --> SS[✅ Verify Trade Accuracy]
-    SS --> TT[📊 Update Performance Metrics]
-    TT --> UU[🏁 End of Trade Cycle]
-    UU --> P
+    OO --> VV[🔄 Alpaca Transaction Sync]
+    VV --> WW[✅ Verify Trade Accuracy]
+    WW --> XX[📊 Update Performance Metrics]
+    XX --> YY[🏁 End of Trade Cycle]
+    YY --> P
     
     %% Error Handling
-    H -.->|API Failure| VV[🔄 Fallback to Yahoo Finance]
-    VV --> L
-    L -.->|AI Failure| WW[🔄 Single Model Fallback]
-    WW --> N
-    V -.->|Fill Timeout| XX[⚠️ Partial Fill Handling]
-    XX --> W
+    H -.->|API Failure| ZZ[🔄 Fallback to Yahoo Finance]
+    ZZ --> L
+    L -.->|AI Failure| AAA[🔄 Single Model Fallback]
+    AAA --> N
+    V -.->|Fill Timeout| BBB[⚠️ Partial Fill Handling]
+    BBB --> W
     
     %% Styling
     classDef slackUX fill:#e1f5fe,stroke:#01579b,stroke-width:3px
