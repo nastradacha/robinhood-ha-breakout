@@ -81,6 +81,25 @@ class MultiSymbolScanner:
         Returns:
             List of trade opportunities sorted by priority/confidence
         """
+        # Early market hours check - skip all processing if market is closed
+        from datetime import datetime
+        import pytz
+        
+        try:
+            from .market_calendar import validate_trading_time
+            et_tz = pytz.timezone('US/Eastern')
+            current_et = datetime.now(et_tz)
+            can_trade, market_reason = validate_trading_time(current_et)
+            if not can_trade:
+                logger.info(f"[MULTI-SYMBOL] Pre-market: All symbols blocked (market closed) - {market_reason}")
+                return []
+        except Exception as e:
+            # Fallback to basic weekend check if market calendar fails
+            current_et = datetime.now(pytz.timezone('US/Eastern'))
+            if current_et.weekday() >= 5:  # Weekend
+                logger.info("[MULTI-SYMBOL] Pre-market: All symbols blocked (weekend)")
+                return []
+        
         if not self.enabled:
             # Fallback to single symbol mode
             default_symbol = self.config.get("SYMBOL", "SPY")
@@ -338,16 +357,14 @@ class MultiSymbolScanner:
                 return [], rejection_reason
 
             # Check confidence threshold
-            confidence = trade_decision.get("confidence", 0.0)
+            confidence = trade_decision.get("confidence")
             min_confidence = self.config.get("MIN_CONFIDENCE", 0.35)
 
-            if confidence < min_confidence:
-                logger.info(
-                    f"[MULTI-SYMBOL] {symbol}: Confidence {confidence:.2f} below threshold {min_confidence}"
-                )
-
-                # Log individual symbol decision for analytics with unified format
-                raw_reason = f"Confidence {confidence:.2f} below threshold {min_confidence}"
+            if confidence is None or confidence < min_confidence:
+                if confidence is None:
+                    raw_reason = "Missing confidence score"
+                else:
+                    raw_reason = f"Confidence {confidence:.3f} below threshold {min_confidence:.3f}"
                 formatted_reason = self._format_no_trade_reason(symbol, raw_reason)
                 self._log_signal_event(
                     symbol,
@@ -363,7 +380,10 @@ class MultiSymbolScanner:
                     formatted_reason,
                     market_data.get("current_price", 0.0),
                 )
-                rejection_reason = f"Confidence {confidence:.2f} below threshold {min_confidence}"
+                if confidence is None:
+                    rejection_reason = "Missing confidence score"
+                else:
+                    rejection_reason = f"Confidence {confidence:.3f} below threshold {min_confidence:.3f}"
                 return [], rejection_reason
 
             # Apply consecutive-loss throttle (stricter requirements after losses)
@@ -448,8 +468,10 @@ class MultiSymbolScanner:
                 ),
             }
 
+            # Format confidence display properly
+            conf_display = f"{confidence:.3f}" if confidence is not None else "N/A"
             logger.info(
-                f"[MULTI-SYMBOL] {symbol}: Found opportunity - {trade_decision['decision']} (confidence: {confidence:.2f})"
+                f"[MULTI-SYMBOL] {symbol}: Found opportunity - {trade_decision['decision']} (confidence: {conf_display})"
             )
             
             # Log opportunity using deterministic serialization
@@ -871,10 +893,11 @@ class MultiSymbolScanner:
             except Exception as e:
                 logger.warning(f"[WEEKLY-PROTECTION-GATE] Weekly protection check failed for {symbol}: {e}, allowing trades (fail-safe)")
             
-            # 6. Check minimum true range percentage (per-symbol thresholds)
+            # 6. Check minimum true range percentage (dynamic thresholds)
             symbol = market_data.get("symbol", "UNKNOWN")
-            by_symbol = config.get("MIN_TR_RANGE_PCT_BY_SYMBOL", {})
-            min_tr_range_pct = float(by_symbol.get(symbol, config.get("MIN_TR_RANGE_PCT", 1.0)))
+            
+            # Dynamic TR floor calculation
+            min_tr_range_pct = self._calculate_dynamic_tr_floor(symbol, market_data, config)
             
             # Add sanity check to prevent "20%" accidents (treat >5 as % not fraction)
             raw_threshold = min_tr_range_pct
@@ -884,13 +907,97 @@ class MultiSymbolScanner:
             
             today_tr_pct = market_data.get("today_true_range_pct", 0.0)
             
-            # Debug logging for true range values with higher precision
-            logger.info(f"[TR-DEBUG] {symbol}: TR={today_tr_pct:.4f}% (threshold: {min_tr_range_pct:.4f}%) [raw: {today_tr_pct:.6f} vs {min_tr_range_pct:.6f}]")
+            # Gate on raw float values, round only for logging
+            tr_passes_threshold = today_tr_pct >= min_tr_range_pct
             
-            if today_tr_pct < min_tr_range_pct:
+            # Debug logging for true range values with consistent precision
+            logger.info(f"[TR-DEBUG] {symbol}: TR={today_tr_pct:.4f}% (threshold: {min_tr_range_pct:.4f}%) - {'PASS' if tr_passes_threshold else 'FAIL'}")
+            
+            # 6a. VIX-based UVXY guardrail (skip UVXY in low-VIX regimes)
+            if symbol == "UVXY":
+                try:
+                    vix_threshold = config.get("UVXY_VIX_THRESHOLD", 18.0)
+                    current_vix = market_data.get("vix", 0.0)
+                    if current_vix > 0 and current_vix < vix_threshold:
+                        logger.info(f"[VIX-GUARDRAIL] {symbol}: VIX={current_vix:.2f} < {vix_threshold:.1f}, skipping UVXY in low-vol regime")
+                        return False, f"VIX too low for UVXY trading: {current_vix:.2f} < {vix_threshold:.1f}"
+                    elif current_vix > 0:
+                        logger.info(f"[VIX-GUARDRAIL] {symbol}: VIX={current_vix:.2f} >= {vix_threshold:.1f}, UVXY trading allowed")
+                except Exception as e:
+                    logger.warning(f"[VIX-GUARDRAIL] VIX check failed for {symbol}: {e}, allowing trades (fail-safe)")
+            
+            if not tr_passes_threshold:
+                # Check for near-miss reschedule (≥95% of floor with good quality)
+                near_miss_threshold = 0.95 * min_tr_range_pct
+                if today_tr_pct >= near_miss_threshold:
+                    # Check body-to-range and momentum quality
+                    close_price = market_data.get("close", 0.0)
+                    open_price = market_data.get("open", 0.0)
+                    high_price = market_data.get("high", 0.0)
+                    low_price = market_data.get("low", 0.0)
+                    
+                    body_to_range = abs(close_price - open_price) / max(high_price - low_price, 1e-9)
+                    momentum_score = self._calculate_momentum_score(market_data)
+                    
+                    if body_to_range >= 0.35 and momentum_score >= 2:
+                        logger.info(f"[NEAR-MISS] {symbol}: TR={today_tr_pct:.4f}% ≥ 95% of floor ({near_miss_threshold:.4f}%), good quality - scheduling 30s rescan")
+                        # TODO: Implement actual reschedule mechanism
+                        return False, f"NEAR_MISS_RESCHEDULE: TR={today_tr_pct:.4f}% (≥95% floor, quality OK)"
+                    else:
+                        logger.debug(f"[NEAR-MISS] {symbol}: TR near floor but quality insufficient (BTR={body_to_range:.3f}, momentum={momentum_score})")
+                
                 return False, f"True range too low ({today_tr_pct:.4f}% < {min_tr_range_pct:.4f}% minimum)"
             
-            # 5. Check user-configured trade window (optional)
+            # 6b. Pre-LLM body percentage and momentum gates
+            pre_llm_gates = config.get("PRE_LLM_GATES", {})
+            if pre_llm_gates.get("enabled", False):
+                # Body percentage check
+                min_body_pct_config = pre_llm_gates.get("min_body_pct", {})
+                if symbol in min_body_pct_config:
+                    min_body_pct = min_body_pct_config[symbol]
+                    current_body_pct = market_data.get("candle_body_pct", 0.0)
+                    if current_body_pct < min_body_pct:
+                        return False, f"Candle body too weak ({current_body_pct:.4f}% < {min_body_pct:.4f}% minimum)"
+                
+                # Momentum checks (require at least N of 3 indicators)
+                required_momentum_checks = pre_llm_gates.get("momentum_checks", 2)
+                momentum_score = 0
+                
+                # Check 1: EMA stack (3 > 5 > 8)
+                try:
+                    # Calculate EMAs from price data if available
+                    price = market_data.get("current_price", 0.0)
+                    if price > 0:
+                        # Simple momentum proxy: compare current price to recent levels
+                        resistance_levels = market_data.get("resistance_levels", [])
+                        support_levels = market_data.get("support_levels", [])
+                        
+                        # If price is above recent support, count as momentum
+                        if support_levels and price > max(support_levels[:3]):
+                            momentum_score += 1
+                except:
+                    pass
+                
+                # Check 2: Heikin Ashi alignment (last 2-3 green for calls)
+                try:
+                    trend_direction = market_data.get("trend_direction", "NEUTRAL")
+                    if trend_direction in ["BULLISH", "BEARISH"]:
+                        momentum_score += 1
+                except:
+                    pass
+                
+                # Check 3: Volume confirmation
+                try:
+                    volume_confirmation = market_data.get("volume_confirmation", False)
+                    if volume_confirmation:
+                        momentum_score += 1
+                except:
+                    pass
+                
+                if momentum_score < required_momentum_checks:
+                    return False, f"Insufficient momentum ({momentum_score}/{required_momentum_checks} indicators)"
+            
+            # 7. Check user-configured trade window (optional)
             trade_window = config.get("TRADE_WINDOW")
             if trade_window and isinstance(trade_window, list) and len(trade_window) == 2:
                 try:
@@ -1606,12 +1713,129 @@ class MultiSymbolScanner:
                         log_file = "logs/trade_history_robinhood_live.csv"
 
             log_trade_decision(log_file, trade_data)
+            # Format confidence display properly for logging
+            conf_display = f"{confidence:.3f}" if confidence is not None else "N/A"
             logger.debug(
-                f"[MULTI-SYMBOL] Logged {symbol} decision: {decision} (confidence: {confidence:.2f})"
+                f"[MULTI-SYMBOL] Logged {symbol} decision: {decision} (confidence: {conf_display})"
             )
 
         except Exception as e:
             logger.error(f"[MULTI-SYMBOL] Error logging {symbol} decision: {e}")
+
+    def _calculate_dynamic_tr_floor(self, symbol: str, market_data: Dict, config: Dict) -> float:
+        """
+        Calculate dynamic TR floor based on VIX and time-of-day.
+        
+        Args:
+            symbol: Trading symbol
+            market_data: Market data including VIX
+            config: Configuration dictionary
+            
+        Returns:
+            Dynamic TR floor as percentage (e.g., 0.10 for 0.10%)
+        """
+        # Base TR thresholds
+        BASE_TR = {
+            "SPY": 0.10, "QQQ": 0.15, "DIA": 0.10, "IWM": 0.15,
+            "XLK": 0.18, "XLF": 0.12, "XLE": 0.20, "TLT": 0.08, "UVXY": 0.80
+        }
+        
+        # Get base threshold
+        base_tr = BASE_TR.get(symbol, 0.10)
+        
+        # VIX scaling
+        current_vix = market_data.get("vix", 20.0)
+        if current_vix < 16:
+            vix_mult = 0.90
+        elif current_vix < 20:
+            vix_mult = 1.00
+        elif current_vix < 25:
+            vix_mult = 1.10
+        else:
+            vix_mult = 1.25
+            
+        # Time-of-day scaling (lunch tighten 12:30-14:30 ET)
+        from datetime import datetime
+        import pytz
+        et_tz = pytz.timezone('US/Eastern')
+        now_et = datetime.now(et_tz)
+        hour_decimal = now_et.hour + now_et.minute / 60.0
+        lunch_mult = 1.10 if 12.5 <= hour_decimal <= 14.5 else 1.00
+        
+        # Special handling for UVXY with VIX-based thresholds
+        if symbol == "UVXY":
+            uvxy_dynamic = config.get("UVXY_DYNAMIC_TR", {})
+            if uvxy_dynamic.get("enabled", False):
+                vix_low = uvxy_dynamic.get("vix_low", 18.0)
+                vix_high = uvxy_dynamic.get("vix_high", 25.0)
+                tr_low = uvxy_dynamic.get("tr_low", 0.60)
+                tr_medium = uvxy_dynamic.get("tr_medium", 0.80)
+                tr_high = uvxy_dynamic.get("tr_high", 1.00)
+                
+                # Determine bucket and threshold
+                if current_vix < vix_low:
+                    dynamic_tr = tr_low
+                    bucket = f"<{vix_low}"
+                elif current_vix < vix_high:
+                    dynamic_tr = tr_medium
+                    bucket = f"{vix_low}-{vix_high}"
+                else:
+                    dynamic_tr = tr_high
+                    bucket = f">{vix_high}"
+                    
+                logger.info(f"[UVXY-THRESH] VIX={current_vix:.2f} (bucket {bucket}) -> TR floor {dynamic_tr:.3f}%")
+                return dynamic_tr
+        
+        # Calculate final dynamic threshold
+        dynamic_tr = round(base_tr * vix_mult * lunch_mult, 3)
+        
+        # Log dynamic calculation for debugging
+        logger.debug(f"[DYNAMIC-TR] {symbol}: base={base_tr:.3f}% * VIX_mult={vix_mult:.2f} * lunch_mult={lunch_mult:.2f} = {dynamic_tr:.3f}%")
+        
+        return dynamic_tr
+
+    def _calculate_momentum_score(self, market_data: Dict) -> int:
+        """
+        Calculate momentum score based on EMA stack, VWAP, and Heikin-Ashi.
+        
+        Args:
+            market_data: Market data dictionary
+            
+        Returns:
+            Momentum score (0-3, need ≥2 for quality gate)
+        """
+        score = 0
+        indicators = []
+        
+        # EMA stack alignment (1 point)
+        ema_9 = market_data.get("ema_9", 0.0)
+        ema_21 = market_data.get("ema_21", 0.0)
+        ema_bullish = ema_9 > 0 and ema_21 > 0 and ema_9 > ema_21
+        if ema_bullish:
+            score += 1
+        indicators.append(f"EMA: {'Bullish ✅' if ema_bullish else 'Bearish ❌'}")
+            
+        # VWAP position (1 point)
+        close_price = market_data.get("close", 0.0)
+        vwap = market_data.get("vwap", 0.0)
+        above_vwap = close_price > 0 and vwap > 0 and close_price > vwap
+        if above_vwap:
+            score += 1
+        indicators.append(f"VWAP: {'Above ✅' if above_vwap else 'Below ❌'}")
+            
+        # Heikin-Ashi trend (1 point)
+        ha_close = market_data.get("ha_close", 0.0)
+        ha_open = market_data.get("ha_open", 0.0)
+        ha_bullish = ha_close > 0 and ha_open > 0 and ha_close > ha_open
+        if ha_bullish:
+            score += 1
+        indicators.append(f"HA trend: {'Bullish ✅' if ha_bullish else 'Bearish ❌'}")
+        
+        # Log detailed momentum breakdown
+        symbol = market_data.get("symbol", "UNKNOWN")
+        logger.debug(f"[MOM] {symbol}: {', '.join(indicators)} (score {score}/3)")
+            
+        return score
 
     def _send_no_trade_heartbeat(self, rejection_reasons: List[str] = None):
         """

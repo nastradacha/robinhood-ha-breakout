@@ -54,12 +54,12 @@ class EnhancedSlackIntegration:
     _instance = None
     _initialized = False
     
-    def __new__(cls):
+    def __new__(cls, config=None):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    def __init__(self):
+    def __init__(self, config=None):
         """Initialize enhanced Slack integration (singleton)"""
         if self._initialized:
             return
@@ -683,6 +683,10 @@ class EnhancedSlackIntegration:
     def send_message(self, message: str):
         """Send generic message via Slack."""
         self.send_heartbeat(message)
+    
+    def send_alert(self, *args, **kwargs):
+        """Compatibility shim for send_alert -> send_message"""
+        return self.send_message(*args, **kwargs)
 
     def send_stop_loss_alert(
         self, symbol: str, strike: float, option_type: str, loss_pct: float

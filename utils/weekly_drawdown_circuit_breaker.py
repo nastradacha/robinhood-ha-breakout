@@ -49,7 +49,10 @@ class WeeklyDrawdownCircuitBreaker:
         # Load or create state
         self._state = self._load_state()
         
-        logger.info(f"[WEEKLY-CIRCUIT-BREAKER] Initialized (enabled: {self.enabled}, threshold: {self.threshold_percent}%)")
+        # Only log initialization once per instance
+        if not hasattr(self, '_initialized'):
+            self._initialized = True
+            logger.info(f"[WEEKLY-CIRCUIT-BREAKER] Initialized (enabled: {self.enabled}, threshold: {self.threshold_percent}%)")
     
     def _load_state(self) -> Dict:
         """Load weekly circuit breaker state from file"""

@@ -116,32 +116,40 @@ class DataValidator:
         self.symbol_attention_thresholds = self.config.get("DATA_SYMBOL_ATTENTION_THRESHOLDS", {
             "GLD": 15.0,  # Higher threshold for GLD due to vendor differences
             "SLV": 12.0,
-            "TLT": 10.0
         })
         
-        # Strict validation mode and pause functionality
-        self.strict_validation = self.config.get("DATA_STRICT_VALIDATION", False)
-        self.pause_on_validate_fail = self.config.get("DATA_PAUSE_ON_VALIDATE_FAIL", None)
-        self.paused_symbols = {}  # Track paused symbols with expiry times
-        
-        # Initialize clients
         self.alpaca_client = None
-        self.slack = None
+        self.logger = logging.getLogger(__name__)
         
+        # Symbol-keyed price cache to prevent cross-contamination
+        self.last_good_prices = {}
+        
+        # Watchlist symbols for ETF split detection guard
+        self.watchlist_etfs = {"SPY", "QQQ", "DIA", "IWM", "XLK", "XLF", "XLE", "TLT", "UVXY"}
+        
+        # Initialize Alpaca client if available
         try:
+            from .alpaca_client import AlpacaClient
             self.alpaca_client = AlpacaClient()
-            logger.debug("[DATA-VALIDATION] Alpaca client initialized")
+            self.logger.info("[DATA-VALIDATION] Initialized (enabled: True)")
         except Exception as e:
-            logger.warning(f"[DATA-VALIDATION] Alpaca client unavailable: {e}")
-        
+            self.logger.warning(f"[DATA-VALIDATION] Failed to initialize Alpaca client: {e}")
+            
+        # Initialize Slack notifier
+        self.slack_notifier = None
         try:
-            self.slack = EnhancedSlackIntegration()
-            logger.debug("[DATA-VALIDATION] Slack integration initialized")
+            from .enhanced_slack import EnhancedSlackIntegration
+            self.slack_notifier = EnhancedSlackIntegration(config)
         except Exception as e:
-            logger.warning(f"[DATA-VALIDATION] Slack unavailable: {e}")
+            self.logger.warning(f"[DATA-VALIDATION] Failed to initialize Slack: {e}")
+        
+        # Initialize paused symbols tracking
+        self.paused_symbols = {}
+        self.pause_on_validate_fail = config.get("DATA_PAUSE_ON_VALIDATE_FAIL", "30m")
+        self.strict_validation = config.get("DATA_STRICT_VALIDATION", False)
             
         self._initialized = True
-        logger.info(f"[DATA-VALIDATION] Initialized (enabled: {self.validation_enabled})")
+        self.logger.info(f"[DATA-VALIDATION] Initialized (enabled: {self.validation_enabled})")
     
     def get_alpaca_price(self, symbol: str) -> Optional[DataPoint]:
         """Get current price from Alpaca API"""
@@ -164,7 +172,12 @@ class DataValidator:
         return None
     
     def get_yahoo_price(self, symbol: str) -> Optional[DataPoint]:
-        """Get current price from Yahoo Finance"""
+        """Get current price from Yahoo Finance (deprecated - use internal validation instead)"""
+        # Check if Yahoo validation is disabled
+        if not self.config.get("DATA_USE_YAHOO_VALIDATION", True):
+            logger.debug(f"[DATA-VALIDATION] Yahoo validation disabled for {symbol}")
+            return None
+            
         try:
             ticker = yf.Ticker(symbol)
             data = ticker.history(period="1d", interval="1m")
@@ -185,6 +198,57 @@ class DataValidator:
         
         return None
     
+    def get_internal_validation_price(self, symbol: str, current_price: float) -> Optional[DataPoint]:
+        """Get historical price from Alpaca for internal validation"""
+        if not self.alpaca_client:
+            return None
+            
+        try:
+            lookback_minutes = self.config.get("DATA_HISTORICAL_LOOKBACK_MINUTES", 15)
+            
+            # Get recent historical data from Alpaca
+            from datetime import datetime, timedelta
+            end_time = datetime.now()
+            start_time = end_time - timedelta(minutes=lookback_minutes)
+            
+            # Fetch historical bars using the correct method
+            df = self.alpaca_client.get_market_data(symbol, period="1d")
+            
+            if df is not None and len(df) > 0:
+                logger.debug(f"[DATA-VALIDATION] Historical data columns: {list(df.columns)}")
+                
+                # Find the close price column (could be 'close', 'Close', or other)
+                close_col = None
+                for col in ['close', 'Close', 'c']:
+                    if col in df.columns:
+                        close_col = col
+                        break
+                
+                if close_col is not None:
+                    # Use the average of recent closes for validation
+                    recent_closes = df[close_col].tail(5).tolist()  # Last 5 minutes
+                    if recent_closes:
+                        avg_price = sum(recent_closes) / len(recent_closes)
+                        latest_timestamp = df.index[-1]
+                        
+                        logger.debug(f"[DATA-VALIDATION] Internal validation: current={current_price:.2f}, historical_avg={avg_price:.2f}")
+                        
+                        return DataPoint(
+                            value=avg_price,
+                            timestamp=latest_timestamp,
+                            source="alpaca_historical",
+                            symbol=symbol,
+                            data_type="price"
+                        )
+                else:
+                    logger.warning(f"[DATA-VALIDATION] No close price column found in historical data for {symbol}. Columns: {list(df.columns)}")
+                
+        except Exception as e:
+            logger.warning(f"[DATA-VALIDATION] Internal validation failed for {symbol}: {e}")
+            logger.debug(f"[DATA-VALIDATION] Full error details: {type(e).__name__}: {str(e)}")
+        
+        return None
+    
     def calculate_discrepancy(self, primary: DataPoint, validation: DataPoint) -> float:
         """Calculate percentage discrepancy between two data points using max denominator"""
         if primary.value == 0 or validation.value == 0:
@@ -193,13 +257,38 @@ class DataValidator:
         # Use max(p1, p2) as denominator for more accurate discrepancy calculation
         return abs(primary.value - validation.value) / max(primary.value, validation.value) * 100.0
     
-    def detect_split_mismatch(self, primary: DataPoint, validation: DataPoint) -> Tuple[bool, str]:
-        """Detect potential stock split mismatches between data sources"""
-        if not primary or not validation or primary.value == 0 or validation.value == 0:
+    def _detect_split_mismatch(self, primary_price: float, validation_price: float, symbol: str) -> Tuple[bool, str]:
+        """
+        Detect potential stock splits causing price mismatches with cross-symbol contamination protection
+        
+        Args:
+            primary_price: Price from primary source (Alpaca)
+            validation_price: Price from validation source 
+            symbol: Stock symbol
+            
+        Returns:
+            Tuple of (is_split_detected, reason)
+        """
+        if primary_price <= 0 or validation_price <= 0:
+            return False, ""
+            
+        # Calculate price ratio
+        ratio = max(primary_price, validation_price) / min(primary_price, validation_price)
+        
+        # Only flag as split if ratio is significantly high (>1.5x)
+        if ratio < 1.5:
             return False, ""
         
-        # Calculate ratio between prices
-        ratio = max(primary.value, validation.value) / min(primary.value, validation.value)
+        # Check for cross-symbol contamination first
+        cross_symbol_match = self._check_cross_symbol_contamination(primary_price, validation_price, symbol)
+        if cross_symbol_match:
+            self.logger.warning(f"[DATA-VALIDATION] {symbol}: Cross-symbol feed contamination detected - {cross_symbol_match}")
+            return True, f"CROSS_SYMBOL_FEED_MISMATCH: {cross_symbol_match}"
+        
+        # ETF split detection guard - require corporate actions confirmation
+        if symbol in self.watchlist_etfs:
+            self.logger.warning(f"[DATA-VALIDATION] {symbol}: ETF split detection bypassed - requires corporate actions confirmation")
+            return False, f"ETF_SPLIT_GUARD: {symbol} in watchlist, skipping split detection"
         
         # Common split ratios: 2:1, 3:1, 4:1, 5:1, 10:1, etc.
         common_splits = [2.0, 3.0, 4.0, 5.0, 10.0, 20.0]
@@ -217,6 +306,28 @@ class DataValidator:
         
         return False, ""
     
+    def _check_cross_symbol_contamination(self, primary_price: float, validation_price: float, symbol: str) -> Optional[str]:
+        """
+        Check if the price mismatch is due to cross-symbol feed contamination
+        
+        Returns:
+            String describing the contamination if detected, None otherwise
+        """
+        # Check if either price matches another symbol's last known price within 0.05%
+        for other_symbol, last_price in self.last_good_prices.items():
+            if other_symbol == symbol:
+                continue
+                
+            # Check if primary_price matches another symbol
+            if abs(primary_price - last_price) / last_price < 0.0005:  # 0.05%
+                return f"primary_price {primary_price} matches {other_symbol} last_price {last_price}"
+                
+            # Check if validation_price matches another symbol  
+            if abs(validation_price - last_price) / last_price < 0.0005:  # 0.05%
+                return f"validation_price {validation_price} matches {other_symbol} last_price {last_price}"
+                
+        return None
+    
     def validate_symbol_data(self, symbol: str) -> ValidationResult:
         """
         Validate data quality for a single symbol across sources
@@ -225,13 +336,22 @@ class DataValidator:
         """
         issues = []
         
-        # Get data from both sources
+        # Get primary data from Alpaca
         alpaca_data = self.get_alpaca_price(symbol)
-        yahoo_data = self.get_yahoo_price(symbol)
         
-        # Determine primary and validation data
-        primary_data = alpaca_data if alpaca_data else yahoo_data
-        validation_data = yahoo_data if alpaca_data else None
+        # Determine validation source based on configuration
+        validation_data = None
+        if self.config.get("DATA_USE_INTERNAL_VALIDATION", False) and alpaca_data:
+            # Use internal Alpaca historical data for validation
+            validation_data = self.get_internal_validation_price(symbol, alpaca_data.value)
+        elif self.config.get("DATA_USE_YAHOO_VALIDATION", True):
+            # Use Yahoo Finance for validation (legacy)
+            validation_data = self.get_yahoo_price(symbol)
+        
+        # Set primary data and update symbol-keyed cache
+        primary_data = alpaca_data if alpaca_data else validation_data
+        if primary_data and primary_data.value > 0:
+            self.last_good_prices[symbol] = primary_data.value
         
         # Check data availability
         if not primary_data:
@@ -257,7 +377,7 @@ class DataValidator:
         
         if validation_data and not validation_data.is_stale(300):  # Allow 5min for Yahoo
             discrepancy_pct = self.calculate_discrepancy(primary_data, validation_data)
-            split_detected, split_reason = self.detect_split_mismatch(primary_data, validation_data)
+            split_detected, split_reason = self._detect_split_mismatch(primary_data.value, validation_data.value, symbol)
             
             if split_detected and symbol not in self.split_whitelist:
                 issues.append(f"Potential split mismatch detected: {split_reason}")
