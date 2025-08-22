@@ -38,8 +38,19 @@ class DrawdownCircuitBreaker:
     - Detailed logging and audit trail
     """
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, config_or_path = "config.yaml"):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self, config_or_path = "config.yaml"):
-        """Initialize the circuit breaker with configuration"""
+        """Initialize the circuit breaker with configuration (singleton)"""
+        if self._initialized:
+            return
+            
         if isinstance(config_or_path, dict):
             self.config = config_or_path
         else:
@@ -70,9 +81,13 @@ class DrawdownCircuitBreaker:
         # Initialize weekly tracker
         self.weekly_tracker = WeeklyPnLTracker() if self.weekly_enabled else None
         
+        # Initialize daily P&L tracker
+        self.pnl_tracker = get_daily_pnl_tracker(self.config)
+        
         # Initialize state
         self._state = self._load_state()
         
+        self._initialized = True
         logger.info(f"[CIRCUIT-BREAKER] Initialized - Daily: {self.enabled} ({self.threshold_percent}%), Weekly: {self.weekly_enabled} ({self.weekly_threshold_percent}%)")
         
     def _load_state(self) -> Dict:
@@ -636,9 +651,16 @@ def validate_circuit_breaker_config(config: Dict) -> Tuple[bool, List[str]]:
         return False, errors
 
 
+_drawdown_circuit_breaker_instance = None
+
 def get_drawdown_circuit_breaker(config: Dict) -> DrawdownCircuitBreaker:
-    """Factory function to get DrawdownCircuitBreaker instance"""
-    return DrawdownCircuitBreaker(config)
+    """Factory function to get DrawdownCircuitBreaker singleton instance"""
+    global _drawdown_circuit_breaker_instance
+    
+    if _drawdown_circuit_breaker_instance is None:
+        _drawdown_circuit_breaker_instance = DrawdownCircuitBreaker(config)
+    
+    return _drawdown_circuit_breaker_instance
 
 
 def check_circuit_breaker(config: Dict) -> Tuple[bool, str]:

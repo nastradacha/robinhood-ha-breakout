@@ -1,402 +1,402 @@
 [
   {
-    "timestamp": "2025-08-18T15:21:37.854863",
+    "timestamp": "2025-08-21T11:19:11.990536",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:21, cutoff: 15:15 ET)",
-    "price": 52.465,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1150% < 0.1320% minimum)",
+    "price": 52.76,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:23:44.086454",
+    "timestamp": "2025-08-21T11:21:21.547380",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:23, cutoff: 15:15 ET)",
-    "price": 52.465,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0850% < 0.1320% minimum)",
+    "price": 52.75,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:25:50.608985",
+    "timestamp": "2025-08-21T11:23:32.442856",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:25, cutoff: 15:15 ET)",
-    "price": 52.4654,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0850% < 0.1320% minimum)",
+    "price": 52.75,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:27:59.060116",
+    "timestamp": "2025-08-21T11:25:51.022000",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:27, cutoff: 15:15 ET)",
-    "price": 52.4654,
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the threshold and there is no strong momentum.; DeepSeek text fallback: ```json\n{\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.092%) below min...",
+    "price": 52.6324,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:30:05.934896",
+    "timestamp": "2025-08-21T11:28:08.946818",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:30, cutoff: 15:15 ET)",
-    "price": 52.4654,
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the threshold and there is no strong momentum.; DeepSeek text fallback: {\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.092%) below threshold, ...",
+    "price": 52.6324,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:32:10.669180",
+    "timestamp": "2025-08-21T11:30:49.101024",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:32, cutoff: 15:15 ET)",
-    "price": 52.475,
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the threshold and there is no strong momentum.; DeepSeek text fallback: ```json\n{\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.117%) below req...",
+    "price": 52.6858,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:34:18.897203",
+    "timestamp": "2025-08-21T11:33:26.536936",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:34, cutoff: 15:15 ET)",
-    "price": 52.475,
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage below threshold and bearish trend.; DeepSeek text fallback: \n```json\n{\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.117%) below en...",
+    "price": 52.6858,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:36:25.623040",
+    "timestamp": "2025-08-21T11:35:43.188181",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:36, cutoff: 15:15 ET)",
-    "price": 52.49,
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the dynamic threshold of 0.050% and there is no strong momentum.; DeepSeek text fallback: {\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.064%) below enhanced th...",
+    "price": 52.75,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:38:32.267767",
+    "timestamp": "2025-08-21T11:38:36.215274",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:38, cutoff: 15:15 ET)",
-    "price": 52.49,
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the dynamic threshold of 0.050% and there is no strong momentum.; DeepSeek text fallback: ```json\n{\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.064%) below min...",
+    "price": 52.75,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-18T15:40:38.677942",
+    "timestamp": "2025-08-21T11:40:52.617178",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:40, cutoff: 15:15 ET)",
-    "price": 52.495,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T15:42:45.256497",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:42, cutoff: 15:15 ET)",
-    "price": 52.495,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T15:44:14.339337",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:44, cutoff: 15:15 ET)",
-    "price": 52.495,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T15:44:51.392011",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 15:44, cutoff: 15:15 ET)",
-    "price": 52.495,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T19:17:39.004786",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 19:17, cutoff: 15:15 ET)",
-    "price": 52.61,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T19:24:40.905183",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 19:24, cutoff: 15:15 ET)",
-    "price": 52.6,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T21:08:25.702723",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 21:08, cutoff: 15:15 ET)",
-    "price": 52.6,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T21:38:37.173730",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 21:38, cutoff: 15:15 ET)",
-    "price": 52.6,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-18T22:28:00.169188",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: After entry cutoff time (current: 22:28, cutoff: 15:15 ET)",
-    "price": 52.6,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T07:36:30.471999",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Before market open (current: 07:36, open: 09:30 ET)",
-    "price": 52.51,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T07:38:40.176648",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Before market open (current: 07:38, open: 09:30 ET)",
-    "price": 52.51,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T07:40:49.631834",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Before market open (current: 07:40, open: 09:30 ET)",
-    "price": 52.51,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T07:42:59.217081",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Before market open (current: 07:42, open: 09:30 ET)",
-    "price": 52.51,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T07:45:07.968758",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Before market open (current: 07:45, open: 09:30 ET)",
-    "price": 52.48,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T07:47:17.085191",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Before market open (current: 07:47, open: 09:30 ET)",
-    "price": 52.48,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T11:29:05.984399",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0760% < 0.1500% minimum)",
-    "price": 52.705,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T11:31:29.261814",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0760% < 0.1500% minimum)",
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0980% < 0.1294% hysteresis threshold, 0.1320% minimum)",
     "price": 52.725,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T11:33:49.952904",
+    "timestamp": "2025-08-21T11:43:09.072858",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0760% < 0.1500% minimum)",
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0980% < 0.1294% hysteresis threshold, 0.1320% minimum)",
     "price": 52.725,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T11:36:11.209525",
+    "timestamp": "2025-08-21T11:45:18.574476",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1230% < 0.1500% minimum)",
-    "price": 52.665,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1270% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.775,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T11:38:21.293460",
+    "timestamp": "2025-08-21T11:47:29.325678",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1230% < 0.1500% minimum)",
-    "price": 52.665,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1270% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.775,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T11:40:41.629948",
+    "timestamp": "2025-08-21T11:49:38.537800",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1040% < 0.1500% minimum)",
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1270% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.775,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T11:51:48.537244",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1150% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.77,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T11:53:58.377417",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1150% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.77,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T11:56:07.984605",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1040% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.785,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T11:58:17.561561",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1040% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.785,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:00:28.160698",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0660% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.795,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:02:38.002611",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0660% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.795,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:04:48.090227",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0660% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.795,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:07:11.677692",
+    "decision": "NO_TRADE",
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the dynamic threshold of 0.050% and there is no strong momentum signal.; DeepSeek text fallback: \n```json\n{\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.064%) below mi...",
+    "price": 52.69,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:09:28.670147",
+    "decision": "NO_TRADE",
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage below threshold and no strong momentum signals.; DeepSeek text fallback: {\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body (0.064%) below threshold, ...",
+    "price": 52.69,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:11:45.234809",
+    "decision": "NO_TRADE",
+    "confidence": 0.25,
+    "reason": "OTHER: Unanimous NO_TRADE (2/2 models). Reasons: Candle body percentage is below the threshold and there is no strong momentum.; DeepSeek text fallback: {\n  \"decision\": \"NO_TRADE\",\n  \"confidence\": 0.0,\n  \"reason\": \"Candle body threshold not met (0.155% ...",
+    "price": 52.6661,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:14:27.672079",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "LLM_ERROR: 1 (of 2) futures unfinished (after 3 attempts)",
+    "price": 52.6661,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:16:59.264280",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 52.605,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:46:24.230199",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0950% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.675,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:48:33.626255",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0950% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.675,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:50:42.929418",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0740% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.6989,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:52:52.897166",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0740% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.6989,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:56:23.630287",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0740% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.72,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T12:58:33.536779",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0740% < 0.1294% hysteresis threshold, 0.1320% minimum)",
+    "price": 52.72,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T14:39:19.253691",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0570% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.715,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T14:41:29.055460",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0760% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.685,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T14:43:49.701385",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0760% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.685,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-08-21T14:57:07.806765",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0570% < 0.1176% hysteresis threshold, 0.1200% minimum)",
     "price": 52.705,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T12:44:14.002976",
+    "timestamp": "2025-08-21T14:59:17.480042",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1050% < 0.1500% minimum)",
-    "price": 52.51,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0570% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.705,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T12:46:33.997767",
+    "timestamp": "2025-08-21T15:01:27.552568",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0950% < 0.1500% minimum)",
-    "price": 52.54,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0780% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.695,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T12:48:44.371955",
+    "timestamp": "2025-08-21T15:03:46.356695",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0950% < 0.1500% minimum)",
-    "price": 52.54,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0780% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.695,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T12:50:54.863345",
+    "timestamp": "2025-08-21T15:06:05.259470",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0910% < 0.1500% minimum)",
-    "price": 52.5201,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0970% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.725,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T12:53:16.039135",
+    "timestamp": "2025-08-21T15:08:19.637586",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0910% < 0.1500% minimum)",
-    "price": 52.5201,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0970% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.725,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T14:47:09.855207",
+    "timestamp": "2025-08-21T15:10:44.110727",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0620% < 0.1500% minimum)",
-    "price": 52.505,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1140% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.755,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:05:15.089211",
+    "timestamp": "2025-08-21T15:13:02.444533",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.56,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.1140% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.755,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:07:39.673948",
+    "timestamp": "2025-08-21T15:15:21.106703",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.56,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0770% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.74,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:10:07.856959",
+    "timestamp": "2025-08-21T15:17:31.598460",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.56,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0770% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.74,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:12:34.005150",
+    "timestamp": "2025-08-21T15:19:42.146316",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.56,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0770% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.74,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:14:59.794906",
+    "timestamp": "2025-08-21T15:21:56.659689",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.56,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0380% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.74,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:17:25.043012",
+    "timestamp": "2025-08-21T15:24:07.697940",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.545,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0380% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.74,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:19:50.540809",
+    "timestamp": "2025-08-21T15:26:17.498118",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.545,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0710% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.72,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-19T15:22:17.294221",
+    "timestamp": "2025-08-21T15:28:26.884724",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.545,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T15:24:41.379814",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.545,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T15:27:07.272089",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.515,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T15:29:31.959648",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.515,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T15:31:53.535202",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.55,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T15:33:44.799082",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.55,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-19T15:35:54.951475",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
-    "price": 52.565,
+    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0710% < 0.1176% hysteresis threshold, 0.1200% minimum)",
+    "price": 52.72,
     "scanner_env": "paper"
   }
 ]

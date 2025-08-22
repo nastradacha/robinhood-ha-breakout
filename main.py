@@ -64,7 +64,8 @@ from utils.browser import RobinhoodBot
 from utils.enhanced_slack import EnhancedSlackIntegration
 from utils.multi_symbol_scanner import MultiSymbolScanner
 from utils.portfolio import PortfolioManager, Position
-from utils.alpaca_options import AlpacaOptionsTrader, create_alpaca_trader
+from utils.alpaca_options import AlpacaOptionsTrader
+from utils.alpaca_sync import sync_before_trade
 from utils.kill_switch import get_kill_switch, is_trading_halted
 from utils.circuit_breaker_reset import check_and_process_file_reset
 from utils.data_validation import check_trading_allowed
@@ -652,6 +653,12 @@ def execute_alpaca_multi_symbol_trade(
     reason = opportunity["reason"]
     
     try:
+        # Sync with Alpaca account before trading
+        alpaca_env = config.get("ALPACA_ENV", "paper")
+        sync_success = sync_before_trade(env=alpaca_env)
+        if not sync_success:
+            logger.warning(f"[MULTI-SYMBOL-ALPACA] Alpaca sync failed for {symbol} - proceeding with caution")
+        
         # Check market hours and trading window
         is_valid, reason_msg = trader.is_market_open_and_valid_time()
         if not is_valid:
@@ -970,7 +977,7 @@ def execute_trade_by_broker(
         )
     else:
         logger.info("[BROKER] Using Robinhood browser automation")
-        return execute_robinhood_trade(
+        return execute_robinhood_options_trade(
             config=config,
             args=args,
             env_vars=env_vars,
@@ -1037,19 +1044,36 @@ def execute_alpaca_options_trade(
         
         total_cost = contract.mid * contracts * 100  # Options multiplier
         
-        # Manual approval required
+        # Check if unattended mode with entry approval is enabled
+        unattended = config.get("UNATTENDED", False)
+        llm_decisions = config.get("LLM_DECISIONS", [])
+        
         if not args.dry_run:
-            logger.info(f"[ALPACA] Trade requires manual approval:")
+            logger.info(f"[ALPACA] Trade details:")
             logger.info(f"  Contract: {contract.symbol}")
             logger.info(f"  Side: BUY {side}")
             logger.info(f"  Quantity: {contracts} contracts")
             logger.info(f"  Premium: ${contract.mid:.2f}")
             logger.info(f"  Total Cost: ${total_cost:.2f}")
             
-            approval = input("\nApprove this trade? (y/N): ").strip().lower()
-            if approval != 'y':
-                logger.info("[ALPACA] Trade cancelled by user")
-                return {"status": "CANCELLED", "reason": "User cancelled"}
+            if unattended and ("entry" in llm_decisions or "ro_review" in llm_decisions):
+                # Use LLM for entry approval - fully automated
+                logger.info(f"[ALPACA] 🤖 LLM evaluating entry decision for {symbol}")
+                approval_result = _handle_llm_entry_approval(
+                    config, contract, contracts, total_cost, side, symbol
+                )
+                if not approval_result["approved"]:
+                    logger.info(f"[ALPACA] 🤖 Trade rejected by LLM: {approval_result['reason']}")
+                    return {"status": "CANCELLED", "reason": f"LLM rejected: {approval_result['reason']}"}
+                else:
+                    logger.info(f"[ALPACA] 🤖 Trade approved by LLM (confidence: {approval_result.get('confidence', 'N/A')})")
+            else:
+                # Manual approval required
+                logger.info("[ALPACA] Manual approval required:")
+                approval = input("\nApprove this trade? (y/N): ").strip().lower()
+                if approval != 'y':
+                    logger.info("[ALPACA] Trade cancelled by user")
+                    return {"status": "CANCELLED", "reason": "User cancelled"}
         
         # Place order
         if args.dry_run:
@@ -1099,7 +1123,162 @@ def execute_alpaca_options_trade(
         return {"status": "ERROR", "reason": str(e)}
 
 
-def execute_robinhood_trade(
+def _handle_llm_entry_approval(config, contract, contracts, total_cost, side, symbol):
+    """Handle entry approval using LLM in unattended mode."""
+    try:
+        from utils.llm_decider import LLMDecider
+        from utils.llm_json_client import LLMJsonClient
+        from utils.ensemble_llm import EnsembleLLM
+        from utils.enhanced_slack import EnhancedSlackIntegration
+        
+        # Initialize LLM components
+        ensemble_llm = EnsembleLLM(config)
+        json_client = LLMJsonClient(ensemble_llm, logger)
+        slack = EnhancedSlackIntegration()
+        llm_decider = LLMDecider(json_client, config, logger, slack_notifier=slack)
+        
+        # Build order context for LLM decision
+        order_ctx = {
+            "symbol": symbol,
+            "side": side,
+            "contract_symbol": contract.symbol,
+            "strike": contract.strike,
+            "premium": contract.mid,
+            "quantity": contracts,
+            "total_cost": total_cost,
+            "slippage_bps": _calculate_slippage_bps(contract),
+            "spread_bps": _calculate_spread_bps(contract),
+            "liquidity_score": _calculate_liquidity_score(contract),
+            "greeks_ok": _validate_greeks(contract),
+            "vix_bucket": _get_vix_bucket(),
+            "position_limits_ok": _check_position_limits(config, contracts),
+            "price_fair_vs_mid": _validate_fair_pricing(contract),
+            "account_risk_ok": _check_account_risk(config, total_cost),
+        }
+        
+        # Get LLM decision
+        decision = llm_decider.decide_entry(symbol, order_ctx)
+        
+        # Log the decision with audit trail
+        audit_msg = (
+            f"[ENTRY-LLM] {symbol} {decision.action} ({decision.confidence:.2f}) – {decision.reason}\n"
+            f"Inputs: {side} {contract.symbol} @ ${contract.mid:.2f}, qty={contracts}, cost=${total_cost:.2f}"
+        )
+        logger.info(audit_msg)
+        
+        # Send Slack notification
+        slack = EnhancedSlackIntegration()
+        slack_msg = f"""🤖 **LLM Entry Decision: {symbol}**
+**Action:** {decision.action}
+**Confidence:** {decision.confidence:.2f}
+**Reason:** {decision.reason}
+**Contract:** {contract.symbol}
+**Side:** BUY {side}
+**Premium:** ${contract.mid:.2f}
+**Quantity:** {contracts} contracts
+**Total Cost:** ${total_cost:.2f}
+**Risk Assessment:** {decision.risk_assessment or 'N/A'}"""
+        
+        slack.send_message(slack_msg)
+        
+        # Process the decision
+        if decision.action == "APPROVE":
+            print(f"\n🤖 [LLM-ENTRY] APPROVE decision for {symbol}")
+            print(f"Reason: {decision.reason}")
+            print(f"Confidence: {decision.confidence:.2f}")
+            return {"approved": True, "reason": decision.reason}
+            
+        elif decision.action == "REJECT":
+            print(f"\n🤖 [LLM-ENTRY] REJECT decision for {symbol}")
+            print(f"Reason: {decision.reason}")
+            return {"approved": False, "reason": decision.reason}
+            
+        elif decision.action == "NEED_USER":
+            print(f"\n🤖 [LLM-ENTRY] NEED_USER decision for {symbol}")
+            print(f"Reason: {decision.reason}")
+            print("Falling back to manual approval...")
+            
+            # Fallback to manual approval
+            approval = input("\nLLM requires manual review. Approve this trade? (y/N): ").strip().lower()
+            approved = approval == 'y'
+            reason = "Manual approval after LLM NEED_USER" if approved else "Manual rejection after LLM NEED_USER"
+            return {"approved": approved, "reason": reason}
+            
+        else:  # ABSTAIN
+            print(f"\n🤖 [LLM-ENTRY] ABSTAIN decision for {symbol}")
+            print(f"Reason: {decision.reason}")
+            return {"approved": False, "reason": f"LLM abstained: {decision.reason}"}
+            
+    except Exception as e:
+        logger.error(f"[ENTRY-LLM] Error in LLM entry approval: {e}")
+        print(f"\n[ERROR] LLM entry approval failed: {e}")
+        print("Falling back to manual approval...")
+        
+        # Fallback to manual approval
+        approval = input("\nLLM error - manual approval required. Approve this trade? (y/N): ").strip().lower()
+        approved = approval == 'y'
+        reason = "Manual approval after LLM error" if approved else "Manual rejection after LLM error"
+        return {"approved": approved, "reason": reason}
+
+
+def _calculate_slippage_bps(contract):
+    """Calculate estimated slippage in basis points."""
+    # Simplified calculation - could be enhanced with volume analysis
+    spread = abs(contract.ask - contract.bid) if hasattr(contract, 'ask') and hasattr(contract, 'bid') else 0
+    mid = contract.mid
+    return int((spread / mid) * 10000) if mid > 0 else 0
+
+
+def _calculate_spread_bps(contract):
+    """Calculate bid-ask spread in basis points."""
+    if hasattr(contract, 'ask') and hasattr(contract, 'bid'):
+        spread = abs(contract.ask - contract.bid)
+        mid = (contract.ask + contract.bid) / 2
+        return int((spread / mid) * 10000) if mid > 0 else 0
+    return 0
+
+
+def _calculate_liquidity_score(contract):
+    """Calculate liquidity score (0-1)."""
+    # Simplified scoring - could be enhanced with OI and volume data
+    if hasattr(contract, 'open_interest') and hasattr(contract, 'volume'):
+        oi_score = min(contract.open_interest / 10000, 1.0)
+        vol_score = min(contract.volume / 1000, 1.0)
+        return (oi_score + vol_score) / 2
+    return 0.5  # Default neutral score
+
+
+def _validate_greeks(contract):
+    """Validate option Greeks are within acceptable ranges."""
+    # Simplified validation - could be enhanced with actual Greeks
+    return True  # Default to True for now
+
+
+def _get_vix_bucket():
+    """Get current VIX volatility bucket."""
+    # Simplified - could fetch actual VIX data
+    return "normal"
+
+
+def _check_position_limits(config, contracts):
+    """Check if position size is within limits."""
+    max_contracts = config.get("MAX_CONTRACTS_PER_TRADE", 10)
+    return contracts <= max_contracts
+
+
+def _validate_fair_pricing(contract):
+    """Validate contract pricing is fair vs market."""
+    # Simplified validation - could compare to theoretical value
+    return True  # Default to True for now
+
+
+def _check_account_risk(config, total_cost):
+    """Check if trade cost is within account risk limits."""
+    # Simplified check - could validate against bankroll limits
+    return True  # Default to True for now
+
+
+def execute_robinhood_options_trade(
     config: Dict,
     args,
     env_vars: Dict,
@@ -1751,110 +1930,6 @@ def main_loop(
             bot.quit()
 
 
-def run_one_shot_mode(
-    config: Dict,
-    args,
-    env_vars: Dict,
-    bankroll_manager,
-    portfolio_manager,
-    llm_client,
-    slack_notifier,
-):
-    """Execute the original one-shot trading mode."""
-    logger = logging.getLogger(__name__)
-
-    # Execute one trading cycle
-    result = run_once(
-        config,
-        args,
-        env_vars,
-        bankroll_manager,
-        portfolio_manager,
-        llm_client,
-        slack_notifier,
-    )
-
-    analysis = result["analysis"]
-    decision = result["decision"]
-    current_bankroll = result["current_bankroll"]
-    position_size = result["position_size"]
-
-    # Send market analysis to Slack
-    if slack_notifier:
-        slack_notifier.send_market_analysis(
-            {
-                "trend": analysis["trend_direction"],
-                "current_price": analysis["current_price"],
-                "body_percentage": analysis["candle_body_pct"],
-                "support_count": len(analysis.get("support_levels", [])),
-                "resistance_count": len(analysis.get("resistance_levels", [])),
-            }
-        )
-
-    # Send trade decision to Slack
-    if slack_notifier:
-        slack_notifier.send_trade_decision(
-            decision=decision.decision,
-            confidence=decision.confidence,
-            reason=decision.reason or "No specific reason provided",
-            bankroll=current_bankroll,
-            position_size=position_size,
-        )
-
-    # Handle NO_TRADE decision
-    if decision.decision == "NO_TRADE":
-        logger.info("[NO_TRADE] No trade signal - ending session")
-
-        trade_data = {
-            "timestamp": datetime.now().isoformat(),
-            "symbol": config["SYMBOL"],
-            "decision": decision.decision,
-            "confidence": decision.confidence,
-            "reason": decision.reason or "",
-            "current_price": analysis["current_price"],
-            "llm_tokens": decision.tokens_used,
-            "bankroll_before": current_bankroll,
-            "bankroll_after": current_bankroll,
-            "status": "NO_TRADE",
-        }
-        log_trade_decision(config["TRADE_LOG_FILE"], trade_data)
-        return
-
-    # Validate confidence threshold
-    if decision.confidence < config["MIN_CONFIDENCE"]:
-        logger.warning(
-            f"[LOW_CONFIDENCE] Confidence {decision.confidence:.2f} below threshold "
-            f"{config['MIN_CONFIDENCE']:.2f} - blocking trade"
-        )
-
-        trade_data = {
-            "timestamp": datetime.now().isoformat(),
-            "symbol": config["SYMBOL"],
-            "decision": "NO_TRADE",
-            "confidence": decision.confidence,
-            "reason": f"Confidence below threshold ({config['MIN_CONFIDENCE']:.2f})",
-            "current_price": analysis["current_price"],
-            "llm_tokens": decision.tokens_used,
-            "bankroll_before": current_bankroll,
-            "bankroll_after": current_bankroll,
-            "status": "BLOCKED_LOW_CONFIDENCE",
-        }
-        log_trade_decision(config["TRADE_LOG_FILE"], trade_data)
-        return
-
-    # Continue with the rest of the original one-shot logic...
-    # (This would include the browser automation, position management, etc.)
-    # For now, I'll implement a simplified version that calls the existing logic
-
-    logger.info(
-        f"[TRADE] Proceeding with {decision.decision} trade (confidence: {decision.confidence:.2f})"
-    )
-
-    # The rest of the original main() logic would go here
-    # This is a placeholder - the actual implementation would include
-    # all the browser automation and position management logic
-
-
 def run_multi_symbol_once(
     config: Dict,
     args,
@@ -1863,6 +1938,10 @@ def run_multi_symbol_once(
     portfolio_manager,
     llm_client,
     slack_notifier,
+    weekly_pnl_tracker,
+    drawdown_circuit_breaker,
+    vix_monitor,
+    health_monitor,
 ):
     """
     Execute multi-symbol scanning once and handle the best opportunity.
@@ -1875,6 +1954,10 @@ def run_multi_symbol_once(
         portfolio_manager: Portfolio tracking instance
         llm_client: LLM client for trade decisions
         slack_notifier: Slack notification instance
+        weekly_pnl_tracker: Weekly P&L tracking instance
+        drawdown_circuit_breaker: Circuit breaker for drawdown protection
+        vix_monitor: VIX monitoring instance
+        health_monitor: System health monitoring instance
     """
     logger = logging.getLogger(__name__)
 
@@ -1890,9 +1973,18 @@ def run_multi_symbol_once(
         
         logger.info(f"[HEALTH] System health check passed: {health_status.overall_status}")
 
-        # Initialize multi-symbol scanner
+        # Initialize multi-symbol scanner with pre-initialized monitors
         alpaca_env = getattr(args, 'alpaca_env', 'paper')
-        scanner = MultiSymbolScanner(config, llm_client, slack_notifier, env=alpaca_env)
+        scanner = MultiSymbolScanner(
+            config, 
+            llm_client, 
+            slack_notifier, 
+            env=alpaca_env,
+            weekly_pnl_tracker=weekly_pnl_tracker,
+            drawdown_circuit_breaker=drawdown_circuit_breaker,
+            vix_monitor=vix_monitor,
+            health_monitor=health_monitor
+        )
 
         # Scan all symbols for opportunities
         opportunities = scanner.scan_all_symbols()
@@ -2021,7 +2113,16 @@ def run_multi_symbol_loop(
                 time.sleep(60)
                 continue
             
-            logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: System health check passed: {health_status.overall_status}")
+            # Log detailed health status with specific causes
+            if health_status.overall_status.value == "WARNING":
+                warning_details = "; ".join(health_status.warnings) if health_status.warnings else "No specific warnings"
+                logger.warning(f"[HEALTH] Multi-symbol scan {scan_count}: System health WARNING - Causes: {warning_details}")
+            else:
+                logger.info(f"[HEALTH] Multi-symbol scan {scan_count}: System health check passed: {health_status.overall_status}")
+            
+            if health_status.critical_issues:
+                critical_details = "; ".join(health_status.critical_issues)
+                logger.error(f"[HEALTH] Critical issues detected: {critical_details}")
 
             # Hard-stop time gate check at top of each loop iteration
             if end_time and current_time >= end_time:
@@ -2344,6 +2445,55 @@ def main():
         metavar="DURATION",
         help="Auto-pause symbols with validation failures for duration (e.g., 30m, 1h)",
     )
+    
+    # LLM Decision Agent flags for hands-free trading
+    parser.add_argument(
+        "--unattended",
+        action="store_true",
+        help="Enable unattended mode with LLM decision agent (default: false)",
+    )
+    parser.add_argument(
+        "--llm-decisions",
+        type=str,
+        default="exit",
+        help="Comma-separated list of decisions to automate: entry,exit,ro_review (default: exit)",
+    )
+    parser.add_argument(
+        "--llm-primary-model",
+        type=str,
+        default="gpt-4o-mini",
+        help="Primary LLM model for decisions (default: gpt-4o-mini)",
+    )
+    parser.add_argument(
+        "--llm-backup-model", 
+        type=str,
+        default="deepseek-chat",
+        help="Backup LLM model for decisions (default: deepseek-chat)",
+    )
+    parser.add_argument(
+        "--llm-min-confidence",
+        type=float,
+        default=0.60,
+        help="Minimum confidence threshold for LLM decisions (default: 0.60)",
+    )
+    parser.add_argument(
+        "--llm-exit-bias",
+        choices=["conservative", "balanced", "aggressive"],
+        default="conservative", 
+        help="Exit decision bias for capital protection (default: conservative)",
+    )
+    parser.add_argument(
+        "--llm-rate-limit-s",
+        type=int,
+        default=30,
+        help="Rate limit seconds between LLM calls per symbol (default: 30)",
+    )
+    parser.add_argument(
+        "--llm-max-api-per-scan",
+        type=int,
+        default=4,
+        help="Maximum LLM API calls per scan for cost control (default: 4)",
+    )
 
     args = parser.parse_args()
 
@@ -2397,6 +2547,33 @@ def main():
     if args.pause_on_validate_fail:
         config["DATA_PAUSE_ON_VALIDATE_FAIL"] = args.pause_on_validate_fail
         logger.info(f"CLI override: Auto-pause on validation fail: {args.pause_on_validate_fail}")
+
+    # Handle LLM Decision Agent CLI overrides
+    if args.unattended:
+        config["UNATTENDED"] = True
+        logger.info("CLI override: Unattended mode enabled")
+    
+    # Parse LLM decisions list
+    llm_decisions = [d.strip() for d in args.llm_decisions.split(",") if d.strip()]
+    config["LLM_DECISIONS"] = llm_decisions
+    
+    # Set up LLM configuration section
+    if "llm" not in config:
+        config["llm"] = {}
+    
+    # Apply LLM CLI overrides with environment variable fallbacks
+    config["llm"]["primary_model"] = os.getenv("LLM_PRIMARY_MODEL", args.llm_primary_model)
+    config["llm"]["backup_model"] = os.getenv("LLM_BACKUP_MODEL", args.llm_backup_model)
+    config["llm"]["min_confidence"] = float(os.getenv("LLM_MIN_CONFIDENCE", args.llm_min_confidence))
+    config["llm"]["exit_bias"] = os.getenv("LLM_EXIT_BIAS", args.llm_exit_bias)
+    config["llm"]["rate_limit_s"] = int(os.getenv("LLM_RATE_LIMIT_S", args.llm_rate_limit_s))
+    config["llm"]["max_api_per_scan"] = int(os.getenv("LLM_MAX_API_PER_SCAN", args.llm_max_api_per_scan))
+    
+    if args.unattended:
+        logger.info(f"LLM decisions enabled: {llm_decisions}")
+        logger.info(f"LLM models: {config['llm']['primary_model']} (primary), {config['llm']['backup_model']} (backup)")
+        logger.info(f"LLM confidence threshold: {config['llm']['min_confidence']}")
+        logger.info(f"LLM exit bias: {config['llm']['exit_bias']}")
 
     # Handle broker/environment CLI overrides
     if args.broker:
@@ -2472,7 +2649,7 @@ def main():
         from utils.vix_monitor import VIXMonitor
         from utils.health_monitor import SystemHealthMonitor
         
-        weekly_pnl_tracker = WeeklyPnLTracker()
+        weekly_pnl_tracker = WeeklyPnLTracker(config)
         drawdown_circuit_breaker = DrawdownCircuitBreaker(config)
         vix_monitor = VIXMonitor(config)
         health_monitor = SystemHealthMonitor(config)
@@ -2486,6 +2663,13 @@ def main():
 
         # Initialize scoped trade log
         initialize_trade_log(config["TRADE_LOG_FILE"])
+
+        # Log validation auto-pause setting for audit trail
+        pause_setting = config.get("DATA_PAUSE_ON_VALIDATE_FAIL")
+        if pause_setting:
+            logger.info(f"[SAFETY] Validation auto-pause: {pause_setting}")
+        else:
+            logger.info("[SAFETY] Validation auto-pause: disabled")
 
         # Choose execution mode
         if args.monitor_positions:

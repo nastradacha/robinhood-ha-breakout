@@ -1,0 +1,6 @@
+{"ts": "2025-08-19T21:28:22.914037+00:00", "test_type": "unit_test", "value": 123}
+{"ts": "2025-08-19T21:28:22.914475+00:00", "type": "health_snapshot", "cpu_pct": 0.0, "rss_mb": 24.04, "extra": {"test": true}}
+{"ts": "2025-08-19T21:28:22.914723+00:00", "type": "incident", "event_type": "test_incident", "severity": "info", "symbol": "TEST", "context": "Unit test", "action": "none", "ttr_seconds": 0, "notes": "Test incident"}
+{"ts": "2025-08-20T16:37:34.234769+00:00", "test_type": "unit_test", "value": 123}
+{"ts": "2025-08-20T16:37:34.235358+00:00", "type": "health_snapshot", "cpu_pct": 14.0, "rss_mb": 212.22, "extra": {"test": true}}
+{"ts": "2025-08-20T16:37:34.235608+00:00", "type": "incident", "event_type": "test_incident", "severity": "info", "symbol": "TEST", "context": "Unit test", "action": "none", "ttr_seconds": 0, "notes": "Test incident"}

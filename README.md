@@ -98,18 +98,25 @@
    - Fills out the trade details automatically
    - **STOPS at the final "Submit" button** - you decide whether to click it!
 
-### 🔄 Two Ways to Use It
+### 🔄 Three Ways to Use It
 
 #### 🎯 **One-Shot Mode** (Traditional)
 - Run once, get one trade recommendation
 - Perfect for manual trading sessions
 - You control exactly when it runs
 
-#### 🔄 **Continuous Loop Mode** (NEW!)
+#### 🔄 **Continuous Loop Mode**
 - Runs automatically every few minutes
 - Monitors the market all morning
 - Sends you notifications when opportunities arise
 - Automatically stops at a time you set
+
+#### 🤖 **Unattended Mode** (NEW! - LLM Decision Agent)
+- **Fully hands-free trading** with AI-powered decision making
+- Replaces manual user prompts with intelligent LLM decisions
+- Maintains all hard safety rails and risk controls
+- Perfect for busy professionals who want automated trading
+- **You still control the final "Submit" button** on Robinhood trades
 
 ---
 
@@ -317,6 +324,156 @@ python monitor_alpaca.py --interval 2 --slack-notify
 - ✅ **Real-Time Data Integration**: Professional Alpaca market feeds
 - ✅ **Advanced Exit Strategies**: 15% profit targets with automatic execution
 - ✅ **Enterprise Logging**: Full audit trail of all decisions and executions
+
+### 🤖 LLM Decision Agent (AI-Powered Trading)
+
+**Status: ✅ Production Ready - All Critical Fixes Complete**
+
+Enable fully unattended options trading with AI-powered entry and exit decisions. **All 9 critical fixes implemented and validated** with enterprise-grade safety rails:
+python main.py --broker alpaca --unattended --llm-decisions entry,exit
+
+# Conservative exit-only automation (recommended start)
+python main.py --broker alpaca --unattended --llm-decisions exit
+
+# Full unattended trading with custom confidence threshold
+python main.py --broker alpaca --unattended --llm-decisions entry,exit --llm-min-confidence 0.70
+
+# Unattended mode with custom LLM models and bias
+python main.py --broker alpaca --unattended --llm-decisions entry,exit \
+  --llm-primary-model gpt-4o-mini --llm-backup-model deepseek-chat \
+  --llm-exit-bias conservative
+
+# Position monitoring with LLM exit decisions
+python monitor_alpaca.py --unattended --llm-decisions exit --interval 2
+```
+
+#### 🎯 **LLM Decision Types**
+
+- **`entry`**: Automates trade entry approval (replaces manual "Approve this trade?" prompts)
+- **`exit`**: Automates position exit decisions (replaces interactive exit confirmations)
+- **`ro_review`**: Automates Robinhood Review screen approval (legacy browser path)
+
+#### ⚙️ **Configuration Options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--unattended` | `false` | Enable unattended mode |
+| `--llm-decisions` | `exit` | Comma-separated list: `entry,exit,ro_review` |
+| `--llm-primary-model` | `gpt-4o-mini` | Primary LLM model |
+| `--llm-backup-model` | `deepseek-chat` | Backup model for failures |
+| `--llm-min-confidence` | `0.60` | Minimum confidence threshold (0.0-1.0) |
+| `--llm-exit-bias` | `balanced` | Exit bias: `conservative`, `balanced`, `aggressive` |
+| `--llm-rate-limit-s` | `30` | Rate limit between LLM calls per symbol |
+| `--llm-max-api-per-scan` | `4` | Maximum API calls per scan cycle |
+
+#### 🛡️ **Safety & Risk Controls**
+
+**All existing safety rails remain fully enforced:**
+- ✅ **Hard Risk Rails**: Position limits, account risk checks, circuit breakers
+- ✅ **Pre-LLM Gating**: Market hours, VIX spikes, earnings blocks
+- ✅ **Rate Limiting**: Prevents excessive API calls and costs
+- ✅ **Confidence Gating**: Low-confidence decisions fall back to manual approval
+- ✅ **Manual Fallback**: System requests user input if LLM fails or is uncertain
+- ✅ **Comprehensive Logging**: Full audit trail of all LLM decisions
+- ✅ **Slack Notifications**: Real-time alerts for all automated decisions
+
+#### 📊 **LLM Decision Context**
+
+The LLM receives comprehensive market context for intelligent decisions:
+
+**Entry Decisions:**
+```json
+{
+  "symbol": "SPY",
+  "direction": "CALL",
+  "strike": 628.0,
+  "premium": 1.85,
+  "quantity": 1,
+  "total_cost": 185.0,
+  "market_conditions": {
+    "vix": 18.5,
+    "trend": "BULLISH",
+    "breakout_strength": 0.72
+  },
+  "risk_metrics": {
+    "position_limits_ok": true,
+    "account_risk_pct": 3.2,
+    "liquidity_score": 0.85
+  }
+}
+```
+
+**Exit Decisions:**
+```json
+{
+  "symbol": "SPY",
+  "current_pnl_pct": 18.5,
+  "current_value": 219.25,
+  "entry_cost": 185.0,
+  "time_held": "2h 15m",
+  "market_conditions": {
+    "trend_change": false,
+    "volatility_spike": false,
+    "approaching_close": false
+  }
+}
+```
+
+#### 🚀 **Usage Examples**
+
+**Start Conservative (Exit-Only Automation):**
+```bash
+# Let LLM handle profit-taking decisions automatically
+python main.py --broker alpaca --multi-symbol --loop --interval 5 \
+  --unattended --llm-decisions exit --slack-notify
+```
+
+**Full Automation (Entry + Exit):**
+```bash
+# Complete hands-free trading with high confidence threshold
+python main.py --broker alpaca --multi-symbol --loop --interval 5 \
+  --unattended --llm-decisions entry,exit --llm-min-confidence 0.75 \
+  --slack-notify --end-at 15:30
+```
+
+**Custom LLM Configuration:**
+```bash
+# Use specific models with conservative exit bias
+python main.py --broker alpaca --unattended \
+  --llm-decisions entry,exit \
+  --llm-primary-model gpt-4o-mini \
+  --llm-backup-model deepseek-chat \
+  --llm-exit-bias conservative \
+  --llm-min-confidence 0.65
+```
+
+#### 📱 **Slack Audit Trail**
+
+All LLM decisions are logged and sent to Slack with full context:
+
+```
+🤖 [LLM-ENTRY] SPY CALL approved
+Confidence: 0.73
+Reason: Strong bullish breakout with volume confirmation
+Risk: 3.2% of account ($185 total)
+
+🤖 [LLM-EXIT] SPY position closed
+P&L: +$34.25 (+18.5%)
+Reason: Profit target achieved, trend showing weakness
+Hold Time: 2h 15m
+```
+
+#### 🔄 **Environment Variables**
+
+Override settings via environment variables:
+```bash
+# .env file
+LLM_PRIMARY_MODEL=gpt-4o-mini
+LLM_BACKUP_MODEL=deepseek-chat
+LLM_MIN_CONFIDENCE=0.70
+LLM_EXIT_BIAS=conservative
+LLM_RATE_LIMIT_S=45
+```
 
 ### 🔄 Continuous Loop Mode (NEW!)
 
@@ -1644,6 +1801,146 @@ When you submit a trade, the system automatically starts monitoring your positio
 2. **Real-Time Tracking**: Monitors your position every 15 seconds using real-time market data
 3. **Smart Alerts**: Sends Slack notifications when profit targets or stop-loss levels are hit
 4. **Graceful Cleanup**: Automatically stops monitoring when you exit the main script
+
+## 🤖 LLM Decision Agent (Unattended Mode)
+
+**Hands-Free AI-Powered Trading with Full Automation**
+
+The LLM Decision Agent replaces manual user prompts with intelligent AI decisions while maintaining all hard safety rails. Perfect for busy professionals who want automated trading without compromising on risk management.
+
+### 🎯 Key Features
+
+- **🤖 Intelligent Decision Making**: Uses GPT-4o-mini or DeepSeek to approve/reject trades
+- **🛡️ Hard Safety Rails**: All existing circuit breakers and risk controls remain active
+- **📊 Comprehensive Audit Trail**: Full logging and Slack notifications for every decision
+- **⚡ Rate Limiting**: Prevents excessive API costs with configurable limits
+- **🎚️ Confidence Gating**: Only acts on high-confidence decisions
+- **🔄 Conservative Bias**: Protects capital with configurable exit strategies
+
+### 🚀 CLI Flags
+
+#### Core Unattended Mode
+```bash
+# Enable unattended mode (default: false)
+--unattended
+
+# Specify which decisions to automate (default: exit)
+--llm-decisions entry,exit,ro_review
+```
+
+#### LLM Configuration
+```bash
+# Primary and backup models (defaults: gpt-4o-mini, deepseek-chat)
+--llm-primary-model gpt-4o-mini
+--llm-backup-model deepseek-chat
+
+# Minimum confidence threshold (default: 0.60)
+--llm-min-confidence 0.70
+
+# Exit decision bias (default: conservative)
+--llm-exit-bias conservative|balanced|aggressive
+```
+
+#### Rate Limiting & API Control
+```bash
+# Rate limit between calls per symbol (default: 30 seconds)
+--llm-rate-limit-s 45
+
+# Maximum API calls per scan cycle (default: 4)
+--llm-max-api-per-scan 6
+```
+
+### 📋 Usage Examples
+
+#### Basic Unattended Mode (Exit Decisions Only)
+```bash
+# Automate exit decisions only - safest option
+python main.py --loop --unattended --llm-decisions exit
+```
+
+#### Full Automation (Entry + Exit)
+```bash
+# Automate both entry and exit decisions
+python main.py --loop --unattended --llm-decisions entry,exit \
+  --llm-min-confidence 0.75 --llm-exit-bias conservative
+```
+
+#### Alpaca Paper Trading with LLM
+```bash
+# Test with Alpaca paper trading
+python main.py --loop --unattended --broker alpaca --env paper \
+  --llm-decisions entry,exit --llm-rate-limit-s 30
+```
+
+#### Conservative Configuration
+```bash
+# Maximum safety settings
+python main.py --loop --unattended --llm-decisions exit \
+  --llm-min-confidence 0.80 --llm-exit-bias conservative \
+  --llm-rate-limit-s 60 --llm-max-api-per-scan 2
+```
+
+### 🔧 Environment Variables
+
+Override CLI settings with environment variables:
+```bash
+# Model configuration
+export LLM_PRIMARY_MODEL="gpt-4o-mini"
+export LLM_BACKUP_MODEL="deepseek-chat"
+
+# Decision parameters
+export LLM_MIN_CONFIDENCE="0.70"
+export LLM_EXIT_BIAS="conservative"
+export LLM_RATE_LIMIT_S="30"
+```
+
+### 📊 Decision Types
+
+#### Exit Decisions (`--llm-decisions exit`)
+- **SELL**: Close position immediately
+- **HOLD**: Keep position open
+- **WAIT**: Defer decision for specified minutes
+- **ABSTAIN**: Require manual intervention
+
+#### Entry Decisions (`--llm-decisions entry,ro_review`)
+- **APPROVE**: Execute the trade
+- **REJECT**: Cancel the trade
+- **NEED_USER**: Require manual approval
+- **ABSTAIN**: Skip this opportunity
+
+### 🛡️ Safety Guarantees
+
+**Hard Rails (Never Overrideable by LLM):**
+- Daily/weekly circuit breakers
+- Kill switch activation
+- Stop loss at -25%
+- Force close at 15:45 ET
+- All existing pre-LLM gates
+
+**Quality Controls:**
+- Confidence gating (configurable threshold)
+- Rate limiting per symbol
+- JSON schema validation
+- Fallback to manual approval on errors
+
+### 📱 Slack Audit Trail
+
+Every LLM decision generates comprehensive Slack notifications:
+
+```
+🤖 LLM EXIT DECISION
+Symbol: SPY
+Action: SELL
+Confidence: 0.85
+Reason: Strong profit target reached, momentum weakening
+
+Position Context:
+• P&L: +12.5% ($125.50)
+• Time to Close: 45 min
+• Exit Bias: CONSERVATIVE
+
+Decision ID: 1692648000-SPY-EXIT
+```
 
 ### CLI Usage
 

@@ -48,6 +48,171 @@ from dataclasses import dataclass
 from decimal import Decimal
 from .llm import load_config
 
+# Helper functions for improved liquidity validation
+def _pct_spread(ask: float, bid: float) -> float:
+    """Calculate percentage spread"""
+    mid = (ask + bid) / 2 if ask and bid else None
+    if not mid or mid <= 0: 
+        return 1e9
+    return (ask - bid) / mid
+
+def _abs_spread(ask: float, bid: float) -> float:
+    """Calculate absolute spread"""
+    return (ask - bid) if ask and bid else 1e9
+
+def _liquidity_score(oi: int, vol: int, bid: float, ask: float, delta: float = None, 
+                    target_low: float = 0.35, target_high: float = 0.55) -> float:
+    """Calculate liquidity score (higher is better)"""
+    spread = _pct_spread(ask, bid)
+    abs_sp = _abs_spread(ask, bid)
+    mid = (ask + bid)/2 if ask and bid else 0.0
+    delta_penalty = 0.0 if (delta is None) else (
+        0.0 if target_low <= abs(delta) <= target_high else min(abs(abs(delta) - 0.45), 1.0)
+    )
+    return (
+        (min(oi, 2000) / 2000.0) * 0.45 +
+        (min(vol, 5000) / 5000.0) * 0.25 +
+        (max(0.0, 1.0 - min(spread, 0.50)/0.50)) * 0.20 +
+        (max(0.0, 1.0 - min(abs_sp, 0.50)/0.50)) * 0.05 +
+        (max(0.0, 1.0 - delta_penalty)) * 0.05
+    )
+
+def _get_dynamic_filter_tiers(mid_price: float, is_short_dte: bool = False) -> List[Dict]:
+    """Generate progressive filter tiers based on contract mid price and DTE"""
+    
+    # Base tier (strict)
+    base_tier = {
+        "name": "strict",
+        "min_oi": 300,
+        "max_spread_pct": 0.15,  # 15%
+        "max_spread_abs": 0.10
+    }
+    
+    # Adjust for low-priced contracts (mid < $0.50)
+    if mid_price < 0.50:
+        # Tier 1: Loosened for low-priced
+        tier1 = {
+            "name": "loosened_low_price",
+            "min_oi": 100 if not is_short_dte else 50,
+            "max_spread_pct": 0.40,  # 40%
+            "max_spread_abs": 0.20
+        }
+        
+        # Tier 2: Looser for very low-priced
+        tier2 = {
+            "name": "looser_low_price", 
+            "min_oi": 50 if not is_short_dte else 25,
+            "max_spread_pct": 0.50,  # 50%
+            "max_spread_abs": 0.20
+        }
+        
+        return [base_tier, tier1, tier2]
+    
+    # Standard tiers for higher-priced contracts
+    tier1 = {
+        "name": "loosened",
+        "min_oi": 100,
+        "max_spread_pct": 0.25,  # 25%
+        "max_spread_abs": 0.15
+    }
+    
+    tier2 = {
+        "name": "looser",
+        "min_oi": 50,
+        "max_spread_pct": 0.35,  # 35%
+        "max_spread_abs": 0.20
+    }
+    
+    return [base_tier, tier1, tier2]
+
+def _passes_liquidity_with_tier(tier: Dict, bid: float, ask: float, oi: int, vol: int) -> Tuple[bool, str]:
+    """Check if contract passes liquidity filters for a specific tier"""
+    mid = (ask + bid)/2 if ask and bid else 0
+    
+    # Junk liquidity guardrail: if spread > 35% and mid < $0.10, always reject
+    spread_pct = _pct_spread(ask, bid)
+    if spread_pct > 0.35 and mid < 0.10:
+        return False, f"junk_liquidity_guard_spread_{spread_pct:.1%}_mid_${mid:.2f}"
+    
+    pct_ok = spread_pct <= tier["max_spread_pct"]
+    
+    # Absolute spread check for low-priced contracts
+    abs_gate = tier.get("max_spread_abs")
+    abs_ok = True
+    if abs_gate is not None and mid < 1.0:
+        abs_ok = _abs_spread(ask, bid) <= abs_gate
+    
+    oi_ok = (oi or 0) >= tier["min_oi"]
+    vol_ok = (vol or 0) >= tier.get("min_vol", 0)
+    
+    # Return detailed reason for failure
+    if not pct_ok:
+        return False, f"spread_pct_{spread_pct:.1%}_>{tier['max_spread_pct']:.1%}"
+    if not abs_ok:
+        return False, f"spread_abs_${_abs_spread(ask, bid):.2f}_>${abs_gate:.2f}"
+    if not oi_ok:
+        return False, f"oi_{oi}_<_{tier['min_oi']}"
+    if not vol_ok:
+        return False, f"vol_{vol}_<_{tier.get('min_vol', 0)}"
+    
+    return True, "passed"
+
+def _passes_liquidity(cfg: Dict, bid: float, ask: float, oi: int, vol: int) -> Tuple[bool, str]:
+    """Legacy liquidity check - maintained for backward compatibility"""
+    pct_ok = _pct_spread(ask, bid) <= cfg["max_spread_pct"]
+    
+    # Absolute spread guard when mid < $1
+    mid = (ask + bid)/2 if ask and bid else 0
+    abs_gate = cfg.get("max_spread_abs", None)
+    abs_ok = True
+    if abs_gate is not None and mid < 1.0:
+        abs_ok = _abs_spread(ask, bid) <= abs_gate
+    
+    oi_ok = (oi or 0) >= cfg["min_oi"]
+    vol_ok = (vol or 0) >= cfg.get("min_vol", 0)
+    
+    # Return detailed reason for failure
+    if not pct_ok:
+        return False, f"spread_pct_{_pct_spread(ask, bid):.1%}_>{cfg['max_spread_pct']:.1%}"
+    if not abs_ok:
+        return False, f"spread_abs_${_abs_spread(ask, bid):.2f}_>${abs_gate:.2f}"
+    if not oi_ok:
+        return False, f"oi_{oi}_<_{cfg['min_oi']}"
+    if not vol_ok:
+        return False, f"vol_{vol}_<_{cfg.get('min_vol', 0)}"
+    
+    return True, "passed"
+
+def _get_symbol_options_config(symbol: str, config: Dict) -> Dict:
+    """Get options configuration for symbol with per-symbol overrides"""
+    # Get from alpaca.min_open_interest section (primary config structure)
+    alpaca_config = config.get("alpaca", {})
+    min_oi_config = alpaca_config.get("min_open_interest", {})
+    
+    # Get symbol-specific min_oi or use default
+    symbol_min_oi = min_oi_config.get(symbol, min_oi_config.get("default", 300))
+    
+    # Also check legacy options config structure for backwards compatibility
+    options_config = config.get("options", {})
+    default_config = options_config.get("default", {})
+    per_symbol_config = options_config.get("per_symbol", {}).get(symbol, {})
+    
+    # Merge configurations with alpaca config taking precedence
+    merged_config = {
+        "min_oi": symbol_min_oi,  # Use alpaca config
+        "min_vol": 0,
+        "max_spread_pct": alpaca_config.get("max_spread_pct", 0.15),
+        "max_spread_abs": alpaca_config.get("max_spread_abs", 0.10),
+        "expiry_search_days": [0, 1, 2],
+        "delta_target": [0.35, 0.55],
+        "allow_shares_fallback": False
+    }
+    
+    # Override with legacy per-symbol config if present
+    merged_config.update(per_symbol_config)
+    
+    return merged_config
+
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.data.historical import OptionHistoricalDataClient
@@ -239,29 +404,16 @@ class AlpacaOptionsTrader:
             # Load config for symbol-specific liquidity requirements
             config = load_config()
             
-            # Set symbol-aware and expiry-aware filtering criteria
-            if min_oi is None or min_vol is None or max_spread_pct is None:
-                # 0DTE options have different liquidity patterns
-                is_0dte = policy == '0DTE'
-                
-                # Get symbol-specific minimum OI from config
-                alpaca_config = config.get('alpaca', {})
-                min_oi_config = alpaca_config.get('min_open_interest', {})
-                symbol_min_oi = min_oi_config.get(symbol, min_oi_config.get('default', 10000))
-                
-                # Apply 0DTE adjustments to config-based values
-                if is_0dte:
-                    # 0DTE typically has lower liquidity, use 10% of weekly requirement
-                    min_oi = min_oi or max(100, int(symbol_min_oi * 0.1))
-                    min_vol = min_vol or 0    # Allow zero volume for 0DTE
-                    max_spread_pct = max_spread_pct or 15.0
-                else:
-                    # Use full config-based requirements for weekly options
-                    min_oi = min_oi or symbol_min_oi
-                    min_vol = min_vol or max(50, int(symbol_min_oi * 0.05))  # Volume = 5% of OI
-                    max_spread_pct = max_spread_pct or 12.0
+            # Get symbol-specific options configuration
+            symbol_config = _get_symbol_options_config(symbol, config)
             
-            logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, max_spread={max_spread_pct}%")
+            # Override with provided parameters or use symbol config
+            min_oi = min_oi or symbol_config["min_oi"]
+            min_vol = min_vol or symbol_config["min_vol"]
+            max_spread_pct = max_spread_pct or symbol_config["max_spread_pct"]
+            
+            logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, "
+                       f"max_spread_pct={max_spread_pct:.1%}, max_spread_abs=${symbol_config.get('max_spread_abs', 'N/A')}")
             # Get current stock price for ATM calculation
             from utils.alpaca_client import AlpacaClient
             alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
@@ -303,14 +455,25 @@ class AlpacaOptionsTrader:
                 if fallback_contract:
                     return fallback_contract
                 
+                # Check if shares fallback is allowed for this symbol
+                if symbol_config.get("allow_shares_fallback", False):
+                    logger.info(f"Options failed for {symbol}, shares fallback allowed")
+                    return self._create_shares_fallback_info(symbol, current_price, symbol_config)
+                
                 return None
             
             contract_list = contracts.option_contracts
             logger.info(f"Found {len(contract_list)} {side} contracts for {symbol}")
             
-            # Filter and score contracts
-            candidates = []
+            # Progressive backoff filtering with dynamic tiers
+            is_short_dte = policy == "0DTE" or (policy == "WEEKLY" and expiry_date == datetime.now().strftime("%Y-%m-%d"))
             
+            # Try progressive filtering tiers
+            candidates = []
+            successful_tier = None
+            
+            # First pass: collect all valid contracts with basic validation
+            all_contracts = []
             for contract in contract_list:
                 try:
                     # Get quote data using correct Alpaca API
@@ -319,12 +482,10 @@ class AlpacaOptionsTrader:
                     
                     # Extract quote data (response is keyed by symbol)
                     if not quote_response or contract.symbol not in quote_response:
-                        logger.info(f"Filtered {contract.symbol}: No quote response")
                         continue
                     
                     quote = quote_response[contract.symbol]
                     if not quote or not quote.bid_price or not quote.ask_price:
-                        logger.info(f"Filtered {contract.symbol}: Missing bid/ask prices")
                         continue
                     
                     bid = float(quote.bid_price)
@@ -332,30 +493,14 @@ class AlpacaOptionsTrader:
                     
                     # Skip stale or crossed quotes
                     if bid <= 0 or ask <= 0 or bid >= ask:
-                        logger.info(f"Filtered {contract.symbol}: Invalid quotes - bid=${bid:.2f}, ask=${ask:.2f}")
                         continue
                     
                     mid = (bid + ask) / 2
                     spread = ask - bid
                     spread_pct = (spread / mid) * 100 if mid > 0 else 999
                     
-                    # Apply liquidity filters (with type conversion and debugging)
                     oi = int(contract.open_interest or 0)
-                    vol = int(getattr(contract, 'volume', 0) or 0)
-                    
-                    if oi < min_oi:
-                        logger.info(f"Filtered {contract.symbol}: OI {oi} < {min_oi}")
-                        continue
-                    if vol < min_vol:
-                        logger.info(f"Filtered {contract.symbol}: Vol {vol} < {min_vol}")
-                        continue
-                    if spread_pct > max_spread_pct and spread > 0.10:
-                        logger.info(f"Filtered {contract.symbol}: Spread {spread_pct:.1f}% > {max_spread_pct}%")
-                        continue
-                    
-                    logger.info(f"Candidate {contract.symbol}: OI={oi}, Vol={vol}, Spread={spread_pct:.1f}%, Strike=${float(contract.strike_price):.2f}")
-                    
-                    # Calculate distance from ATM
+                    vol = int(getattr(contract, 'volume', 0))
                     strike = float(contract.strike_price)
                     atm_distance = abs(strike - current_price)
                     
@@ -366,10 +511,9 @@ class AlpacaOptionsTrader:
                         if delta and not (0.45 <= abs(delta) <= 0.55):
                             # Allow some flexibility for ATM contracts
                             if atm_distance > current_price * 0.02:  # > 2% from ATM
-                                logger.info(f"Filtered {contract.symbol}: Delta {delta:.3f} not ATM (distance {atm_distance:.2f})")
                                 continue
                     
-                    candidates.append({
+                    all_contracts.append({
                         'contract': contract,
                         'bid': bid,
                         'ask': ask,
@@ -378,19 +522,68 @@ class AlpacaOptionsTrader:
                         'spread_pct': spread_pct,
                         'atm_distance': atm_distance,
                         'delta': delta,
-                        'volume': getattr(contract, 'volume', 0)
+                        'volume': vol,
+                        'oi': oi
                     })
                     
                 except Exception as e:
                     logger.warning(f"Error processing contract {contract.symbol}: {e}")
                     continue
             
+            if not all_contracts:
+                logger.warning(f"No valid {side} contracts found for {symbol} after basic validation")
+            else:
+                logger.info(f"Found {len(all_contracts)} valid {side} contracts for {symbol}, applying progressive filtering")
+                
+                # Get dynamic filter tiers based on average mid price
+                avg_mid = sum(c['mid'] for c in all_contracts) / len(all_contracts)
+                filter_tiers = _get_dynamic_filter_tiers(avg_mid, is_short_dte)
+                
+                # Try each tier progressively
+                for tier in filter_tiers:
+                    tier_candidates = []
+                    
+                    for contract_data in all_contracts:
+                        passes_tier, failure_reason = _passes_liquidity_with_tier(
+                            tier, 
+                            contract_data['bid'], 
+                            contract_data['ask'], 
+                            contract_data['oi'], 
+                            contract_data['volume']
+                        )
+                        
+                        if passes_tier:
+                            tier_candidates.append(contract_data)
+                    
+                    if tier_candidates:
+                        candidates = tier_candidates
+                        successful_tier = tier['name']
+                        logger.info(f"Progressive filtering succeeded with tier '{successful_tier}': {len(candidates)} candidates (avg_mid=${avg_mid:.2f}, short_dte={is_short_dte})")
+                        break
+                    else:
+                        logger.info(f"Tier '{tier['name']}' found no candidates (min_oi={tier['min_oi']}, max_spread_pct={tier['max_spread_pct']:.1%})")
+                
+                if candidates:
+                    # Log details about successful candidates
+                    for candidate in candidates[:3]:  # Log top 3
+                        contract = candidate['contract']
+                        logger.info(f"Candidate {contract.symbol}: OI={candidate['oi']}, Vol={candidate['volume']}, Spread={candidate['spread_pct']:.1f}%, Strike=${float(contract.strike_price):.2f}")
+            
             if not candidates:
-                logger.warning(f"No suitable {side} contracts found after filtering {len(contract_list)} total contracts")
-                logger.info(f"Consider relaxing filtering criteria for {symbol} if this persists")
+                logger.warning(f"No suitable {side} contracts found after progressive filtering {len(contract_list)} total contracts")
+                if successful_tier:
+                    logger.info(f"Last successful tier was '{successful_tier}' but no candidates passed all filters")
+                else:
+                    logger.info(f"All progressive filtering tiers failed - consider manual review for {symbol}")
+                
+                # Check if shares fallback is enabled for this symbol
+                if symbol_config.get("allow_shares_fallback", False):
+                    logger.info(f"Options failed for {symbol}, shares fallback allowed")
+                    return self._create_shares_fallback_info(symbol, current_price, symbol_config)
+                
                 return None
             
-            logger.info(f"Found {len(candidates)} suitable {side} candidates for {symbol} after filtering")
+            logger.info(f"Found {len(candidates)} suitable {side} candidates for {symbol} using tier '{successful_tier}'")
             
             # Sort by: ATM distance, then spread, then volume
             candidates.sort(key=lambda x: (
@@ -404,7 +597,7 @@ class AlpacaOptionsTrader:
             
             logger.info(f"Selected contract: {contract.symbol} strike=${contract.strike_price} "
                        f"bid=${best['bid']:.2f} ask=${best['ask']:.2f} "
-                       f"spread={best['spread_pct']:.1f}% OI={contract.open_interest}")
+                       f"spread={best['spread_pct']:.1f}% OI={contract.open_interest} (tier: {successful_tier})")
             
             return ContractInfo(
                 symbol=contract.symbol,
@@ -418,13 +611,44 @@ class AlpacaOptionsTrader:
                 spread=best['spread'],
                 spread_pct=best['spread_pct'],
                 open_interest=contract.open_interest,
-                volume=best['volume'],
-                delta=best['delta']
+                volume=best.get('volume', 0),
+                delta=best.get('delta')
             )
             
         except Exception as e:
             logger.error(f"Error finding ATM contract for {symbol}: {e}")
             return None
+    
+    def _create_shares_fallback_info(self, symbol: str, current_price: float, symbol_config: Dict) -> ContractInfo:
+        """Create a shares fallback ContractInfo when options fail filters"""
+        fallback_budget_pct = symbol_config.get("shares_fallback_budget_pct", 0.5)
+        
+        logger.info(f"Creating shares fallback for {symbol} at ${current_price:.2f} "
+                   f"with {fallback_budget_pct:.1%} budget allocation")
+        
+        # Create a special ContractInfo that indicates shares fallback
+        contract_info = ContractInfo(
+            symbol=f"{symbol}_SHARES",  # Special marker for shares
+            underlying_symbol=symbol,
+            strike=current_price,  # Use current price as "strike"
+            expiry="SHARES",  # Special marker
+            option_type="SHARES",  # Special type
+            bid=current_price,
+            ask=current_price,
+            mid=current_price,
+            spread=0.0,  # No spread for shares
+            spread_pct=0.0,
+            open_interest=999999,  # Shares have infinite "liquidity"
+            volume=999999,
+            delta=1.0  # Shares have delta of 1.0
+        )
+        
+        # Add special attributes to mark this as shares fallback
+        contract_info.is_shares_fallback = True
+        contract_info.fallback_reason = "Options failed liquidity filters, using shares fallback"
+        contract_info.fallback_budget_pct = fallback_budget_pct
+        
+        return contract_info
     
     def _try_expiry_fallback(
         self,
@@ -550,8 +774,8 @@ class AlpacaOptionsTrader:
                     quote = quote_response[contract.symbol]
                     
                     # Calculate metrics
-                    bid = float(quote.bid) if quote.bid else 0.0
-                    ask = float(quote.ask) if quote.ask else 0.0
+                    bid = float(quote.bid_price) if hasattr(quote, 'bid_price') and quote.bid_price else 0.0
+                    ask = float(quote.ask_price) if hasattr(quote, 'ask_price') and quote.ask_price else 0.0
                     mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0.0
                     spread = ask - bid if bid > 0 and ask > 0 else float('inf')
                     spread_pct = (spread / mid * 100) if mid > 0 else float('inf')
@@ -609,8 +833,8 @@ class AlpacaOptionsTrader:
                 spread=best['spread'],
                 spread_pct=best['spread_pct'],
                 open_interest=contract.open_interest,
-                volume=best['volume'],
-                delta=best['delta']
+                volume=best.get('volume', 0),
+                delta=best.get('delta')
             )
             
         except Exception as e:
@@ -684,12 +908,12 @@ class AlpacaOptionsTrader:
         try:
             # Get current quote for limit price calculation
             quote = self.client.get_latest_quote(contract_symbol)
-            if not quote or not quote.bid or not quote.ask:
+            if not quote or not hasattr(quote, 'bid_price') or not quote.bid_price or not hasattr(quote, 'ask_price') or not quote.ask_price:
                 logger.error("Cannot get quote for limit order fallback")
                 return None
             
-            bid = float(quote.bid)
-            ask = float(quote.ask)
+            bid = float(quote.bid_price)
+            ask = float(quote.ask_price)
             mid = (bid + ask) / 2
             
             # Set aggressive limit price: max(mid, mid + $0.05, mid * 1.05)

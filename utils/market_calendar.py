@@ -31,9 +31,19 @@ class MarketHours:
     reason: Optional[str]  # Holiday name or early close reason
 
 class MarketCalendar:
-    """Enhanced market calendar with holiday and early close detection"""
+    """Market calendar with holiday and early close detection"""
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls, cache_dir: str = ".cache"):
+        if cls._instance is None:
+            cls._instance = super(MarketCalendar, cls).__new__(cls)
+        return cls._instance
     
     def __init__(self, cache_dir: str = ".cache"):
+        if self._initialized:
+            return
+            
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.cache_file = self.cache_dir / "market_calendar.json"
@@ -46,6 +56,7 @@ class MarketCalendar:
         
         # Load cached data
         self._cache = self._load_cache()
+        self._initialized = True
     
     def _load_cache(self) -> Dict:
         """Load cached market calendar data"""
@@ -147,6 +158,8 @@ class MarketCalendar:
             calendar_data = self._fetch_market_calendar(year)
             self._cache[year_key] = calendar_data
             self._save_cache()
+        else:
+            logger.debug(f"Using cached market calendar data for {year}")
         
         year_data = self._cache[year_key]
         holidays = year_data.get("holidays", {})

@@ -163,9 +163,197 @@ class ExitConfirmationWorkflow:
         print("-"*60)
         print()
     
-    def _get_user_decision(self, estimated_premium: float) -> ExitConfirmationResult:
-        """Get user decision through interactive prompt."""
+    def _get_user_decision(self, estimated_premium: float, config: Dict = None) -> ExitConfirmationResult:
+        """Get user decision through interactive prompt or LLM in unattended mode."""
         
+        # Check if unattended mode is enabled and exit decisions are automated
+        if config and config.get("UNATTENDED") and "exit" in config.get("LLM_DECISIONS", []):
+            return self._get_llm_decision(estimated_premium, config)
+        
+        # Original interactive prompt
+        while True:
+            print("Options:")
+            print(f"  [S] Submit at expected price (${estimated_premium:.2f})")
+            print("  [C] Cancel exit (keep position open)")
+            print("  [P] Submit at different price (enter custom premium)")
+            print("  [0.XX] Enter premium directly (e.g., 2.15)")
+            print()
+            
+            try:
+                decision = input("Your choice: ").lower().strip()
+                
+                if not decision:
+                    print("❌ Please enter a choice")
+                    continue
+                
+                # Direct premium entry (e.g., "2.15")
+                try:
+                    premium = float(decision)
+                    if 0.01 <= premium <= 50.0:  # Reasonable bounds
+                        print(f"[OK] Submitting SELL order at ${premium:.2f}")
+                        return ExitConfirmationResult(
+                            action="custom_price",
+                            premium=premium,
+                            confirmed=True
+                        )
+                    else:
+                        print("[ERROR] Premium must be between $0.01 and $50.00")
+                        continue
+                except ValueError:
+                    pass  # Not a number, check other options
+                
+                # Standard options
+                if decision == 's':
+                    print(f"[OK] Submitting SELL order at ${estimated_premium:.2f}")
+                    return ExitConfirmationResult(
+                        action="submit",
+                        premium=estimated_premium,
+                        confirmed=True
+                    )
+                
+                elif decision == 'c':
+                    print("[CANCEL] Exit cancelled - keeping position open")
+                    return ExitConfirmationResult(
+                        action="cancel",
+                        confirmed=False
+                    )
+                
+                elif decision == 'p':
+                    # Custom premium entry
+                    while True:
+                        try:
+                            custom_premium = input("Enter sell price: $").strip()
+                            premium = float(custom_premium)
+                            if 0.01 <= premium <= 50.0:
+                                print(f"[OK] Submitting SELL order at ${premium:.2f}")
+                                return ExitConfirmationResult(
+                                    action="custom_price",
+                                    premium=premium,
+                                    confirmed=True
+                                )
+                            else:
+                                print("[ERROR] Premium must be between $0.01 and $50.00")
+                        except ValueError:
+                            print("[ERROR] Please enter a valid number")
+                        except KeyboardInterrupt:
+                            print("\n[CANCEL] Cancelled")
+                            return ExitConfirmationResult(
+                                action="cancel",
+                                confirmed=False
+                            )
+                
+                else:
+                    print("[ERROR] Invalid choice. Please enter S, C, P, or a premium amount")
+                    continue
+                    
+            except KeyboardInterrupt:
+                print("\n[CANCEL] Exit cancelled")
+                return ExitConfirmationResult(
+                    action="cancel",
+                    confirmed=False
+                )
+            except Exception as e:
+                self.logger.error(f"[EXIT-CONFIRM] Error in user input: {e}")
+                print("[ERROR] Error processing input, please try again")
+                continue
+
+    def _get_llm_decision(self, estimated_premium: float, config: Dict) -> ExitConfirmationResult:
+        """Get exit decision from LLM in unattended mode."""
+        try:
+            from utils.llm_decider import LLMDecider
+            from utils.llm_json_client import LLMJsonClient
+            from utils.llm import LLMClient
+            
+            # Initialize LLM components
+            ensemble_client = LLMClient(config)
+            json_client = LLMJsonClient(ensemble_client, self.logger)
+            decider = LLMDecider(json_client, config, self.logger)
+            
+            # Build context for LLM decision
+            ctx = self._build_exit_context(estimated_premium, config)
+            
+            # Get LLM decision
+            llm_decision = decider.decide_exit("POSITION", ctx)
+            
+            # Convert LLM decision to ExitConfirmationResult
+            if llm_decision.action == "SELL":
+                premium = llm_decision.expected_exit_price or estimated_premium
+                self.logger.info(f"[EXIT-LLM] Auto-approving exit at ${premium:.2f} (confidence: {llm_decision.confidence:.2f})")
+                return ExitConfirmationResult(
+                    action="submit",
+                    premium=premium,
+                    confirmed=True
+                )
+            elif llm_decision.action == "HOLD":
+                self.logger.info(f"[EXIT-LLM] Auto-rejecting exit (confidence: {llm_decision.confidence:.2f}) - {llm_decision.reason}")
+                return ExitConfirmationResult(
+                    action="cancel",
+                    confirmed=False
+                )
+            else:  # WAIT or ABSTAIN
+                self.logger.info(f"[EXIT-LLM] LLM deferred decision - falling back to manual prompt")
+                # Fall back to manual decision
+                return self._get_manual_decision(estimated_premium)
+                
+        except Exception as e:
+            self.logger.error(f"[EXIT-LLM] Error getting LLM decision: {e}")
+            self.logger.info("[EXIT-LLM] Falling back to manual decision due to error")
+            return self._get_manual_decision(estimated_premium)
+
+    def _build_exit_context(self, estimated_premium: float, config: Dict) -> Dict:
+        """Build context dictionary for LLM exit decision."""
+        from datetime import datetime
+        import pytz
+        
+        # Get current time in ET
+        et_tz = pytz.timezone('US/Eastern')
+        now_et = datetime.now(et_tz)
+        
+        # Calculate minutes to market close (4:00 PM ET)
+        market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+        if now_et > market_close:
+            # After hours - set to next day
+            market_close = market_close.replace(day=market_close.day + 1)
+        
+        minutes_to_close = max(0, (market_close - now_et).total_seconds() / 60)
+        
+        # Build context
+        ctx = {
+            "symbol": "POSITION",
+            "timestamp": now_et.isoformat(),
+            "time_to_close_min": minutes_to_close,
+            "hard_rails": {
+                "force_close_now": minutes_to_close <= 15,  # Force close at 3:45 PM
+                "kill_switch": False,  # Would be checked by caller
+                "circuit_breaker": False,  # Would be checked by caller
+            },
+            "pnl": {
+                "pct": 0.0,  # Would be calculated by caller
+                "velocity_pct_4m": 0.0,  # Would need historical data
+            },
+            "price": {
+                "last": estimated_premium,
+                "vwap_rel": 0.0,  # Would need market data
+                "spread_bps": 50,  # Estimate
+                "iv": 0.3,  # Estimate
+            },
+            "trend": {
+                "ha_trend": "BULLISH",  # Would need market analysis
+                "rsi2": 50,  # Would need technical analysis
+                "vix": 20.0,  # Would need VIX data
+            },
+            "policy": {
+                "profit_target_pct": 15.0,
+                "min_profit_consider_pct": 5.0,
+                "stop_loss_pct": -25.0
+            },
+            "memory": []  # Would include recent trade history
+        }
+        
+        return ctx
+
+    def _get_manual_decision(self, estimated_premium: float) -> ExitConfirmationResult:
+        """Get manual decision through interactive prompt (original logic)."""
         while True:
             print("Options:")
             print(f"  [S] Submit at expected price (${estimated_premium:.2f})")

@@ -21,7 +21,7 @@ import os
 import logging
 import time
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import sys
 
@@ -30,6 +30,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.alpaca_client import AlpacaClient
 from utils.enhanced_slack import EnhancedSlackIntegration
+from utils.alpaca_sync import AlpacaSync
 from utils.exit_strategies import (
     ExitStrategyManager,
     load_exit_config_from_file,
@@ -65,6 +66,7 @@ class EnhancedPositionMonitor:
         try:
             from utils.llm import load_config  # lazy import to avoid cycles
             config = load_config("config.yaml")
+            self.config = config  # Store config for later use
 
             broker = config.get("BROKER", "robinhood")
             env = config.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
@@ -83,6 +85,7 @@ class EnhancedPositionMonitor:
             positions_file = "positions.csv"
             # Fallback Alpaca client (paper mode)
             self.alpaca = AlpacaClient(env="paper")
+            self.config = None  # No config available
 
         self.positions_file = positions_file
 
@@ -449,7 +452,20 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
         current_stock_price: float,
         current_option_price: float,
     ) -> None:
-        """Launch interactive exit confirmation workflow."""
+        """Launch interactive exit confirmation workflow or LLM decision if unattended."""
+        # Check if unattended mode is enabled
+        try:
+            from utils.llm import load_config
+            config = load_config("config.yaml")
+            unattended = config.get("UNATTENDED", False)
+            llm_decisions = config.get("LLM_DECISIONS", [])
+            
+            if unattended and "exit" in llm_decisions:
+                self._handle_llm_exit_decision(position, exit_decision, current_stock_price, current_option_price)
+                return
+        except Exception as e:
+            logger.warning(f"[EXIT] Could not check unattended mode, falling back to interactive: {e}")
+        
         try:
             # Import Windows-safe exit confirmation workflow
             from utils.exit_confirmation_safe import SafeExitConfirmationWorkflow
@@ -504,14 +520,211 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 print(f"\n[ERROR] Error in exit confirmation: {e}")
                 print("Please exit manually through your broker if desired")
         else:
-            logger.warning("[EXIT-CONFIRM] Exit workflow not available - please exit manually")
+            logger.error("[EXIT-CONFIRM] No exit confirmation workflow available")
+            print("\n[ERROR] Exit confirmation not available - please exit manually")
 
-    def check_legacy_alerts(
+    def _handle_llm_exit_decision(
+        self,
+        position: Dict,
+        exit_decision,
+        current_stock_price: float,
+        current_option_price: float,
+    ) -> None:
+        """Handle exit decision using LLM in unattended mode."""
+        try:
+            from utils.llm import load_config
+            from utils.llm_decider import LLMDecider
+            from utils.llm_json_client import LLMJsonClient
+            from utils.ensemble_llm import EnsembleLLM
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            
+            config = load_config("config.yaml")
+            
+            # Initialize LLM components
+            ensemble_llm = EnsembleLLM(config)
+            json_client = LLMJsonClient(ensemble_llm, logger)
+            llm_decider = LLMDecider(json_client, config, logger, slack_notifier=self.slack)
+            
+            # Build context for LLM decision
+            symbol = position.get("symbol", "UNKNOWN")
+            pnl_pct = float(position.get("pnl_pct", 0))
+            
+            # Get market time info
+            et_tz = ZoneInfo("America/New_York")
+            now = datetime.now(et_tz)
+            market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+            minutes_to_close = max(0, int((market_close - now).total_seconds() / 60))
+            
+            # Build comprehensive context
+            ctx = {
+                "symbol": symbol,
+                "timestamp": now.isoformat(),
+                "time_to_close_min": minutes_to_close,
+                "hard_rails": {
+                    "force_close_now": now.hour >= 15 and now.minute >= 45,
+                    "kill_switch": False,  # Would be checked by circuit breaker
+                    "circuit_breaker": False,  # Would be checked by circuit breaker
+                },
+                "pnl": {
+                    "pct": pnl_pct,
+                    "velocity_pct_4m": 0,  # Could be enhanced with historical tracking
+                },
+                "price": {
+                    "last": current_stock_price,
+                    "vwap_rel": 0,  # Could be enhanced with VWAP calculation
+                    "spread_bps": 0,  # Could be enhanced with option spread data
+                    "iv": 0,  # Could be enhanced with IV data
+                },
+                "trend": {
+                    "ha_trend": "unknown",  # Could be enhanced with HA data
+                    "rsi2": 50,  # Could be enhanced with RSI calculation
+                    "vix": 20,  # Could be enhanced with VIX data
+                },
+                "policy": {
+                    "profit_target_pct": 15.0,
+                    "min_profit_consider_pct": 5.0,
+                    "stop_loss_pct": -25.0
+                },
+                "memory": []  # Could be enhanced with trade history
+            }
+            
+            # Get LLM decision
+            decision = llm_decider.decide_exit(symbol, ctx)
+            
+            # Log the decision with audit trail
+            audit_msg = (
+                f"[EXIT-LLM] {symbol} {decision.action} ({decision.confidence:.2f}) – {decision.reason}\n"
+                f"Inputs: pnl={pnl_pct:.1f}%, ttc={minutes_to_close}min, price=${current_stock_price:.2f}"
+            )
+            logger.info(audit_msg)
+            
+            # Send Slack notification
+            slack_msg = f"""🤖 **LLM Exit Decision: {symbol}**
+**Action:** {decision.action}
+**Confidence:** {decision.confidence:.2f}
+**Reason:** {decision.reason}
+**Current P&L:** {pnl_pct:.1f}%
+**Stock Price:** ${current_stock_price:.2f}
+**Time to Close:** {minutes_to_close} minutes"""
+            
+            self.slack.send_message(slack_msg)
+            
+            # Execute the decision
+            if decision.action == "SELL":
+                print(f"\n🤖 [LLM-EXIT] Executing SELL decision for {symbol}")
+                print(f"Reason: {decision.reason}")
+                print(f"Confidence: {decision.confidence:.2f}")
+                
+                # Execute the sell order automatically
+                try:
+                    from utils.alpaca_options import AlpacaOptionsTrader
+                    trader = AlpacaOptionsTrader(config)
+                    
+                    # Get contract symbol from position
+                    contract_symbol = position.get("symbol", symbol)
+                    quantity = int(position.get("qty", 1))
+                    
+                    logger.info(f"[LLM-EXIT] Placing SELL order: {contract_symbol} x{quantity}")
+                    
+                    # Place market sell order
+                    order_id = trader.place_market_order(contract_symbol, quantity, "SELL")
+                    
+                    if order_id:
+                        logger.info(f"[LLM-EXIT] Order placed successfully: {order_id}")
+                        
+                        # Poll for fill
+                        fill_result = trader.poll_fill(order_id=order_id, timeout_s=90)
+                        
+                        if fill_result.status == "FILLED":
+                            logger.info(f"[LLM-EXIT] Order filled: {fill_result.filled_qty} contracts at ${fill_result.avg_fill_price:.2f}")
+                            
+                            # Send success notification
+                            success_msg = f"""✅ **Automated Exit Executed: {symbol}**
+**Order ID:** {order_id}
+**Quantity:** {fill_result.filled_qty} contracts
+**Fill Price:** ${fill_result.avg_fill_price:.2f}
+**P&L:** {pnl_pct:.1f}%
+**LLM Reason:** {decision.reason}
+**Confidence:** {decision.confidence:.2f}"""
+                            
+                            self.slack.send_message(success_msg)
+                            
+                        else:
+                            logger.warning(f"[LLM-EXIT] Order not filled: {fill_result.status}")
+                            
+                            # Send warning notification
+                            warning_msg = f"""⚠️ **Exit Order Not Filled: {symbol}**
+**Order ID:** {order_id}
+**Status:** {fill_result.status}
+**Manual intervention may be required**"""
+                            
+                            self.slack.send_message(warning_msg)
+                    else:
+                        logger.error(f"[LLM-EXIT] Failed to place sell order for {symbol}")
+                        
+                        # Send error notification
+                        error_msg = f"""❌ **Exit Order Failed: {symbol}**
+**Error:** Order placement failed
+**Manual intervention required**"""
+                        
+                        self.slack.send_message(error_msg)
+                        
+                except Exception as order_error:
+                    logger.error(f"[LLM-EXIT] Error executing sell order: {order_error}")
+                    
+                    # Send error notification
+                    error_msg = f"""❌ **Exit Execution Error: {symbol}**
+**Error:** {str(order_error)}
+**Manual intervention required**"""
+                    
+                    self.slack.send_message(error_msg)
+                
+                # Record the automated exit decision
+                try:
+                    from utils.trade_confirmation import TradeConfirmationManager
+                    confirmation_manager = TradeConfirmationManager()
+                    confirmation_manager.record_trade_outcome(
+                        symbol=symbol,
+                        action="SELL",
+                        fill_price=current_option_price,
+                        pnl_pct=pnl_pct,
+                        reason=f"LLM Auto-Exit: {decision.reason}",
+                        confidence=decision.confidence
+                    )
+                except Exception as e:
+                    logger.warning(f"[EXIT-LLM] Could not record trade outcome: {e}")
+                
+            elif decision.action in ["HOLD", "WAIT"]:
+                defer_min = decision.defer_minutes or 2
+                print(f"\n🤖 [LLM-EXIT] {decision.action} decision for {symbol}")
+                print(f"Reason: {decision.reason}")
+                print(f"Next check in {defer_min} minutes")
+                
+            elif decision.action == "ABSTAIN":
+                print(f"\n🤖 [LLM-EXIT] ABSTAIN decision for {symbol}")
+                print(f"Reason: {decision.reason}")
+                print("Manual intervention may be required")
+                
+        except Exception as e:
+            logger.error(f"[EXIT-LLM] Error in LLM exit decision: {e}")
+            print(f"\n[ERROR] LLM exit decision failed: {e}")
+            print("Falling back to manual exit confirmation")
+            
+            # Fallback to interactive mode
+            try:
+                from utils.exit_confirmation_safe import SafeExitConfirmationWorkflow
+                exit_workflow = SafeExitConfirmationWorkflow()
+                result = exit_workflow.confirm_exit(
+                    position, exit_decision, current_stock_price, current_option_price
+                )
+            except Exception as fallback_error:
+                logger.error(f"[EXIT-LLM] Fallback also failed: {fallback_error}")
+
+    def _legacy_alert_system(
         self,
         position: Dict,
         current_price: float,
-        option_price: float,
-        pnl: float,
         pnl_pct: float,
         position_key: str,
         current_time: datetime,

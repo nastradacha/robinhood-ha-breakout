@@ -49,6 +49,78 @@ multi_symbol:
   symbols: ["SPY", "QQQ", "IWM", "UVXY", "TLT", "DIA", "XLK", "XLF", "XLE"]
   max_concurrent_trades: 1
 
+# Per-symbol TR thresholds for better trade capture
+MIN_TR_RANGE_PCT: 0.5  # Global fallback
+PER_SYMBOL_TR_THRESHOLDS:
+  SPY: 0.10    # Large cap index - midday adjusted
+  QQQ: 0.15    # Tech heavy - midday adjusted  
+  IWM: 0.15    # Small cap - midday adjusted
+  DIA: 0.10    # Blue chip - midday adjusted
+  XLF: 0.12    # Financial sector - midday adjusted
+  XLK: 0.18    # Tech sector - midday adjusted
+  XLE: 0.20    # Energy sector - midday adjusted
+  TLT: 0.08    # Treasury bonds - midday adjusted
+  UVXY: 0.80   # Volatility ETF - dynamic based on VIX
+
+# Dynamic UVXY TR thresholds based on VIX regime
+UVXY_DYNAMIC_TR:
+  enabled: true
+  vix_low: 18.0      # VIX < 18 = low volatility
+  vix_high: 25.0     # VIX > 25 = high volatility
+  tr_low: 0.60       # UVXY min TR when VIX < 18
+  tr_medium: 0.80    # UVXY min TR when 18 <= VIX < 25
+  tr_high: 1.00      # UVXY min TR when VIX >= 25
+
+# VIX-based UVXY trading guardrail
+UVXY_VIX_THRESHOLD: 18.0  # Skip UVXY when VIX < 18
+
+# Data validation configuration
+DATA_VALIDATION_ENABLED: true
+DATA_USE_YAHOO_VALIDATION: false  # Disable unreliable Yahoo Finance validation
+DATA_USE_INTERNAL_VALIDATION: true  # Use Alpaca historical data for validation
+DATA_MAX_DISCREPANCY_PCT: 2.0  # Allow 2% variance for internal validation
+DATA_HISTORICAL_LOOKBACK_MINUTES: 15  # Compare against 15min historical data
+
+# Pre-LLM momentum and body percentage gates
+PRE_LLM_GATES:
+  enabled: true
+  min_body_pct:
+    SPY: 0.05    # Large cap index
+    QQQ: 0.05    # Tech heavy
+    DIA: 0.05    # Blue chip
+    XLF: 0.05    # Financial sector
+    IWM: 0.06    # Small cap - slightly higher
+    XLK: 0.06    # Tech sector - slightly higher
+    XLE: 0.07    # Energy sector - highest
+    TLT: 0.04    # Treasury bonds - lowest
+    UVXY: 0.08   # Volatility ETF - highest
+  momentum_checks: 2  # Require at least 2 of 3 momentum indicators
+
+# Ensemble LLM configuration
+ENSEMBLE_ENABLED: true
+ENSEMBLE_MODELS: ["gpt-4o-mini", "deepseek-chat"]  # Fixed DeepSeek integration
+ENSEMBLE_TIMEOUT: 12  # Increased timeout for DeepSeek (8-10s response time)
+ENSEMBLE_EARLY_EXIT_CONFIDENCE: 0.7  # Early exit if NO_TRADE with this confidence
+
+# Options configuration with per-symbol overrides
+options:
+  default:
+    min_oi: 300
+    min_vol: 0
+    max_spread_pct: 0.15
+    max_spread_abs: 0.10            # Used when option premium < $1.00
+    expiry_search_days: [0, 1, 2]   # 0=0DTE, then +1, +2
+    delta_target: [0.35, 0.55]      # ATM-ish; improves fill odds
+    allow_shares_fallback: false
+  per_symbol:
+    UVXY:
+      min_oi: 150                   # UVXY tolerates lower OI
+      max_spread_pct: 0.25          # Higher spread tolerance for vol ETF
+      max_spread_abs: 0.08          # Cap absolute spread for low premiums
+      expiry_search_days: [0, 1, 2, 3] # Extended search if no 0DTE
+      allow_shares_fallback: true   # Allow shares if options fail
+      shares_fallback_budget_pct: 0.5   # Use same 50% dry-run sizing
+
 # Required config keys for main.py
 START_CAPITAL: 1000
 START_CAPITAL_DEFAULT: 500

@@ -1,0 +1,62 @@
+{
+  "SPY": {
+    "state": "quarantined",
+    "reason": "Suspected corporate action: 5:1 forward split",
+    "quarantined_at": "2025-08-21T15:23:39.933992",
+    "current_price": 100.0,
+    "historical_price": 636.365,
+    "stable_scans": 0,
+    "last_scan": "2025-08-21T15:23:39.933992",
+    "suspected_split": {
+      "factor": 5.0,
+      "description": "5:1 forward split",
+      "detected_at": "2025-08-21T15:23:39.933992"
+    }
+  },
+  "QQQ": {
+    "state": "quarantined",
+    "reason": "Suspected corporate action: 5:1 forward split",
+    "quarantined_at": "2025-08-21T15:23:40.011589",
+    "current_price": 100.0,
+    "historical_price": 563.96,
+    "stable_scans": 0,
+    "last_scan": "2025-08-21T15:23:40.011589",
+    "suspected_split": {
+      "factor": 5.0,
+      "description": "5:1 forward split",
+      "detected_at": "2025-08-21T15:23:40.011589"
+    }
+  },
+  "IWM": {
+    "state": "quarantined",
+    "reason": "Large price discrepancy: 55.8%",
+    "quarantined_at": "2025-08-21T15:23:40.075465",
+    "current_price": 100.0,
+    "historical_price": 226.22,
+    "stable_scans": 0,
+    "last_scan": "2025-08-21T15:23:40.075465"
+  },
+  "TSLA": {
+    "state": "quarantined",
+    "reason": "Suspected corporate action: 3:1 forward split",
+    "quarantined_at": "2025-08-21T15:23:40.140229",
+    "current_price": 100.0,
+    "historical_price": 322.17,
+    "stable_scans": 0,
+    "last_scan": "2025-08-21T15:23:40.140229",
+    "suspected_split": {
+      "factor": 3.003003003003003,
+      "description": "3:1 forward split",
+      "detected_at": "2025-08-21T15:23:40.140229"
+    }
+  },
+  "NVDA": {
+    "state": "quarantined",
+    "reason": "Large price discrepancy: 42.8%",
+    "quarantined_at": "2025-08-21T15:23:40.211262",
+    "current_price": 100.0,
+    "historical_price": 174.9601,
+    "stable_scans": 0,
+    "last_scan": "2025-08-21T15:23:40.211262"
+  }
+}

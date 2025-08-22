@@ -244,9 +244,16 @@ class CircuitBreakerResetManager:
             return []
 
 
+_reset_manager_instance = None
+
 def get_reset_manager(config: Dict) -> CircuitBreakerResetManager:
-    """Factory function to get CircuitBreakerResetManager instance"""
-    return CircuitBreakerResetManager(config)
+    """Factory function to get CircuitBreakerResetManager singleton instance"""
+    global _reset_manager_instance
+    
+    if _reset_manager_instance is None:
+        _reset_manager_instance = CircuitBreakerResetManager(config)
+    
+    return _reset_manager_instance
 
 
 def check_and_process_file_reset(config: Dict) -> Tuple[bool, str]:

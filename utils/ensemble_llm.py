@@ -27,6 +27,8 @@ Version: 0.6.0
 import logging
 from typing import Dict, List, Tuple, Optional
 from collections import Counter
+import concurrent.futures
+import time
 
 from .llm import LLMClient, TradeDecision, load_config
 
@@ -41,19 +43,32 @@ class EnsembleLLM:
     quality through consensus and reduces single-model bias.
     """
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+    
     def __init__(self):
         """Initialize ensemble with configured models."""
+        if self._initialized:
+            return
+            
         self.config = load_config()
         self.enabled = self.config.get("ENSEMBLE_ENABLED", True)
         self.models = self.config.get("ENSEMBLE_MODELS", ["gpt-4o-mini", "deepseek-chat"])
         
         if not self.enabled:
             logger.info("[ENSEMBLE] Ensemble disabled, using single-model fallback")
+            self._initialized = True
             return
             
         if len(self.models) < 2:
             logger.warning(f"[ENSEMBLE] Less than 2 models configured: {self.models}, disabling ensemble")
             self.enabled = False
+            self._initialized = True
             return
             
         # Initialize LLM clients for each model
@@ -70,6 +85,8 @@ class EnsembleLLM:
             self.enabled = False
         else:
             logger.info(f"[ENSEMBLE] Ensemble enabled with {len(self.clients)} models: {list(self.clients.keys())}")
+            
+        self._initialized = True
     
     def choose_trade(self, payload: Dict) -> Dict:
         """
@@ -95,29 +112,81 @@ class EnsembleLLM:
                 "reason": f"Single-model decision (ensemble disabled): {decision.reason}"
             }
         
-        # Collect decisions from all available models
+        # Collect decisions from all available models in parallel with timeout
         decisions = []
         failed_models = []
+        timeout_seconds = self.config.get("ENSEMBLE_TIMEOUT", 6)  # 6s total timeout
+        early_exit_confidence = self.config.get("ENSEMBLE_EARLY_EXIT_CONFIDENCE", 0.7)
         
-        for model_name, client in self.clients.items():
+        def query_model(model_name, client):
+            """Query a single model and return result."""
             try:
                 logger.info(f"[ENSEMBLE] Querying {model_name}...")
+                start_time = time.time()
                 decision = client.make_trade_decision(payload)
-                decisions.append({
+                elapsed = time.time() - start_time
+                
+                result = {
                     "model": model_name,
                     "decision": decision.decision,
                     "confidence": decision.confidence,
-                    "reason": decision.reason or f"{model_name} decision"
-                })
-                logger.info(f"[ENSEMBLE] {model_name}: {decision.decision} (conf: {decision.confidence:.3f})")
+                    "reason": decision.reason or f"{model_name} decision",
+                    "elapsed": elapsed
+                }
+                logger.info(f"[ENSEMBLE] {model_name}: {decision.decision} (conf: {decision.confidence:.3f}) [{elapsed:.1f}s] - {decision.reason or 'No reason provided'}")
+                return result
             except Exception as e:
                 logger.warning(f"[ENSEMBLE] {model_name} failed: {e}")
-                failed_models.append(model_name)
+                raise e
+        
+        # Execute models in parallel with timeout
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.clients)) as executor:
+            # Submit all tasks
+            future_to_model = {
+                executor.submit(query_model, model_name, client): model_name 
+                for model_name, client in self.clients.items()
+            }
+            
+            # Process results as they complete, with improved timeout handling
+            try:
+                for future in concurrent.futures.as_completed(future_to_model, timeout=timeout_seconds):
+                    model_name = future_to_model[future]
+                    try:
+                        result = future.result(timeout=1.0)  # Individual result timeout
+                        decisions.append(result)
+                        
+                        # Early exit if first model returns NO_TRADE with high confidence
+                        if (result["decision"] == "NO_TRADE" and 
+                            result["confidence"] >= early_exit_confidence and 
+                            len(decisions) == 1):
+                            logger.info(f"[ENSEMBLE] Early exit: {model_name} NO_TRADE with {result['confidence']:.3f} confidence")
+                            # Cancel remaining futures
+                            for remaining_future in future_to_model:
+                                if remaining_future != future:
+                                    remaining_future.cancel()
+                            break
+                            
+                    except Exception as e:
+                        logger.warning(f"[ENSEMBLE] {model_name} failed: {e}")
+                        failed_models.append(model_name)
+                        
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"[ENSEMBLE] Timeout after {timeout_seconds}s, using available results")
+                # Cancel remaining futures on timeout and wait for cancellation
+                for future in future_to_model:
+                    if not future.done():
+                        future.cancel()
+                        model_name = future_to_model[future]
+                        failed_models.append(model_name)
+                        logger.warning(f"[ENSEMBLE] Cancelled {model_name} due to timeout")
+                        
+                # Wait briefly for cancellations to complete
+                time.sleep(0.1)
         
         # Handle failure cases
         if not decisions:
-            logger.error("[ENSEMBLE] All LLM providers failed - attempting rule-based fallback")
-            return self._rule_based_fallback(payload)
+            logger.error("[ENSEMBLE] All LLM providers failed")
+            raise RuntimeError("All LLM providers failed")
         
         if len(decisions) == 1:
             logger.warning(f"[ENSEMBLE] Only one model succeeded, using single decision")
@@ -229,21 +298,56 @@ class EnsembleLLM:
                 "reason": "All models abstained from voting due to parse failures"
             }
         
-        # Count votes for each decision type (excluding ABSTAIN)
-        vote_counts = Counter(d["decision"] for d in voting_decisions)
-        max_votes = max(vote_counts.values())
-        winners = [decision for decision, count in vote_counts.items() if count == max_votes]
+        # New ensemble veto policy: Only block if BOTH models say NO_TRADE
+        votes = [d["decision"] for d in voting_decisions if d["decision"] in {"CALL", "PUT", "NO_TRADE"}]
+        vote_counts = Counter(votes)
         
         logger.info(f"[ENSEMBLE] Vote counts: {dict(vote_counts)} (abstained: {abstain_count})")
         
-        # Case 1: Clear majority winner
-        if len(winners) == 1:
-            winning_decision = winners[0]
+        # Case 1: No valid votes - defer to rules
+        if len(votes) == 0:
+            logger.info("[ENSEMBLE] No valid votes - deferring to rules")
+            return {
+                "decision": "NO_TRADE",
+                "confidence": 0.0,
+                "reason": "No valid ensemble votes - deferred to rules"
+            }
+        
+        # Case 2: Both models say NO_TRADE - block trade
+        if len(votes) >= 2 and all(v == "NO_TRADE" for v in votes):
+            no_trade_votes = [d for d in voting_decisions if d["decision"] == "NO_TRADE"]
+            avg_confidence = sum(d["confidence"] for d in no_trade_votes) / len(no_trade_votes)
+            reasons = [d["reason"] for d in no_trade_votes]
+            
+            logger.info(f"[ENSEMBLE] Both models agree: NO_TRADE (conf: {avg_confidence:.3f})")
+            
+            return {
+                "decision": "NO_TRADE",
+                "confidence": round(avg_confidence, 3),
+                "reason": f"Unanimous NO_TRADE ({len(no_trade_votes)}/{len(voting_decisions)} models). Reasons: {'; '.join(reasons)}"
+            }
+        
+        # Case 3: Mixed votes (TRADE + NO_TRADE) - defer to rules but allow trade
+        if "NO_TRADE" in votes and any(v in {"CALL", "PUT"} for v in votes):
+            trade_votes = [d for d in voting_decisions if d["decision"] in {"CALL", "PUT"}]
+            if trade_votes:
+                best_trade = max(trade_votes, key=lambda x: x["confidence"])
+                logger.info(f"[ENSEMBLE] Mixed votes - deferring to trade signal: {best_trade['decision']}")
+                
+                return {
+                    "decision": best_trade["decision"],
+                    "confidence": round(best_trade["confidence"], 3),
+                    "reason": f"Mixed ensemble votes - trade signal wins: {best_trade['reason']}"
+                }
+        
+        # Case 4: Clear majority winner (all CALL or all PUT)
+        if len(set(votes)) == 1:
+            winning_decision = votes[0]
             winning_votes = [d for d in voting_decisions if d["decision"] == winning_decision]
             avg_confidence = sum(d["confidence"] for d in winning_votes) / len(winning_votes)
             
             reasons = [d["reason"] for d in winning_votes]
-            combined_reason = f"Majority vote: {winning_decision} ({len(winning_votes)}/{len(voting_decisions)} voting models). " + \
+            combined_reason = f"Majority vote: {winning_decision} ({len(winning_votes)}/{len(voting_decisions)} models). " + \
                             f"Reasons: {'; '.join(reasons)}"
             
             logger.info(f"[ENSEMBLE] Majority winner: {winning_decision} (conf: {avg_confidence:.3f})")

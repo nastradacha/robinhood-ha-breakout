@@ -65,11 +65,12 @@ def launch_dry_run():
         logger.warning("Weekend detected - system will wait for market open")
     
     # Log dry run start
-    logger.info("Starting US-FA-014 Full Automation Dry Run")
+    logger.info("Starting US-FA-014 Full Automation Dry Run - UNATTENDED MODE")
     logger.info("Configuration: %s", config_path)
     logger.info("Symbols: %s", config['app']['symbols'])
     logger.info("Position sizing: %s%%", config['broker']['position_sizing_pct'] * 100)
     logger.info("Safety: Strict validation enabled, 30m pause on failures")
+    logger.info("LLM Automation: Entry and exit decisions enabled")
     logger.info("End time: %s ET", config['app']['end_at'])
     
     # Log incident for dry run start
@@ -92,7 +93,13 @@ def launch_dry_run():
         "--multi-symbol",
         "--config", config_path,
         "--strict-validation",
-        "--end-at", config['app']['end_at']
+        "--end-at", config['app']['end_at'],
+        "--loop",
+        "--interval", "2",
+        "--pause-on-validate-fail", "30m",
+        "--slack-notify",
+        "--unattended",
+        "--llm-decisions", "entry,exit"
     ]
     
     print("\nLaunch Command:")
@@ -103,7 +110,8 @@ def launch_dry_run():
     print(f"  • Incidents: monitoring/incident_log.csv")
     print(f"  • Slack: {config['notifiers']['slack']['channel']}")
     
-    print("\nPre-flight checks complete. Ready for dry run launch!")
+    print("\nPre-flight checks complete. Ready for FULLY UNATTENDED dry run launch!")
+    print("🤖 LLM will handle all entry and exit decisions automatically")
     print("Remember to monitor the first 72 hours intensively.")
     
     return launch_cmd

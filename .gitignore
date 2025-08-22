@@ -41,7 +41,7 @@ env/
 *.swo
 *~
 
-Logs
+# Logs
 logs/*.log
 logs/*.csv
 *.log

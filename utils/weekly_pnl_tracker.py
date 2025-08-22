@@ -35,28 +35,27 @@ class WeeklyPnLTracker:
     - Historical daily P&L storage for weekly analysis
     - Configurable weekly loss threshold (default: 15%)
     - Performance summary generation for strategy analysis
-    - Persistent state management across system restarts
-    - Integration with existing daily P&L tracking
     """
+    _initialized = False
     
     def __init__(self, config: Dict = None):
-        """Initialize WeeklyPnLTracker with configuration"""
-        if config is None:
-            config = load_config()
-        
-        self.config = config
-        self.state_file = Path("weekly_pnl_state.json")
-        self.threshold_percent = config.get("WEEKLY_DRAWDOWN_THRESHOLD_PERCENT", 15.0)
-        self.enabled = config.get("WEEKLY_DRAWDOWN_ENABLED", True)
-        self.lookback_days = config.get("WEEKLY_DRAWDOWN_LOOKBACK_DAYS", 7)
+        """Initialize weekly P&L tracker"""
+        self.config = config or {}
+        self.enabled = self.config.get("WEEKLY_DRAWDOWN_ENABLED", True)
+        self.threshold_pct = self.config.get("WEEKLY_DRAWDOWN_THRESHOLD_PCT", 15.0)
+        self.lookback_days = self.config.get("WEEKLY_DRAWDOWN_LOOKBACK_DAYS", 7)
         
         # Initialize daily P&L tracker for current data
         self.daily_pnl_tracker = get_daily_pnl_tracker(config)
         
         # Load or create state
+        self.state_file = Path("weekly_pnl_state.json")
         self._state = self._load_state()
         
-        logger.info(f"[WEEKLY-PNL] Initialized (enabled: {self.enabled}, threshold: {self.threshold_percent}%, lookback: {self.lookback_days} days)")
+        # Only log initialization once per process
+        if not WeeklyPnLTracker._initialized:
+            logger.info(f"[WEEKLY-PNL] Initialized (enabled: {self.enabled}, threshold: {self.threshold_pct}%, lookback: {self.lookback_days} days)")
+            WeeklyPnLTracker._initialized = True
     
     def _load_state(self) -> Dict:
         """Load weekly P&L state from file"""
@@ -240,8 +239,8 @@ class WeeklyPnLTracker:
             weekly_pnl, weekly_percent, weekly_records = self.calculate_weekly_pnl()
             
             # Check if weekly loss exceeds threshold (negative percentage)
-            if weekly_percent <= -self.threshold_percent:
-                reason = f"Weekly loss {weekly_percent:.2f}% exceeds {self.threshold_percent}% threshold (${weekly_pnl:.2f})"
+            if weekly_percent <= -self.threshold_pct:
+                reason = f"Weekly loss {weekly_percent:.2f}% exceeds {self.threshold_pct}% threshold (${weekly_pnl:.2f})"
                 
                 # Generate performance summary
                 performance_summary = self._generate_performance_summary(weekly_records, weekly_pnl, weekly_percent)
@@ -250,7 +249,7 @@ class WeeklyPnLTracker:
                 return True, reason, performance_summary
             
             # Within limits
-            reason = f"Weekly P&L within limits: {weekly_percent:.2f}% (threshold: -{self.threshold_percent}%)"
+            reason = f"Weekly P&L within limits: {weekly_percent:.2f}% (threshold: -{self.threshold_pct}%)"
             logger.debug(f"[WEEKLY-PNL] {reason}")
             
             return False, reason, {}
@@ -267,7 +266,7 @@ class WeeklyPnLTracker:
                 "period": f"Last {len(weekly_records)} days",
                 "total_pnl": weekly_pnl,
                 "total_percent": weekly_percent,
-                "threshold_percent": self.threshold_percent,
+                "threshold_percent": self.threshold_pct,
                 "daily_breakdown": [],
                 "statistics": {
                     "winning_days": 0,
@@ -320,7 +319,7 @@ class WeeklyPnLTracker:
             
             status = {
                 "enabled": self.enabled,
-                "threshold_percent": self.threshold_percent,
+                "threshold_percent": self.threshold_pct,
                 "lookback_days": self.lookback_days,
                 "current_weekly_pnl": weekly_pnl,
                 "current_weekly_percent": weekly_percent,

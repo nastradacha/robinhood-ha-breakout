@@ -41,6 +41,13 @@ SYMBOL: "SPY"                    # Default/fallback symbol for backwards compati
 TIMEFRAME: "5m"
 DATA_SOURCE: "alpaca"      # Options: "yfinance", "alpaca"
 
+# Alpaca Synchronization Configuration
+ALPACA_SYNC_ENABLED: true                    # Enable automatic sync with Alpaca account
+ALPACA_AUTO_SYNC_BEFORE_TRADE: true         # Sync before each trade execution
+ALPACA_SYNC_TOLERANCE_PCT: 1.0              # Tolerance for balance differences (1% = no sync needed)
+ALPACA_SYNC_SLACK_ALERTS: true              # Send Slack notifications for sync events
+ALPACA_SYNC_INTERVAL_MINUTES: 15            # Auto-sync interval for monitoring mode
+
 # Multi-Symbol Configuration
 multi_symbol:
   enabled: true                   # Enable multi-symbol scanning
@@ -129,8 +136,8 @@ exit_strategies:
 # Alpaca Options Configuration
 alpaca:
   # Global spread and liquidity guards
-  max_spread_pct: 8               # Maximum bid-ask spread as % of mid price
-  max_spread_abs: 0.10            # Maximum absolute bid-ask spread ($)
+  max_spread_pct: 15              # Maximum bid-ask spread as % of mid price (relaxed from 8%)
+  max_spread_abs: 0.15            # Maximum absolute bid-ask spread ($) (relaxed from $0.10)
   
   # Enhanced breakout detection for rapid moves (QQQ PUT fix)
   rapid_move_threshold: 0.5       # Trigger analysis on >0.5% moves in 5min
@@ -156,7 +163,7 @@ alpaca:
     DIA: 6000                     # Dow Jones ETF
     F: 5000                       # Ford stock
     PLTR: 5000                    # Palantir stock
-    UVXY: 5000                    # Volatility ETF
+    UVXY: 1000                    # Volatility ETF (relaxed for better liquidity)
     AAL: 4000                     # American Airlines stock
     SNAP: 4000                    # Snapchat stock
   
@@ -217,8 +224,10 @@ DATA_VALIDATION_ENABLED: true
 DATA_MAX_DISCREPANCY_PCT: 1.0      # Maximum allowed price discrepancy between sources (%)
 DATA_MAX_STALENESS_SECONDS: 120    # Maximum data age before considered stale (seconds)
 DATA_REQUIRE_VALIDATION: false     # Require cross-source validation before trading
-DATA_PRIORITIZE_ALPACA: true       # Use Alpaca as primary source, Yahoo as validation
+DATA_PRIORITIZE_ALPACA: true       # Use Alpaca as primary source only
 DATA_ALERT_ON_DISCREPANCY: true    # Send Slack alerts for data quality issues
+DATA_USE_INTERNAL_VALIDATION: true # Use Alpaca historical data for validation
+DATA_USE_YAHOO_VALIDATION: false   # Yahoo Finance validation disabled (delayed data)
 
 # Real-Time Data Staleness Detection (US-FA-008)
 STALENESS_MONITORING_ENABLED: true

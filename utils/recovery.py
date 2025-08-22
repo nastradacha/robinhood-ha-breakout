@@ -395,7 +395,7 @@ class RecoveryManager:
             # Try to send Slack alert
             from .enhanced_slack import EnhancedSlackIntegration
             
-            slack = EnhancedSlackIntegration.get_instance()
+            slack = EnhancedSlackIntegration()
             if slack.enabled:
                 alert_msg = (
                     f"🚨 *ESCALATION REQUIRED*\n"

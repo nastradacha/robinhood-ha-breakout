@@ -297,9 +297,16 @@ class DailyPnLTracker:
         return market_open <= dt <= market_close
 
 
+_daily_pnl_tracker_instance = None
+
 def get_daily_pnl_tracker(config: Dict) -> DailyPnLTracker:
-    """Factory function to get DailyPnLTracker instance"""
-    return DailyPnLTracker(config)
+    """Factory function to get DailyPnLTracker singleton instance"""
+    global _daily_pnl_tracker_instance
+    
+    if _daily_pnl_tracker_instance is None:
+        _daily_pnl_tracker_instance = DailyPnLTracker(config)
+    
+    return _daily_pnl_tracker_instance
 
 
 def validate_daily_pnl_tracking(symbol: str, config: Dict) -> Tuple[bool, str]:

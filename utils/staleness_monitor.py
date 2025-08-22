@@ -22,11 +22,67 @@ from enum import Enum
 import asyncio
 from pathlib import Path
 import json
+import os
+import tempfile
+import shutil
+import threading
 
 from .data_validation import DataValidator, DataPoint, DataQuality
 from .enhanced_slack import EnhancedSlackIntegration
 
 logger = logging.getLogger(__name__)
+
+
+def atomic_write_json(file_path: Path, data: any) -> None:
+    """
+    Atomic write function for JSON data that works reliably on Windows.
+    Uses same-directory temp file to avoid cross-directory permission issues.
+    """
+    file_path = Path(file_path)
+    
+    # Ensure parent directory exists
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create temp file in same directory as target file
+    temp_fd = None
+    temp_path = None
+    
+    try:
+        # Use tempfile.mkstemp for atomic creation in same directory
+        temp_fd, temp_name = tempfile.mkstemp(
+            suffix='.tmp',
+            prefix=f'{file_path.stem}_',
+            dir=file_path.parent
+        )
+        temp_path = Path(temp_name)
+        
+        # Write JSON data to temp file
+        with os.fdopen(temp_fd, 'w') as f:
+            json.dump(data, f, indent=2)
+        temp_fd = None  # File is now closed
+        
+        # Atomic replace - works reliably on Windows
+        if os.name == 'nt':  # Windows
+            # On Windows, remove target first if it exists
+            if file_path.exists():
+                file_path.unlink()
+        
+        # Atomic move/rename
+        shutil.move(str(temp_path), str(file_path))
+        
+    except Exception as e:
+        # Cleanup on failure
+        if temp_fd is not None:
+            try:
+                os.close(temp_fd)
+            except:
+                pass
+        if temp_path and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except:
+                pass
+        raise e
 
 
 class StalenessLevel(Enum):
@@ -111,6 +167,7 @@ class StalenessMonitor:
         self.data_validator = DataValidator(config)
         self.slack = EnhancedSlackIntegration(config) if config.get("SLACK_ENABLED") else None
         self.metrics_file = Path("logs/staleness_metrics.json")
+        self._file_lock = threading.Lock()  # Prevent concurrent file access
         
         # Ensure metrics directory exists
         self.metrics_file.parent.mkdir(exist_ok=True)
@@ -413,22 +470,24 @@ class StalenessMonitor:
     def _log_metrics(self, metrics: StalenessMetrics):
         """Log staleness metrics to file with JSON error protection"""
         try:
-            # Load existing metrics with robust error handling
-            all_metrics = []
-            if self.metrics_file.exists():
-                try:
-                    with open(self.metrics_file, 'r') as f:
-                        content = f.read().strip()
-                        if content:  # Check if file has content
-                            all_metrics = json.loads(content)
-                        else:
-                            all_metrics = []  # Empty file, start fresh
-                except (json.JSONDecodeError, ValueError) as json_err:
-                    # Corrupted JSON file - reinitialize with empty list
-                    if not self._json_error_logged:
-                        logger.warning(f"[STALENESS] Corrupted metrics file, reinitializing: {json_err}")
-                        self.__class__._json_error_logged = True
-                    all_metrics = []
+            # Use file lock to prevent concurrent access
+            with self._file_lock:
+                # Load existing metrics with robust error handling
+                all_metrics = []
+                if self.metrics_file.exists():
+                    try:
+                        with open(self.metrics_file, 'r') as f:
+                            content = f.read().strip()
+                            if content:  # Check if file has content
+                                all_metrics = json.loads(content)
+                            else:
+                                all_metrics = []  # Empty file, start fresh
+                    except (json.JSONDecodeError, ValueError) as json_err:
+                        # Corrupted JSON file - reinitialize with empty list
+                        if not self._json_error_logged:
+                            logger.warning(f"[STALENESS] Corrupted metrics file, reinitializing: {json_err}")
+                            self.__class__._json_error_logged = True
+                        all_metrics = []
             
             # Add new metrics entry
             metrics_dict = {
@@ -449,24 +508,8 @@ class StalenessMonitor:
             if len(all_metrics) > 1000:
                 all_metrics = all_metrics[-1000:]
             
-            # Write back to file with atomic operation
-            temp_file = self.metrics_file.with_suffix('.tmp')
-            try:
-                with open(temp_file, 'w') as f:
-                    json.dump(all_metrics, f, indent=2)
-                
-                # Atomic rename to prevent corruption during write
-                temp_file.replace(self.metrics_file)
-            except PermissionError:
-                # Handle Windows permission issues with temp files
-                try:
-                    if temp_file.exists():
-                        temp_file.unlink()
-                except:
-                    pass
-                # Fallback to direct write (less safe but functional)
-                with open(self.metrics_file, 'w') as f:
-                    json.dump(all_metrics, f, indent=2)
+                # Write back to file with atomic operation (still within lock)
+                atomic_write_json(self.metrics_file, all_metrics)
                 
         except Exception as e:
             if not self._json_error_logged:

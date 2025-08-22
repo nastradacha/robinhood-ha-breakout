@@ -1326,12 +1326,15 @@ class RobinhoodBot:
                         > 0
                     )
                     logger.info(
-                        "[SUCCESS] Reached final Review Order screen - STOPPING HERE for manual review"
+                        "[SUCCESS] Reached final Review Order screen"
                     )
-                    logger.info(
-                        "[MANUAL ACTION REQUIRED] Please review the order details and submit manually if approved"
-                    )
-                    return True
+                    
+                    # Check if unattended mode with entry approval is enabled
+                    if self._should_auto_approve_entry():
+                        return self._handle_llm_entry_approval()
+                    else:
+                        logger.info("[MANUAL ACTION REQUIRED] Please review the order details and submit manually if approved")
+                        return True
                 except:
                     logger.info(
                         "[SUCCESS] Order flow completed - STOPPING HERE for manual review"
