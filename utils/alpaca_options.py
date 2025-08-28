@@ -469,6 +469,12 @@ class AlpacaOptionsTrader:
         try:
             logger.info(f"Finding {side} contract for {symbol}: {get_filter_summary(symbol)}")
             
+            # Quote sanity check before filtering
+            sanity_passed, sanity_reason = self._check_quote_sanity(symbol, expiry_date)
+            if not sanity_passed:
+                logger.error(f"Quote sanity check failed for {symbol}: {sanity_reason}")
+                return None
+            
             # Try primary filters first
             contract = self._find_contract_with_filters(symbol, side, expiry_date, use_fallback=False)
             
@@ -491,6 +497,66 @@ class AlpacaOptionsTrader:
         except Exception as e:
             logger.error(f"Error finding ATM contract for {symbol}: {e}")
             return None
+    
+    def _check_quote_sanity(self, symbol: str, expiry_date: str) -> Tuple[bool, str]:
+        """Check if near-ATM options have valid bid/ask quotes before filtering.
+        
+        Args:
+            symbol: Underlying symbol
+            expiry_date: Target expiry date
+            
+        Returns:
+            Tuple of (passed, reason)
+        """
+        try:
+            # Get current stock price
+            from utils.alpaca_client import AlpacaClient
+            alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
+            current_price = alpaca_data.get_current_price(symbol)
+            
+            if not current_price:
+                return False, "Unable to get current stock price"
+            
+            # Get options contracts for the expiry
+            contracts = self.client.get_option_contracts(
+                underlying_symbols=[symbol],
+                expiration_date=expiry_date,
+                limit=200
+            )
+            
+            if not contracts:
+                return False, f"No contracts available for {expiry_date}"
+            
+            # Check near-ATM strikes (±4 strikes around current price)
+            valid_quotes = 0
+            checked_strikes = 0
+            
+            for contract in contracts:
+                strike_diff = abs(contract.strike_price - current_price)
+                if strike_diff <= current_price * 0.05:  # Within 5% of ATM
+                    checked_strikes += 1
+                    
+                    # Get quote for this contract
+                    quote = self.get_latest_quote(contract.symbol)
+                    if quote and quote.bid is not None and quote.ask is not None:
+                        if quote.bid > 0 and quote.ask > quote.bid:
+                            valid_quotes += 1
+            
+            if checked_strikes == 0:
+                return False, "No near-ATM contracts found"
+            
+            if valid_quotes == 0:
+                return False, f"No valid quotes found in {checked_strikes} near-ATM contracts (all bid=None or invalid)"
+            
+            quote_ratio = valid_quotes / checked_strikes
+            if quote_ratio < 0.3:  # Less than 30% have valid quotes
+                return False, f"Poor quote coverage: {valid_quotes}/{checked_strikes} contracts have valid quotes"
+            
+            self.logger.info(f"Quote sanity check passed: {valid_quotes}/{checked_strikes} near-ATM contracts have valid quotes")
+            return True, f"Quote sanity passed ({valid_quotes}/{checked_strikes} valid)"
+            
+        except Exception as e:
+            return False, f"Quote sanity check error: {str(e)}"
     
     def _find_contract_with_filters(
         self,
@@ -551,33 +617,65 @@ class AlpacaOptionsTrader:
                 
                 # Get real-time quote for liquidity validation
                 quote = self.get_latest_quote(contract.symbol)
-                if not quote or quote.bid <= 0 or quote.ask <= 0:
+                if not quote:
                     continue
                 
-                # Get contract stats (open interest, volume)
-                oi = getattr(contract, 'open_interest', 0)
-                volume = getattr(contract, 'volume', 0)
+                # Handle None bid/ask values from API
+                bid = quote.bid if quote.bid is not None else 0
+                ask = quote.ask if quote.ask is not None else 0
+                
+                if bid <= 0 or ask <= 0:
+                    self.logger.warning(f"Quote for {contract.symbol} missing bid/ask: bid={quote.bid}, ask={quote.ask}")
+                    continue
+                
+                # Minimum premium filter to skip penny quotes
+                mid_price = (bid + ask) / 2
+                if mid_price < 0.10:
+                    self.logger.debug(f"Skipping {contract.symbol}: premium ${mid_price:.3f} < $0.10 minimum")
+                    continue
+                
+                # Get contract stats (open interest, volume) with type conversion
+                oi_raw = getattr(contract, 'open_interest', 0)
+                volume_raw = getattr(contract, 'volume', 0)
+                
+                # Convert to int, handling string values from API
+                try:
+                    oi = int(oi_raw) if oi_raw is not None else 0
+                except (ValueError, TypeError):
+                    oi = 0
+                    
+                try:
+                    volume = int(volume_raw) if volume_raw is not None else 0
+                except (ValueError, TypeError):
+                    volume = 0
                 
                 # Validate liquidity using tiered filters
                 passes_filter, reason = validate_contract_liquidity(
-                    symbol, quote.bid, quote.ask, oi, volume, use_fallback
+                    symbol, bid, ask, oi, volume, use_fallback
                 )
                 
-                if passes_filter and strike_diff < min_strike_diff:
-                    min_strike_diff = strike_diff
-                    best_contract = ContractInfo(
-                        symbol=contract.symbol,
-                        underlying_symbol=symbol,
-                        strike=contract.strike_price,
-                        expiry=expiry_date,
-                        side=side,
-                        bid=quote.bid,
-                        ask=quote.ask,
-                        open_interest=oi,
-                        volume=volume
-                    )
+                if passes_filter:
                     contracts_passed += 1
-                    logger.debug(f"New best {side} contract: {contract.symbol} (strike ${contract.strike_price}, {reason})")
+                    # Use liquidity-aware strike selection (ATM fan-out)
+                    if strike_diff < min_strike_diff:
+                        min_strike_diff = strike_diff
+                        best_contract = ContractInfo(
+                            symbol=contract.symbol,
+                            underlying_symbol=symbol,
+                            strike=contract.strike_price,
+                            expiry=expiry_date,
+                            option_type=side,  # Use option_type instead of side
+                            bid=bid,
+                            ask=ask,
+                            mid=(bid + ask) / 2,
+                            open_interest=oi,
+                            volume=volume,
+                            spread=ask - bid,
+                            spread_pct=(ask - bid) / ask * 100 if ask > 0 else 0
+                        )
+                        logger.debug(f"New best {side} contract: {contract.symbol} (strike ${contract.strike_price}, ATM+${strike_diff:.2f}, {reason})")
+                    else:
+                        logger.debug(f"Valid {side} contract: {contract.symbol} (strike ${contract.strike_price}, ATM+${strike_diff:.2f}, {reason})")
                 else:
                     logger.debug(f"Rejected {contract.symbol}: {reason}")
             

@@ -32,6 +32,8 @@ import logging
 from typing import Dict, Optional, Literal
 from datetime import datetime, timedelta
 import pandas as pd
+import hashlib
+from collections import defaultdict
 from dotenv import load_dotenv
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest, StockBarsRequest
@@ -81,6 +83,11 @@ class AlpacaClient:
         self._data_client = None
         self._trading_client = None
         self._connection_tested = False
+        
+        # Data fetch cache to prevent duplicate "Retrieved X bars" messages
+        self._data_cache = {}
+        self._cache_ttl = 300  # 5 minutes cache TTL
+        self._last_fetch_log = defaultdict(float)  # Track last log time per symbol
 
         if not self.enabled:
             logger.warning(
@@ -255,9 +262,17 @@ class AlpacaClient:
                         }
                     )
 
-                    logger.info(
-                        f"[ALPACA] Retrieved {len(df)} bars for {symbol} (timeframe: {timeframe})"
-                    )
+                    # Cache-aware logging to prevent spam
+                    cache_key = f"{symbol}_{timeframe}_{period}"
+                    current_time = datetime.now().timestamp()
+                    
+                    # Only log if we haven't logged this fetch recently (debounce)
+                    if current_time - self._last_fetch_log[cache_key] > 60:  # 1 minute debounce
+                        logger.info(
+                            f"[ALPACA] Retrieved {len(df)} bars for {symbol} (timeframe: {timeframe})"
+                        )
+                        self._last_fetch_log[cache_key] = current_time
+                    
                     return df
 
                 except Exception as df_error:

@@ -416,12 +416,13 @@ def execute_multi_symbol_trade(
     reason = opportunity["reason"]
 
     # Enforce confidence threshold - no pre-approved overrides
-    if confidence < config["MIN_CONFIDENCE"]:
+    min_confidence = config.get("MIN_CONFIDENCE", 0.6)
+    if confidence < min_confidence:
         logger.warning(
             f"[MULTI-SYMBOL-EXECUTE] Confidence {confidence:.2f} below threshold "
-            f"{config['MIN_CONFIDENCE']:.2f} - blocking pre-approved trade for {symbol}"
+            f"{min_confidence:.2f} - blocking pre-approved trade for {symbol}"
         )
-        return {"status": "BLOCKED", "reason": f"Confidence below threshold ({config['MIN_CONFIDENCE']:.2f})"}
+        return {"status": "BLOCKED", "reason": f"Confidence below threshold ({min_confidence:.2f})"}
 
     logger.info(
         f"[MULTI-SYMBOL-EXECUTE] Executing pre-approved {symbol} {decision} (confidence: {confidence:.2f})"
@@ -466,7 +467,7 @@ def execute_multi_symbol_trade(
             
             # Execute Alpaca trade
             result = execute_alpaca_multi_symbol_trade(
-                trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action
+                trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action, args
             )
             return result
         else:
@@ -655,7 +656,7 @@ def execute_multi_symbol_trade(
 
 
 def execute_alpaca_multi_symbol_trade(
-    trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action
+    trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action, args
 ):
     """Execute multi-symbol trade using Alpaca API."""
     from utils.trade_confirmation import TradeConfirmationManager
@@ -667,12 +668,13 @@ def execute_alpaca_multi_symbol_trade(
     reason = opportunity["reason"]
     
     # Enforce confidence threshold - no pre-approved overrides
-    if confidence < config["MIN_CONFIDENCE"]:
+    min_confidence = config.get("MIN_CONFIDENCE", 0.6)
+    if confidence < min_confidence:
         logger.warning(
             f"[MULTI-SYMBOL-ALPACA] Confidence {confidence:.2f} below threshold "
-            f"{config['MIN_CONFIDENCE']:.2f} - blocking pre-approved trade for {symbol}"
+            f"{min_confidence:.2f} - blocking pre-approved trade for {symbol}"
         )
-        return {"status": "BLOCKED", "reason": f"Confidence below threshold ({config['MIN_CONFIDENCE']:.2f})"}
+        return {"status": "BLOCKED", "reason": f"Confidence below threshold ({min_confidence:.2f})"}
     
     try:
         # Sync with Alpaca account before trading
@@ -687,11 +689,18 @@ def execute_alpaca_multi_symbol_trade(
             logger.warning(f"[MULTI-SYMBOL-ALPACA] Trading not allowed for {symbol}: {reason_msg}")
             return {"status": "BLOCKED", "reason": reason_msg}
         
-        # Get expiry policy and find ATM contract
-        policy, expiry_date = trader.get_expiry_policy(symbol)
-        if policy is None or expiry_date is None:
-            logger.error(f"[MULTI-SYMBOL-ALPACA] No valid expiry available for {symbol}")
-            return {"success": False, "error_type": "expiry_unavailable", "status": "ERROR", "reason": f"No valid expiry for {symbol}"}
+        # Use expiry policy from opportunity (preserve 0DTE end-to-end)
+        policy = opportunity.get("expiry_policy", "0DTE")
+        expiry_date = opportunity.get("expiry_date")
+        
+        # Only recalculate if not provided in opportunity
+        if not expiry_date:
+            policy, expiry_date = trader.get_expiry_policy(symbol)
+            if policy is None or expiry_date is None:
+                logger.error(f"[MULTI-SYMBOL-ALPACA] No valid expiry available for {symbol}")
+                return {"success": False, "error_type": "expiry_unavailable", "status": "ERROR", "reason": f"No valid expiry for {symbol}"}
+        else:
+            logger.info(f"[MULTI-SYMBOL-ALPACA] Using opportunity expiry policy: {policy} ({expiry_date})")
         
         side = "CALL" if decision == "CALL" else "PUT"
         
@@ -1733,7 +1742,8 @@ def main_loop(
 
                 elif decision.decision in ["CALL", "PUT"]:
                     # Validate confidence threshold
-                    if decision.confidence < config["MIN_CONFIDENCE"]:
+                    min_confidence = config.get("MIN_CONFIDENCE", 0.6)
+                    if decision.confidence < min_confidence:
                         logger.warning(
                             f"[LOW_CONFIDENCE] Confidence {decision.confidence:.2f} below threshold"
                         )
@@ -2173,6 +2183,27 @@ def run_multi_symbol_loop(
                     except:
                         pass
                 break
+            
+            # Auto-stop after market hours when no --end-at specified
+            if not end_time:
+                from utils.market_calendar import validate_trading_time
+                try:
+                    can_trade, market_reason = validate_trading_time(current_time)
+                    if not can_trade and "Market closed at" in market_reason:
+                        # Extract close time from market_reason for clean logging
+                        close_info = market_reason.split("Market closed at")[1].strip() if "Market closed at" in market_reason else "market close"
+                        logger.info(f"[AUTO-STOP] Market closed ({close_info}). Stopping multi-symbol loop.")
+                        if slack_notifier:
+                            try:
+                                slack_notifier.send_message(f"🔚 [AUTO-STOP] Market closed ({close_info}) — stopping scanner.")
+                            except:
+                                pass
+                        break
+                except Exception as e:
+                    # Fallback: stop after 5 PM ET if market validation fails
+                    if current_time.hour >= 17:
+                        logger.info(f"[AUTO-STOP] After 5 PM ET, stopping loop (market validation failed: {e}).")
+                        break
 
             logger.info(
                 f"[MULTI-SYMBOL-LOOP] Starting scan #{scan_count} at {current_time.strftime('%H:%M:%S')}"
@@ -2927,10 +2958,11 @@ def main():
             return
 
         # Validate confidence threshold
-        if decision.confidence < config["MIN_CONFIDENCE"]:
+        min_confidence = config.get("MIN_CONFIDENCE", 0.6)
+        if decision.confidence < min_confidence:
             logger.warning(
                 f"[LOW_CONFIDENCE] Confidence {decision.confidence:.2f} below threshold "
-                f"{config['MIN_CONFIDENCE']:.2f} - blocking trade"
+                f"{min_confidence:.2f} - blocking trade"
             )
 
             trade_data = {
@@ -2938,7 +2970,7 @@ def main():
                 "symbol": config["SYMBOL"],
                 "decision": "NO_TRADE",
                 "confidence": decision.confidence,
-                "reason": f"Confidence below threshold ({config['MIN_CONFIDENCE']:.2f})",
+                "reason": f"Confidence below threshold ({min_confidence:.2f})",
                 "current_price": analysis["current_price"],
                 "llm_tokens": decision.tokens_used,
                 "bankroll_before": current_bankroll,

@@ -157,6 +157,10 @@ class MultiSymbolScanner:
 
         # Sort opportunities by priority and confidence
         sorted_opportunities = self._prioritize_opportunities(opportunities)
+        
+        # Generate per-scan summary for faster skimming
+        scan_summary = self._generate_scan_summary(sorted_opportunities, rejection_reasons)
+        logger.info(f"[SCAN-SUMMARY] {scan_summary}")
 
         if sorted_opportunities:
             logger.info(
@@ -184,6 +188,71 @@ class MultiSymbolScanner:
                 self._send_no_trade_heartbeat(rejection_reasons)
 
         return sorted_opportunities
+
+    def _generate_scan_summary(self, opportunities: List[Dict], rejection_reasons: List[str]) -> str:
+        """Generate concise per-scan summary with gate passes/fails and borderline tickers."""
+        total_symbols = len(self.symbols)
+        passed_symbols = len(opportunities)
+        failed_symbols = total_symbols - passed_symbols
+        
+        # Categorize gate failures
+        gate_stats = {
+            "MARKET_CLOSED": 0,
+            "CIRCUIT_BREAKER": 0,
+            "PRE_LLM_GATE": 0,  # TR/momentum/body failures
+            "LLM_NO_TRADE": 0,
+            "DATA_ISSUES": 0,
+            "OTHER": 0
+        }
+        
+        borderline_tickers = []  # Track tickers that almost passed
+        
+        for reason in rejection_reasons:
+            symbol = reason.split(":")[0] if ":" in reason else "UNKNOWN"
+            reason_text = reason.lower()
+            
+            if "market closed" in reason_text or "pre-open-gate" in reason_text:
+                gate_stats["MARKET_CLOSED"] += 1
+            elif "circuit breaker" in reason_text or "drawdown" in reason_text:
+                gate_stats["CIRCUIT_BREAKER"] += 1
+            elif any(x in reason_text for x in ["true range", "body too weak", "insufficient momentum", "pre-llm gate"]):
+                gate_stats["PRE_LLM_GATE"] += 1
+                # Check if borderline (close to passing thresholds)
+                if any(x in reason_text for x in ["0.4%", "0.5%", "0.6%", "close to", "borderline"]):
+                    borderline_tickers.append(symbol)
+            elif "llm recommends no_trade" in reason_text or "no_trade" in reason_text:
+                gate_stats["LLM_NO_TRADE"] += 1
+            elif any(x in reason_text for x in ["no data", "staleness", "api error", "timeout"]):
+                gate_stats["DATA_ISSUES"] += 1
+            else:
+                gate_stats["OTHER"] += 1
+        
+        # Build summary string
+        summary_parts = [f"Scanned {total_symbols} symbols: {passed_symbols} passed, {failed_symbols} failed"]
+        
+        # Add gate breakdown (only non-zero counts)
+        gate_breakdown = []
+        for gate, count in gate_stats.items():
+            if count > 0:
+                gate_breakdown.append(f"{gate}={count}")
+        
+        if gate_breakdown:
+            summary_parts.append(f"Gates: {', '.join(gate_breakdown)}")
+        
+        # Add top 2 borderline tickers if any
+        if borderline_tickers:
+            top_borderline = borderline_tickers[:2]
+            summary_parts.append(f"Borderline: {', '.join(top_borderline)}")
+        
+        # Add opportunity details if any passed
+        if opportunities:
+            top_opportunity = opportunities[0]
+            symbol = top_opportunity.get('symbol', 'UNKNOWN')
+            confidence = top_opportunity.get('confidence', 0)
+            direction = top_opportunity.get('direction', 'UNKNOWN')
+            summary_parts.append(f"Top: {symbol} {direction} ({confidence:.1%})")
+        
+        return " | ".join(summary_parts)
 
     def _summarize_rejection_reasons(self, rejection_reasons: List[str]) -> str:
         """Summarize rejection reasons for logging and Slack alerts with concrete buckets."""
@@ -1077,14 +1146,22 @@ class MultiSymbolScanner:
                     logger.warning(f"[VIX-GUARDRAIL] VIX check failed for {symbol}: {e}, allowing trades (fail-safe)")
             
             # 6a. True range minimum check with enhanced hysteresis and momentum compensation
-            hysteresis_factor = config.get('HYSTERESIS_FACTOR', 0.92)  # Increased from 0.86 to 0.92 for fewer false negatives
+            hysteresis_factor = config.get('HYSTERESIS_FACTOR', 0.87)  # Reduced from 0.92 to 0.87 for better near-miss handling
             hysteresis_threshold = hysteresis_factor * min_tr_range_pct
+            
+            # Percentile-based contextual gate: allow if TR >= P80 of last 120 bars
+            percentile_threshold = self._calculate_percentile_tr_threshold(symbol, market_data)
+            contextual_threshold = max(min_tr_range_pct, percentile_threshold) if percentile_threshold > 0 else min_tr_range_pct
             
             # Check for strong range that can compensate for borderline momentum
             range_compensation_threshold = 1.25 * min_tr_range_pct  # 25% above threshold
             has_strong_range = today_tr_pct >= range_compensation_threshold
             
-            if today_tr_pct < hysteresis_threshold:
+            # Use the lower of fixed threshold or contextual threshold for more adaptive gating
+            effective_threshold = min(min_tr_range_pct, contextual_threshold)
+            effective_hysteresis = hysteresis_factor * effective_threshold
+            
+            if today_tr_pct < effective_hysteresis:
                 # Near-miss detection for quality trades close to threshold (95-98% range)
                 near_miss_threshold = 0.95 * min_tr_range_pct
                 if today_tr_pct >= near_miss_threshold:
@@ -1104,10 +1181,10 @@ class MultiSymbolScanner:
                     else:
                         logger.debug(f"[NEAR-MISS] {symbol}: TR near floor but quality insufficient (BTR={body_to_range:.3f}, momentum={momentum_score})")
                 
-                return False, f"True range too low ({today_tr_pct:.4f}% < {hysteresis_threshold:.4f}% hysteresis threshold, {min_tr_range_pct:.4f}% minimum)"
-            elif today_tr_pct < min_tr_range_pct:
+                return False, f"True range too low ({today_tr_pct:.4f}% < {effective_hysteresis:.4f}% hysteresis threshold, {effective_threshold:.4f}% minimum)"
+            elif today_tr_pct < effective_threshold:
                 # In hysteresis zone (90-100% of threshold) - allow to pass
-                logger.info(f"[TR-HYSTERESIS] {symbol}: TR={today_tr_pct:.4f}% in hysteresis zone ({hysteresis_threshold:.4f}%-{min_tr_range_pct:.4f}%), allowing trade")
+                logger.info(f"[TR-HYSTERESIS] {symbol}: TR={today_tr_pct:.4f}% in hysteresis zone ({effective_hysteresis:.4f}%-{effective_threshold:.4f}%), allowing trade")
                 # Continue to next gate check
             
             # 6b. Pre-LLM body percentage and momentum gates with time-of-day scaling
@@ -1130,28 +1207,39 @@ class MultiSymbolScanner:
                     body_passes = current_body_pct >= scaled_min_body_pct
                     
                     if not body_passes:
-                        # Check for borderline escalation (≥90% of threshold) - widened hysteresis
-                        borderline_threshold = 0.90 * scaled_min_body_pct  # Increased from 85% to 90%
-                        is_borderline = current_body_pct >= borderline_threshold
+                        # Check for TR-based override: if TR ≥ 2× threshold AND momentum compensation engaged
+                        tr_override_threshold = 2.0 * min_tr_range_pct  # 2× TR threshold
+                        has_tr_override = (today_tr_pct >= tr_override_threshold and 
+                                         market_data.get("_momentum_compensation_active", False))
                         
-                        if is_borderline:
-                            # Round to basis points for consistent comparison
-                            current_body_bp = round(current_body_pct * 10000)  # Convert to basis points
-                            threshold_bp = round(borderline_threshold * 10000)
-                            
-                            # Log borderline case for potential LLM escalation
-                            logger.info(f"[BORDERLINE] {symbol}: Body {current_body_bp/100:.2f}bp ≥ 85% of threshold ({threshold_bp/100:.2f}bp), flagging for potential LLM escalation")
-                            # Mark this as a borderline case in market_data for later escalation
-                            market_data["_borderline_body_case"] = {
-                                "current_pct": current_body_pct,
-                                "threshold_pct": scaled_min_body_pct,
-                                "shortfall_pct": ((scaled_min_body_pct - current_body_pct) / scaled_min_body_pct) * 100
-                            }
+                        if has_tr_override:
+                            logger.info(f"[TR-OVERRIDE] {symbol}: Body {current_body_pct*10000:.1f}bp below threshold, "
+                                       f"but TR={today_tr_pct:.4f}% ≥ 2× threshold ({tr_override_threshold:.4f}%) "
+                                       f"with momentum compensation - allowing trade")
+                            # Allow trade to proceed with TR override
                         else:
-                            # Round for consistent logging
-                            current_bp = round(current_body_pct * 10000)
-                            threshold_bp = round(scaled_min_body_pct * 10000)
-                            return False, f"Candle body too weak ({current_bp/100:.2f}bp < {threshold_bp/100:.2f}bp minimum, scaled from {round(base_min_body_pct * 10000)/100:.2f}bp)"
+                            # Check for borderline escalation (≥90% of threshold) - widened hysteresis
+                            borderline_threshold = 0.90 * scaled_min_body_pct  # Increased from 85% to 90%
+                            is_borderline = current_body_pct >= borderline_threshold
+                            
+                            if is_borderline:
+                                # Round to basis points for consistent comparison
+                                current_body_bp = round(current_body_pct * 10000)  # Convert to basis points
+                                threshold_bp = round(borderline_threshold * 10000)
+                                
+                                # Log borderline case for potential LLM escalation
+                                logger.info(f"[BORDERLINE] {symbol}: Body {current_body_bp/100:.2f}bp ≥ 85% of threshold ({threshold_bp/100:.2f}bp), flagging for potential LLM escalation")
+                                # Mark this as a borderline case in market_data for later escalation
+                                market_data["_borderline_body_case"] = {
+                                    "current_pct": current_body_pct,
+                                    "threshold_pct": scaled_min_body_pct,
+                                    "shortfall_pct": ((scaled_min_body_pct - current_body_pct) / scaled_min_body_pct) * 100
+                                }
+                            else:
+                                # Round for consistent logging
+                                current_bp = round(current_body_pct * 10000)
+                                threshold_bp = round(scaled_min_body_pct * 10000)
+                                return False, f"Candle body too weak ({current_bp/100:.2f}bp < {threshold_bp/100:.2f}bp minimum, scaled from {round(base_min_body_pct * 10000)/100:.2f}bp)"
                 
                 # Momentum checks (require at least N of 3 indicators) - relaxed thresholds
                 required_momentum_checks = pre_llm_gates.get("momentum_checks", 1)  # Reduced from 2 to 1
@@ -1207,6 +1295,8 @@ class MultiSymbolScanner:
                 if momentum_score < required_momentum_checks:
                     if has_strong_range and momentum_score >= (required_momentum_checks - 1):
                         logger.info(f"[MOMENTUM-COMPENSATION] {symbol}: TR={today_tr_pct:.4f}% (≥{range_compensation_threshold:.4f}%) compensates for momentum {momentum_score}/{required_momentum_checks}")
+                        # Mark momentum compensation as active for potential TR-based body override
+                        market_data["_momentum_compensation_active"] = True
                         # Allow trade to proceed with strong range compensation
                     else:
                         return False, f"Insufficient momentum ({momentum_score}/{required_momentum_checks} indicators)"
@@ -1853,19 +1943,57 @@ class MultiSymbolScanner:
 
     def _create_market_data_for_chart(self, opportunity: Dict) -> pd.DataFrame:
         """
-        Create a simple market data DataFrame for chart generation.
+        Fetch historical market data for meaningful chart generation.
 
         Args:
             opportunity: Trading opportunity with breakout analysis
 
         Returns:
-            DataFrame with basic market data for charting
+            DataFrame with historical market data for charting (last 60 bars)
         """
         try:
-            # Create a minimal DataFrame with current price data
-            # This is a simplified version for chart generation
-            current_time = datetime.now()
+            symbol = opportunity["symbol"]
+            
+            # Get Alpaca client for historical data
+            from utils.alpaca_client import AlpacaClient
+            alpaca_client = AlpacaClient()
+            
+            if alpaca_client.enabled:
+                # Fetch historical data from Alpaca for meaningful charts
+                bars_df = alpaca_client.get_market_data(
+                    symbol=symbol,
+                    period="5d"  # Get 5 days of data with 5-minute intervals
+                )
+                
+                if bars_df is not None and len(bars_df) >= 5:
+                    # Take last 60 bars for chart (about 5 hours of 5-minute data)
+                    chart_data = bars_df.tail(60).copy()
+                    # Note: Chart data fetch logging is now debounced in AlpacaClient
+                    return chart_data
+                else:
+                    logger.warning(f"[MULTI-SYMBOL] Insufficient historical data for {symbol} chart")
+                    return self._create_fallback_chart_data(opportunity)
+            else:
+                logger.warning(f"[MULTI-SYMBOL] Alpaca client not available for {symbol} chart")
+                return self._create_fallback_chart_data(opportunity)
 
+        except Exception as e:
+            logger.warning(f"[MULTI-SYMBOL] Failed to fetch historical data for {symbol} chart: {e}")
+            # Return fallback single-point data
+            return self._create_fallback_chart_data(opportunity)
+
+    def _create_fallback_chart_data(self, opportunity: Dict) -> pd.DataFrame:
+        """
+        Create fallback single-point chart data when historical data is unavailable.
+        
+        Args:
+            opportunity: Trading opportunity with breakout analysis
+            
+        Returns:
+            DataFrame with single data point
+        """
+        try:
+            current_time = datetime.now()
             data = {
                 "timestamp": [current_time],
                 "Open": [opportunity["current_price"]],
@@ -1877,14 +2005,10 @@ class MultiSymbolScanner:
 
             df = pd.DataFrame(data)
             df.set_index("timestamp", inplace=True)
-
             return df
 
         except Exception as e:
-            logger.warning(
-                f"[MULTI-SYMBOL] Failed to create market data for chart: {e}"
-            )
-            # Return empty DataFrame as fallback
+            logger.warning(f"[MULTI-SYMBOL] Failed to create fallback chart data: {e}")
             return pd.DataFrame()
 
     def _log_symbol_decision(
@@ -1968,10 +2092,10 @@ class MultiSymbolScanner:
         Returns:
             Dynamic TR floor as percentage (e.g., 0.10 for 0.10%)
         """
-        # Base TR thresholds
+        # Base TR thresholds (reduced for low-VIX environments)
         BASE_TR = {
-            "SPY": 0.10, "QQQ": 0.15, "DIA": 0.10, "IWM": 0.15,
-            "XLK": 0.18, "XLF": 0.12, "XLE": 0.20, "TLT": 0.08, "UVXY": 0.80
+            "SPY": 0.050, "QQQ": 0.090, "DIA": 0.060, "IWM": 0.100,
+            "XLK": 0.100, "XLF": 0.070, "XLE": 0.120, "TLT": 0.060, "UVXY": 0.450
         }
         
         # Get base threshold
@@ -2001,26 +2125,27 @@ class MultiSymbolScanner:
         is_index_etf = symbol in index_etfs
         
         if current_vix < 12:
-            # Extremely low VIX - very aggressive reduction for index ETFs
-            vix_mult = 0.60 if is_index_etf else 0.80
+            # Extremely low VIX - very aggressive reduction
+            vix_mult = 0.80
         elif current_vix < 16:
-            # Very low VIX - aggressive reduction for index ETFs
-            vix_mult = 0.70 if is_index_etf else 0.85
+            # Very low VIX - aggressive reduction  
+            vix_mult = 0.90
         elif current_vix < 20:
-            # Low VIX - moderate reduction for index ETFs
-            vix_mult = 0.85 if is_index_etf else 0.95
+            # Low VIX - moderate reduction
+            vix_mult = 1.00
         elif current_vix < 25:
-            vix_mult = 1.10
+            vix_mult = 1.15
         else:
-            vix_mult = 1.25
+            vix_mult = 1.30
             
-        # Time-of-day scaling (lunch tighten 12:30-14:30 ET)
+        # Time-of-day scaling (reduce floors during midday lull 11:30-14:30 ET)
         from datetime import datetime
         import pytz
         et_tz = pytz.timezone('US/Eastern')
         now_et = datetime.now(et_tz)
         hour_decimal = now_et.hour + now_et.minute / 60.0
-        lunch_mult = 1.05 if 12.5 <= hour_decimal <= 14.5 else 1.00
+        # Reduce floors by 20% during midday consolidation period
+        tod_mult = 0.80 if 11.5 <= hour_decimal <= 14.5 else 1.00
         
         # Special handling for UVXY with VIX-based thresholds
         if symbol == "UVXY":
@@ -2028,9 +2153,9 @@ class MultiSymbolScanner:
             if uvxy_dynamic.get("enabled", False):
                 vix_low = uvxy_dynamic.get("vix_low", 18.0)
                 vix_high = uvxy_dynamic.get("vix_high", 25.0)
-                tr_low = uvxy_dynamic.get("tr_low", 0.45)
-                tr_medium = uvxy_dynamic.get("tr_medium", 0.80)
-                tr_high = uvxy_dynamic.get("tr_high", 1.00)
+                tr_low = uvxy_dynamic.get("tr_low", 0.40)
+                tr_medium = uvxy_dynamic.get("tr_medium", 0.50)
+                tr_high = uvxy_dynamic.get("tr_high", 0.80)
                 
                 # Determine bucket and threshold
                 if current_vix < vix_low:
@@ -2050,12 +2175,64 @@ class MultiSymbolScanner:
                 return dynamic_tr
         
         # Calculate final dynamic threshold
-        dynamic_tr = round(base_tr * vix_mult * lunch_mult, 3)
+        dynamic_tr = round(base_tr * vix_mult * tod_mult, 3)
         
         # Log dynamic calculation for debugging
-        logger.debug(f"[DYNAMIC-TR] {symbol}: base={base_tr:.3f}% * VIX_mult={vix_mult:.2f} * lunch_mult={lunch_mult:.2f} = {dynamic_tr:.3f}%")
+        logger.debug(f"[DYNAMIC-TR] {symbol}: base={base_tr:.3f}% * VIX_mult={vix_mult:.2f} * ToD_mult={tod_mult:.2f} = {dynamic_tr:.3f}%")
         
         return dynamic_tr
+
+    def _calculate_percentile_tr_threshold(self, symbol: str, market_data: Dict) -> float:
+        """
+        Calculate P80 threshold from recent TR history for contextual gating.
+        
+        Args:
+            symbol: Trading symbol
+            market_data: Market data dictionary
+            
+        Returns:
+            P80 threshold as percentage, or 0.0 if insufficient data
+        """
+        try:
+            # Get historical bars from market data
+            bars = market_data.get("bars", [])
+            if len(bars) < 60:  # Need at least 60 bars for meaningful percentile
+                return 0.0
+                
+            # Calculate TR for last 120 bars (or available bars)
+            tr_values = []
+            for i in range(min(120, len(bars))):
+                bar = bars[-(i+1)]  # Work backwards from most recent
+                high = bar.get("high", bar.get("h", 0))
+                low = bar.get("low", bar.get("l", 0))
+                close = bar.get("close", bar.get("c", 0))
+                prev_close = bars[-(i+2)].get("close", bars[-(i+2)].get("c", close)) if i+1 < len(bars) else close
+                
+                # True Range calculation
+                tr = max(
+                    high - low,
+                    abs(high - prev_close),
+                    abs(low - prev_close)
+                )
+                
+                if close > 0:
+                    tr_pct = (tr / close) * 100
+                    tr_values.append(tr_pct)
+            
+            if len(tr_values) < 30:  # Need minimum data points
+                return 0.0
+                
+            # Calculate P80 (80th percentile)
+            tr_values.sort()
+            p80_index = int(0.80 * len(tr_values))
+            p80_threshold = tr_values[p80_index]
+            
+            logger.debug(f"[PERCENTILE-TR] {symbol}: P80 of {len(tr_values)} bars = {p80_threshold:.4f}%")
+            return p80_threshold
+            
+        except Exception as e:
+            logger.warning(f"[PERCENTILE-TR] Failed to calculate P80 for {symbol}: {e}")
+            return 0.0
 
     def _calculate_momentum_score(self, market_data: Dict) -> int:
         """
@@ -2168,12 +2345,16 @@ class MultiSymbolScanner:
         - VIX 20-25: 90% of threshold (normal-low volatility)
         - VIX > 25: 100% of threshold (normal/high volatility)
         
+        Midday Tuning (11:30-14:30 ET):
+        - For index ETFs during very-low VIX: raise threshold by 25% to reduce noise
+        - UVXY maintains 0.60% TR floor regardless of time
+        
         Args:
             time_scaled_pct: Time-scaled minimum body percentage
             symbol: Trading symbol for logging context
             
         Returns:
-            VIX-adjusted minimum body percentage
+            VIX-adjusted minimum body percentage with optional midday tuning
         """
         try:
             # Import VIX monitor
@@ -2189,11 +2370,21 @@ class MultiSymbolScanner:
             
             vix_value = vix_data.value
             
+            # Check if we're in midday hours (11:30-14:30 ET)
+            is_midday = self._is_midday_period()
+            
             # Determine VIX-based scaling factor
             if vix_value < 15.0:
                 # Very low volatility - reduce threshold by 30%
                 vix_scaling_factor = 0.70
                 regime = "very-low"
+                
+                # Apply midday tuning for index ETFs during very-low VIX
+                if is_midday and self._is_index_etf(symbol):
+                    midday_adjustment = 1.25  # Raise threshold by 25% during midday
+                    vix_scaling_factor *= midday_adjustment
+                    regime += "-midday-tuned"
+                    
             elif vix_value < 20.0:
                 # Low volatility - reduce threshold by 20%
                 vix_scaling_factor = 0.80
@@ -2209,6 +2400,18 @@ class MultiSymbolScanner:
             
             vix_scaled_pct = time_scaled_pct * vix_scaling_factor
             
+            # Apply minimum floor after VIX scaling to prevent over-suppression
+            # Index ETFs: 1.5bp floor, Individual stocks/volatility ETFs: 2.0bp floor
+            index_etfs = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE"]
+            min_floor_pct = 0.00015 if symbol in index_etfs else 0.0002  # 1.5bp vs 2.0bp
+            
+            # Ensure we never go below the minimum floor
+            if vix_scaled_pct < min_floor_pct:
+                original_scaled = vix_scaled_pct
+                vix_scaled_pct = min_floor_pct
+                logger.info(f"[VIX-FLOOR] {symbol}: Applied minimum floor {min_floor_pct*10000:.1f}bp "
+                           f"(was {original_scaled*10000:.1f}bp after VIX scaling)")
+            
             # Log VIX adjustment details
             if vix_scaling_factor < 1.0:
                 logger.info(f"[VIX-SCALE] {symbol}: VIX {vix_value:.1f} ({regime}) - reducing body threshold "
@@ -2221,6 +2424,31 @@ class MultiSymbolScanner:
         except Exception as e:
             logger.warning(f"[VIX-SCALE] {symbol}: Error applying VIX scaling: {e}, using time-scaled threshold")
             return time_scaled_pct
+
+    def _is_midday_period(self) -> bool:
+        """Check if current time is in midday period (11:30-14:30 ET)."""
+        try:
+            from datetime import datetime
+            import pytz
+            
+            # Get current ET time
+            et_tz = pytz.timezone('US/Eastern')
+            current_et = datetime.now(et_tz)
+            
+            # Define midday window: 11:30 AM - 2:30 PM ET
+            midday_start = current_et.replace(hour=11, minute=30, second=0, microsecond=0)
+            midday_end = current_et.replace(hour=14, minute=30, second=0, microsecond=0)
+            
+            return midday_start <= current_et <= midday_end
+            
+        except Exception as e:
+            logger.debug(f"[MIDDAY-CHECK] Error checking midday period: {e}")
+            return False
+
+    def _is_index_etf(self, symbol: str) -> bool:
+        """Check if symbol is an index ETF (not UVXY which should maintain low thresholds)."""
+        index_etfs = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "XLE"]
+        return symbol in index_etfs
 
     def _send_no_trade_heartbeat(self, rejection_reasons: List[str] = None):
         """

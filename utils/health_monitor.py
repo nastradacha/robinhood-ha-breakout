@@ -216,60 +216,158 @@ class SystemHealthMonitor:
             )
     
     def _check_api_connectivity(self) -> List[HealthCheckResult]:
-        """Check connectivity to critical APIs."""
+        """Check connectivity to critical APIs with intelligent credential detection."""
         checks = []
         
-        # API endpoints to check
-        apis = {
-            "alpaca_paper": "https://paper-api.alpaca.markets/v2/account",
-            "alpaca_live": "https://api.alpaca.markets/v2/account", 
-            "slack": "https://slack.com/api/api.test",
-            "yahoo_finance": "https://finance.yahoo.com/quote/SPY"
-        }
+        # Check Alpaca API connectivity using same logic as live trader
+        current_env = self.config.get("ALPACA_ENV", "paper")
         
-        for api_name, url in apis.items():
+        # Check for credentials using same logic as alpaca_client.py
+        # Both paper and live use the same environment variables
+        alpaca_credentials_available = bool(
+            (os.getenv("ALPACA_KEY_ID") or os.getenv("ALPACA_API_KEY")) and
+            os.getenv("ALPACA_SECRET_KEY")
+        )
+        
+        if alpaca_credentials_available:
+            if current_env == "paper":
+                alpaca_url = "https://paper-api.alpaca.markets/v2/account"
+                alpaca_name = "alpaca_paper"
+            else:
+                alpaca_url = "https://api.alpaca.markets/v2/account"
+                alpaca_name = "alpaca_live"
+            # Test Alpaca API with actual credentials
             try:
+                headers = {}
+                # Use same credential logic as alpaca_client.py
+                api_key = os.getenv("ALPACA_KEY_ID") or os.getenv("ALPACA_API_KEY")
+                secret_key = os.getenv("ALPACA_SECRET_KEY")
+                
+                if api_key and secret_key:
+                    headers = {
+                        "APCA-API-KEY-ID": api_key,
+                        "APCA-API-SECRET-KEY": secret_key
+                    }
+                
                 for attempt in range(self.api_retry_attempts):
                     try:
-                        response = requests.get(url, timeout=self.api_timeout)
+                        response = requests.get(alpaca_url, headers=headers, timeout=self.api_timeout)
                         
-                        if response.status_code in [200, 401, 403]:  # 401/403 means API is reachable
+                        if response.status_code == 200:
                             status = HealthStatus.HEALTHY
-                            message = f"{api_name} API reachable"
+                            message = f"{alpaca_name} API authenticated and operational"
+                            break
+                        elif response.status_code in [401, 403]:
+                            status = HealthStatus.WARNING
+                            message = f"{alpaca_name} API reachable but authentication failed"
                             break
                         else:
                             if attempt == self.api_retry_attempts - 1:
                                 status = HealthStatus.WARNING
-                                message = f"{api_name} API returned {response.status_code}"
+                                message = f"{alpaca_name} API returned {response.status_code}"
                             else:
                                 continue
                                 
                     except requests.RequestException as e:
                         if attempt == self.api_retry_attempts - 1:
-                            status = HealthStatus.CRITICAL if api_name.startswith("alpaca") else HealthStatus.WARNING
-                            message = f"{api_name} API unreachable: {str(e)}"
+                            status = HealthStatus.CRITICAL
+                            message = f"{alpaca_name} API unreachable: {str(e)}"
                         else:
-                            time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                            time.sleep(0.5 * (attempt + 1))
                             continue
                 
                 checks.append(HealthCheckResult(
                     check_type=HealthCheckType.API_CONNECTIVITY,
                     status=status,
                     message=message,
-                    details={"api": api_name, "url": url, "attempts": self.api_retry_attempts},
+                    details={"api": alpaca_name, "url": alpaca_url, "authenticated": bool(headers)},
                     timestamp=datetime.now(),
-                    critical=(api_name.startswith("alpaca"))
+                    critical=True
                 ))
                 
             except Exception as e:
                 checks.append(HealthCheckResult(
                     check_type=HealthCheckType.API_CONNECTIVITY,
-                    status=HealthStatus.CRITICAL if api_name.startswith("alpaca") else HealthStatus.WARNING,
-                    message=f"{api_name} API check failed: {str(e)}",
-                    details={"api": api_name, "error": str(e)},
+                    status=HealthStatus.WARNING,
+                    message=f"Alpaca API check failed: {str(e)}",
+                    details={"error": str(e)},
                     timestamp=datetime.now(),
-                    critical=(api_name.startswith("alpaca"))
+                    critical=False
                 ))
+        else:
+            # No Alpaca credentials available - log debug info and skip check
+            logger.debug(f"[HEALTH-MONITOR] No Alpaca credentials found (checked ALPACA_KEY_ID, ALPACA_API_KEY, ALPACA_SECRET_KEY)")
+            checks.append(HealthCheckResult(
+                check_type=HealthCheckType.API_CONNECTIVITY,
+                status=HealthStatus.INFO,
+                message=f"Alpaca API credentials not configured - skipping connectivity test",
+                details={"reason": "no_credentials", "environment": current_env},
+                timestamp=datetime.now(),
+                critical=False
+            ))
+        
+        # Check Slack connectivity only if integration is configured
+        slack_configured = any([
+            os.getenv("SLACK_WEBHOOK_URL"),
+            os.getenv("SLACK_BOT_TOKEN"),
+            self.config.get("SLACK_WEBHOOK_URL"),
+            self.config.get("SLACK_BOT_TOKEN")
+        ])
+        
+        if slack_configured:
+            try:
+                # Test basic Slack API connectivity
+                for attempt in range(self.api_retry_attempts):
+                    try:
+                        response = requests.get("https://slack.com/api/api.test", timeout=self.api_timeout)
+                        
+                        if response.status_code == 200:
+                            status = HealthStatus.HEALTHY
+                            message = "Slack API reachable"
+                            break
+                        else:
+                            if attempt == self.api_retry_attempts - 1:
+                                status = HealthStatus.WARNING
+                                message = f"Slack API returned {response.status_code}"
+                            else:
+                                continue
+                                
+                    except requests.RequestException as e:
+                        if attempt == self.api_retry_attempts - 1:
+                            status = HealthStatus.WARNING
+                            message = f"Slack API unreachable: {str(e)}"
+                        else:
+                            time.sleep(0.5 * (attempt + 1))
+                            continue
+                
+                checks.append(HealthCheckResult(
+                    check_type=HealthCheckType.API_CONNECTIVITY,
+                    status=status,
+                    message=message,
+                    details={"api": "slack", "url": "https://slack.com/api/api.test", "attempts": self.api_retry_attempts},
+                    timestamp=datetime.now(),
+                    critical=False
+                ))
+                
+            except Exception as e:
+                checks.append(HealthCheckResult(
+                    check_type=HealthCheckType.API_CONNECTIVITY,
+                    status=HealthStatus.WARNING,
+                    message=f"Slack API check failed: {str(e)}",
+                    details={"api": "slack", "error": str(e)},
+                    timestamp=datetime.now(),
+                    critical=False
+                ))
+        else:
+            # No Slack integration configured - skip check
+            checks.append(HealthCheckResult(
+                check_type=HealthCheckType.API_CONNECTIVITY,
+                status=HealthStatus.HEALTHY,
+                message="Slack integration not configured - skipping connectivity test",
+                details={"reason": "no_slack_config"},
+                timestamp=datetime.now(),
+                critical=False
+            ))
         
         return checks
     
@@ -388,9 +486,26 @@ class SystemHealthMonitor:
             # Calculate file hash for integrity
             file_hash = hashlib.md5(config_content.encode()).hexdigest()
             
-            # Check for required keys
-            required_keys = ["ALPACA_API_KEY", "ALPACA_SECRET_KEY", "SLACK_WEBHOOK_URL"]
-            missing_keys = [key for key in required_keys if not config_data.get(key)]
+            # Check for required keys - flexible for different auth methods
+            alpaca_keys_present = any([
+                config_data.get("ALPACA_API_KEY"),
+                os.getenv("ALPACA_API_KEY"),
+                config_data.get("ALPACA_PAPER_API_KEY"),
+                os.getenv("ALPACA_PAPER_API_KEY")
+            ])
+            
+            slack_integration_present = any([
+                config_data.get("SLACK_WEBHOOK_URL"),
+                config_data.get("SLACK_BOT_TOKEN"),
+                os.getenv("SLACK_WEBHOOK_URL"),
+                os.getenv("SLACK_BOT_TOKEN")
+            ])
+            
+            missing_keys = []
+            if not alpaca_keys_present:
+                missing_keys.append("ALPACA_API_KEY (or env variable)")
+            if not slack_integration_present:
+                missing_keys.append("SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN (or env variables)")
             
             if missing_keys:
                 checks.append(HealthCheckResult(

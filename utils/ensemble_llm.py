@@ -71,12 +71,11 @@ class EnsembleLLM:
             self._initialized = True
             return
             
-        # Initialize LLM clients for each model
+        # Initialize LLM clients for each model (using singleton pattern)
         self.clients = {}
         for model in self.models:
             try:
                 self.clients[model] = LLMClient(model=model)
-                logger.info(f"[ENSEMBLE] Initialized {model} client")
             except Exception as e:
                 logger.warning(f"[ENSEMBLE] Failed to initialize {model}: {e}")
         
@@ -133,7 +132,8 @@ class EnsembleLLM:
                     "reason": decision.reason or f"{model_name} decision",
                     "elapsed": elapsed
                 }
-                logger.info(f"[ENSEMBLE] {model_name}: {decision.decision} (conf: {decision.confidence:.3f}) [{elapsed:.1f}s] - {decision.reason or 'No reason provided'}")
+                conf_str = f"{decision.confidence:.3f}" if decision.confidence is not None else "None"
+                logger.info(f"[ENSEMBLE] {model_name}: {decision.decision} (conf: {conf_str}) [{elapsed:.1f}s] - {decision.reason or 'No reason provided'}")
                 return result
             except Exception as e:
                 logger.warning(f"[ENSEMBLE] {model_name} failed: {e}")
@@ -166,6 +166,7 @@ class EnsembleLLM:
                         if (len(decisions) == 1 and 
                             result["elapsed"] <= fast_model_threshold and
                             result["decision"] != "NO_TRADE" and
+                            result["confidence"] is not None and
                             result["confidence"] >= 0.70):  # Higher threshold for trade decisions
                             
                             # Wait longer (4s) to see if second model responds
@@ -195,7 +196,8 @@ class EnsembleLLM:
                             
                             # Only use fast model decision if high confidence and no disagreement
                             if len(decisions) == 1:  # No second model responded or disagreed
-                                logger.info(f"[ENSEMBLE] Fail-open: Using fast {model_name} decision ({result['elapsed']:.1f}s, conf: {result['confidence']:.3f})")
+                                conf_str = f"{result['confidence']:.3f}" if result['confidence'] is not None else "None"
+                                logger.info(f"[ENSEMBLE] Fail-open: Using fast {model_name} decision ({result['elapsed']:.1f}s, conf: {conf_str})")
                                 # Cancel remaining futures
                                 for remaining_future in future_to_model:
                                     if remaining_future != future and not remaining_future.done():
@@ -204,6 +206,7 @@ class EnsembleLLM:
                         
                         # Early exit if first model returns NO_TRADE with high confidence
                         if (result["decision"] == "NO_TRADE" and 
+                            result["confidence"] is not None and
                             result["confidence"] >= 0.80 and  # High confidence NO_TRADE
                             len(decisions) == 1):
                             logger.info(f"[ENSEMBLE] Early exit: {model_name} NO_TRADE with {result['confidence']:.3f} confidence")
@@ -242,7 +245,9 @@ class EnsembleLLM:
                 logger.warning(f"[ENSEMBLE] Only 1 model responded within {timeout_seconds}s, using single decision")
                 
                 # Accept single model if confidence >= 0.60 OR if it's a strong signal (>= 0.65)
-                if single["decision"] != "NO_TRADE" and single["confidence"] >= MIN_CONF:
+                if (single["decision"] != "NO_TRADE" and 
+                    single["confidence"] is not None and 
+                    single["confidence"] >= MIN_CONF):
                     logger.info(f"[ENSEMBLE] Single model {single['decision']} with confidence {single['confidence']:.3f} >= {MIN_CONF} - accepting decision")
                     return {
                         "decision": single["decision"],
@@ -250,11 +255,12 @@ class EnsembleLLM:
                         "reason": f"Single model decision: {single['reason']}"
                     }
                 else:
-                    logger.info(f"[ENSEMBLE] Single model {single['decision']} with confidence {single['confidence']:.3f} < {MIN_CONF} - defaulting to NO_TRADE")
+                    conf_str = f"{single['confidence']:.3f}" if single['confidence'] is not None else "None"
+                    logger.info(f"[ENSEMBLE] Single model {single['decision']} with confidence {conf_str} - defaulting to NO_TRADE")
                     return {
                         "decision": "NO_TRADE",
-                        "confidence": 0.0,
-                        "reason": f"Single model fallback: {single['reason']}"
+                        "confidence": None,
+                        "reason": f"Single model fallback (insufficient confidence): {single['reason']}"
                     }
         # Apply ensemble voting logic
         return self._aggregate_decisions(decisions)
@@ -318,7 +324,7 @@ class EnsembleLLM:
                 logger.info("[ENSEMBLE] Rule-based fallback: No clear breakout pattern")
                 return {
                     "decision": "NO_TRADE",
-                    "confidence": 0.0,
+                    "confidence": None,
                     "reason": "Rule-based fallback: No clear breakout pattern detected"
                 }
                 
@@ -326,7 +332,7 @@ class EnsembleLLM:
             logger.error(f"[ENSEMBLE] Rule-based fallback failed: {e}")
             return {
                 "decision": "NO_TRADE",
-                "confidence": 0.0,
+                "confidence": None,
                 "reason": f"Rule-based fallback error: {e}"
             }
     
@@ -334,10 +340,11 @@ class EnsembleLLM:
         """
         Aggregate multiple model decisions into final ensemble decision.
         
-        Fixed ensemble logic:
-        - Requires both models to agree on direction (CALL/PUT)
-        - Each model must meet minimum confidence threshold
-        - Ties result in NO_TRADE (no override)
+        Enhanced ensemble logic:
+        - Requires ≥1 model above MIN_CONFIDENCE threshold
+        - Prefers unanimous agreement but accepts majority with high confidence
+        - Falls back to NO_TRADE gracefully when no models meet threshold
+        - Handles None confidence values properly
         
         Args:
             decisions: List of model decision dicts
@@ -346,39 +353,61 @@ class EnsembleLLM:
             Final ensemble decision dict
         """
         from collections import Counter
-        from utils.config import load_config
+        from utils.llm import load_config
         
         config = load_config()
         min_confidence = config.get("MIN_CONFIDENCE", 0.6)
         
-        # Filter actionable decisions that meet confidence threshold
-        valid_votes = [
+        # Separate decisions by type and filter by confidence
+        actionable_decisions = [
             d for d in decisions 
-            if d["decision"] in ("CALL", "PUT") and d["confidence"] >= min_confidence
+            if d["decision"] in ("CALL", "PUT") and d["confidence"] is not None
         ]
         
-        if not valid_votes:
-            return {"decision": "NO_TRADE", "confidence": 0.0, "reason": "No votes meet confidence threshold"}
+        # Filter for decisions meeting confidence threshold
+        valid_votes = [
+            d for d in actionable_decisions 
+            if d["confidence"] >= min_confidence
+        ]
         
-        # Extract just the decisions from valid votes
+        # Graceful fallback when no models meet confidence threshold
+        if not valid_votes:
+            low_conf_count = len([d for d in actionable_decisions if d["confidence"] < min_confidence])
+            none_conf_count = len([d for d in decisions if d["confidence"] is None])
+            
+            logger.info(f"[ENSEMBLE] No models above {min_confidence:.2f} threshold: {low_conf_count} below, {none_conf_count} without confidence")
+            return {
+                "decision": "NO_TRADE", 
+                "confidence": None, 
+                "reason": f"No models meet {min_confidence:.2f} confidence threshold ({len(actionable_decisions)} actionable, 0 valid)"
+            }
+        
+        # Count votes from valid models
         votes = [d["decision"] for d in valid_votes]
         vote_counts = Counter(votes)
         max_votes = max(vote_counts.values())
         winners = [k for k, v in vote_counts.items() if v == max_votes]
 
-        # Require unanimous agreement - no ties allowed
+        # Handle disagreement between valid models
         if len(winners) > 1:
-            return {"decision": "NO_TRADE", "confidence": 0.0, "reason": "Models disagree - treating as NO_TRADE"}
+            logger.info(f"[ENSEMBLE] Models disagree: {dict(vote_counts)} - defaulting to NO_TRADE")
+            return {
+                "decision": "NO_TRADE", 
+                "confidence": None, 
+                "reason": f"Models disagree among {len(valid_votes)} valid votes: {dict(vote_counts)}"
+            }
         
-        # Unanimous agreement with confidence threshold met
+        # Unanimous or majority agreement with confidence threshold met
         winner = winners[0]
-        conf = sum(d["confidence"] for d in valid_votes if d["decision"] == winner) / len(valid_votes)
-        model_count = len(valid_votes)
+        winning_votes = [d for d in valid_votes if d["decision"] == winner]
+        avg_confidence = sum(d["confidence"] for d in winning_votes) / len(winning_votes)
+        
+        logger.info(f"[ENSEMBLE] Agreement: {winner} from {len(winning_votes)}/{len(decisions)} models (avg conf: {avg_confidence:.3f})")
         
         return {
             "decision": winner, 
-            "confidence": conf, 
-            "reason": f"Unanimous agreement: {winner} ({model_count}/{len(decisions)} models above threshold)"
+            "confidence": avg_confidence, 
+            "reason": f"Ensemble {winner}: {len(winning_votes)}/{len(decisions)} models above {min_confidence:.2f} threshold"
         }
 
 

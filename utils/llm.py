@@ -168,7 +168,7 @@ class TradeDecision:
     """Data class for trade decision results."""
 
     decision: str  # "CALL", "PUT", "NO_TRADE"
-    confidence: float  # 0.0 to 1.0
+    confidence: Optional[float] = None  # 0.0 to 1.0, or None if not provided
     reason: Optional[str] = None
     tokens_used: int = 0
 
@@ -183,9 +183,21 @@ class BankrollUpdate:
 
 
 class LLMClient:
-    """Unified client for OpenAI and DeepSeek APIs."""
+    """Unified client for OpenAI and DeepSeek APIs with singleton pattern per model."""
+    
+    _instances = {}
+    _initialized = set()
+
+    def __new__(cls, model: str = "gpt-4o-mini"):
+        if model not in cls._instances:
+            cls._instances[model] = super().__new__(cls)
+        return cls._instances[model]
 
     def __init__(self, model: str = "gpt-4o-mini"):
+        # Skip initialization if already done for this model
+        if model in self._initialized:
+            return
+            
         self.model = model
         self.openai_key = os.getenv("OPENAI_API_KEY")
         self.deepseek_key = os.getenv("DEEPSEEK_API_KEY")
@@ -199,6 +211,10 @@ class LLMClient:
         if model.startswith("gpt"):
             # Modern OpenAI client initialization handled in _call_openai method
             pass
+            
+        # Mark this model as initialized
+        self._initialized.add(model)
+        logger.debug(f"[LLM] Initialized {model} client (singleton)")
 
     def _get_function_schemas(self) -> list:
         """Get function calling schemas for trade decisions."""
@@ -623,13 +639,13 @@ Use the choose_trade function to respond.""",
                         try:
                             args = json.loads(tool_call.function.arguments)
                             
-                            # Validate required fields
-                            if "decision" not in args or "confidence" not in args:
-                                logger.warning(f"OpenAI missing required fields: {args}")
+                            # Validate required fields - only decision is required
+                            if "decision" not in args:
+                                logger.warning(f"OpenAI missing decision field: {args}")
                                 return TradeDecision(
                                     decision="ABSTAIN",
-                                    confidence=0.0,
-                                    reason="OpenAI missing required decision/confidence fields",
+                                    confidence=None,
+                                    reason="OpenAI missing required decision field",
                                     tokens_used=tokens_used,
                                 )
                             
@@ -639,21 +655,22 @@ Use the choose_trade function to respond.""",
                                 logger.warning(f"OpenAI invalid decision: {args['decision']}")
                                 return TradeDecision(
                                     decision="ABSTAIN",
-                                    confidence=0.0,
+                                    confidence=None,
                                     reason=f"OpenAI invalid decision: {args['decision']}",
                                     tokens_used=tokens_used,
                                 )
                             
-                            # Validate confidence range
-                            confidence = float(args["confidence"])
-                            if not (0.0 <= confidence <= 1.0):
-                                logger.warning(f"OpenAI invalid confidence: {confidence}")
-                                return TradeDecision(
-                                    decision="ABSTAIN",
-                                    confidence=0.0,
-                                    reason=f"OpenAI invalid confidence: {confidence}",
-                                    tokens_used=tokens_used,
-                                )
+                            # Handle optional confidence field
+                            confidence = None
+                            if "confidence" in args:
+                                try:
+                                    confidence = float(args["confidence"])
+                                    if not (0.0 <= confidence <= 1.0):
+                                        logger.warning(f"OpenAI invalid confidence range: {confidence}, treating as None")
+                                        confidence = None
+                                except (ValueError, TypeError):
+                                    logger.warning(f"OpenAI non-numeric confidence: {args['confidence']}, treating as None")
+                                    confidence = None
                             
                             return TradeDecision(
                                 decision=args["decision"],
@@ -717,13 +734,13 @@ Use the choose_trade function to respond.""",
                             
                             args = json.loads(cleaned_args)
                         
-                        # Validate required fields
-                        if "decision" not in args or "confidence" not in args:
-                            logger.warning(f"DeepSeek missing required fields: {args}")
+                        # Validate required fields - only decision is required
+                        if "decision" not in args:
+                            logger.warning(f"DeepSeek missing decision field: {args}")
                             return TradeDecision(
                                 decision="ABSTAIN",
-                                confidence=0.0,
-                                reason="DeepSeek missing required decision/confidence fields",
+                                confidence=None,
+                                reason="DeepSeek missing required decision field",
                                 tokens_used=tokens_used,
                             )
                         
@@ -733,32 +750,26 @@ Use the choose_trade function to respond.""",
                             logger.warning(f"DeepSeek invalid decision: {args['decision']}")
                             return TradeDecision(
                                 decision="ABSTAIN",
-                                confidence=0.0,
+                                confidence=None,
                                 reason=f"DeepSeek invalid decision: {args['decision']}",
                                 tokens_used=tokens_used,
                             )
                         
                         # Validate confidence range
-                        try:
-                            confidence = float(args["confidence"])
-                            if not (0.0 <= confidence <= 1.0):
-                                logger.warning(f"DeepSeek invalid confidence: {confidence}")
-                                return TradeDecision(
-                                    decision="ABSTAIN",
-                                    confidence=0.0,
-                                    reason=f"DeepSeek invalid confidence: {confidence}",
-                                    tokens_used=tokens_used,
-                                )
-                        except (ValueError, TypeError):
-                            logger.warning(f"DeepSeek confidence not numeric: {args['confidence']}")
-                            return TradeDecision(
-                                decision="ABSTAIN",
-                                confidence=0.0,
-                                reason=f"DeepSeek non-numeric confidence: {args['confidence']}",
-                                tokens_used=tokens_used,
-                            )
+                        # Handle optional confidence field
+                        confidence = None
+                        if "confidence" in args:
+                            try:
+                                confidence = float(args["confidence"])
+                                if not (0.0 <= confidence <= 1.0):
+                                    logger.warning(f"DeepSeek invalid confidence range: {confidence}, treating as None")
+                                    confidence = None
+                            except (ValueError, TypeError):
+                                logger.warning(f"DeepSeek non-numeric confidence: {args['confidence']}, treating as None")
+                                confidence = None
                         
-                        logger.info(f"DeepSeek successful parse: {args['decision']} (conf: {confidence:.3f})")
+                        conf_str = f"{confidence:.3f}" if confidence is not None else "None"
+                        logger.info(f"DeepSeek successful parse: {args['decision']} (conf: {conf_str})")
                         return TradeDecision(
                             decision=args["decision"],
                             confidence=confidence,
@@ -771,7 +782,7 @@ Use the choose_trade function to respond.""",
                         logger.debug(f"DeepSeek problematic arguments: {function_call_data.get('arguments', 'N/A')}")
                         return TradeDecision(
                             decision="ABSTAIN",
-                            confidence=0.0,
+                            confidence=None,
                             reason=f"DeepSeek parse failure: {str(e)}",
                             tokens_used=tokens_used,
                         )
@@ -780,20 +791,73 @@ Use the choose_trade function to respond.""",
                 message_content = response["choices"][0]["message"].get("content", "")
                 if message_content:
                     logger.debug(f"DeepSeek text response: {message_content}")
-                    # Try to extract decision from text using regex
+                    # Try to extract JSON from text content first (more reliable than regex)
                     import re
+                    
+                    # Look for JSON blocks in the text
+                    json_match = re.search(r'\{[^}]*"decision"[^}]*\}', message_content, re.DOTALL)
+                    if json_match:
+                        try:
+                            json_str = json_match.group(0)
+                            logger.debug(f"DeepSeek extracted JSON: {json_str}")
+                            json_data = json.loads(json_str)
+                            
+                            if "decision" in json_data:
+                                decision = json_data["decision"]
+                                confidence = None
+                                
+                                # Parse confidence from JSON (source of truth)
+                                if "confidence" in json_data:
+                                    try:
+                                        confidence = float(json_data["confidence"])
+                                        if not (0.0 <= confidence <= 1.0):
+                                            logger.warning(f"DeepSeek JSON confidence out of range: {confidence}, treating as None")
+                                            confidence = None
+                                    except (ValueError, TypeError):
+                                        logger.warning(f"DeepSeek JSON confidence not numeric: {json_data['confidence']}, treating as None")
+                                        confidence = None
+                                
+                                conf_str = f"{confidence:.3f}" if confidence is not None else "None"
+                                logger.info(f"DeepSeek JSON fallback: {decision} (conf: {conf_str})")
+                                return TradeDecision(
+                                    decision=decision,
+                                    confidence=confidence,
+                                    reason=f"DeepSeek JSON fallback: {json_data.get('reason', 'No reason provided')}",
+                                    tokens_used=tokens_used,
+                                )
+                        except json.JSONDecodeError:
+                            logger.debug("DeepSeek JSON extraction failed, falling back to regex")
+                    
+                    # Fallback to regex parsing if JSON extraction fails
                     decision_match = re.search(r'\b(CALL|PUT|NO_TRADE)\b', message_content.upper())
                     if decision_match:
                         decision = decision_match.group(1)
-                        # Extract confidence if present
-                        conf_match = re.search(r'confidence[:\s]*([0-9]*\.?[0-9]+)', message_content.lower())
-                        confidence = float(conf_match.group(1)) if conf_match else 0.5
+                        # Extract confidence if present - look for various patterns
+                        conf_patterns = [
+                            r'confidence[:\s]*([0-9]*\.?[0-9]+)',
+                            r'"confidence"[:\s]*([0-9]*\.?[0-9]+)',
+                            r'conf[:\s]*([0-9]*\.?[0-9]+)'
+                        ]
                         
-                        logger.info(f"DeepSeek text fallback: {decision} (conf: {confidence:.3f})")
+                        confidence = None
+                        for pattern in conf_patterns:
+                            conf_match = re.search(pattern, message_content.lower())
+                            if conf_match:
+                                try:
+                                    confidence = float(conf_match.group(1))
+                                    if 0.0 <= confidence <= 1.0:
+                                        break
+                                    else:
+                                        confidence = None
+                                except (ValueError, TypeError):
+                                    confidence = None
+                        
+                        conf_str = f"{confidence:.3f}" if confidence is not None else "None"
+                        logger.info(f"DeepSeek regex fallback: {decision} (conf: {conf_str})")
                         return TradeDecision(
                             decision=decision,
-                            confidence=min(max(confidence, 0.0), 1.0),  # Clamp to valid range
-                            reason=f"DeepSeek text fallback: {message_content[:100]}...",
+                            confidence=confidence,
+                            reason=f"DeepSeek regex fallback: {message_content[:100]}...",
                             tokens_used=tokens_used,
                         )
 
@@ -801,7 +865,7 @@ Use the choose_trade function to respond.""",
             logger.warning(f"Model {self.model} failed to provide valid function call, returning ABSTAIN")
             return TradeDecision(
                 decision="ABSTAIN",
-                confidence=0.0,
+                confidence=None,
                 reason=f"Model {self.model} failed to provide required function call",
                 tokens_used=tokens_used,
             )
@@ -810,7 +874,7 @@ Use the choose_trade function to respond.""",
             logger.error(f"Error making trade decision: {e}")
             return TradeDecision(
                 decision="NO_TRADE",
-                confidence=0.0,
+                confidence=None,
                 reason=f"API error: {str(e)}",
                 tokens_used=0,
             )

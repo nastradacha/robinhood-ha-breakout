@@ -162,6 +162,12 @@ class DataValidator:
         self.pause_cooldowns = {}  # symbol -> {"paused_at": datetime, "normal_scans": int, "required_normal_scans": int}
         self.cooldown_normal_scans_required = self.config.get("DATA_COOLDOWN_NORMAL_SCANS", 5)  # Require 5 consecutive normal scans
         
+        # UVXY-specific data consistency guardrails
+        self.uvxy_throttle_threshold = self.config.get("UVXY_THROTTLE_THRESHOLD", 1.0)  # 1% discrepancy threshold
+        self.uvxy_throttle_duration = self.config.get("UVXY_THROTTLE_DURATION", 300)  # 5 minutes throttle
+        self.uvxy_validation_samples = self.config.get("UVXY_VALIDATION_SAMPLES", 2)  # Extra validation samples required
+        self.uvxy_throttle_state = {}  # symbol -> {"throttled_at": datetime, "validation_count": int, "required_validations": int}
+        
         # Initialize Alpaca client if available
         try:
             from .alpaca_client import AlpacaClient
@@ -410,17 +416,73 @@ class DataValidator:
         
         return False, ""
     
-    def _check_corporate_actions(self, symbol: str, ratio: float) -> Optional[str]:
+    def _check_price_source_consistency(self, price1: float, price2: float, symbol: str) -> bool:
         """
-        Check corporate actions API for recent splits/dividends that could explain price discrepancy
+        Check if two prices are from consistent sources (both adjusted or both unadjusted).
+        
+        This prevents false split detection when comparing adjusted vs unadjusted prices
+        from different data sources.
         
         Args:
-            symbol: Stock symbol to check
-            ratio: Price ratio that triggered the check
+            price1: First price to compare
+            price2: Second price to compare  
+            symbol: Symbol being validated
             
         Returns:
-            String describing the corporate action if found, None otherwise
+            bool: True if prices appear to be from consistent sources
         """
+        try:
+            # Calculate percentage difference
+            diff_pct = abs(price1 - price2) / max(price1, price2) * 100
+            
+            # If difference is very small (<0.5%), assume consistent sources
+            if diff_pct < 0.5:
+                return True
+                
+            # For larger differences, check if it matches common split ratios
+            # If it does, it's likely a real split, not source inconsistency
+            ratio = max(price1, price2) / min(price1, price2)
+            common_splits = [2.0, 3.0, 4.0, 5.0, 10.0, 20.0]
+            
+            for split_ratio in common_splits:
+                # Check both normal and reverse splits with 5% tolerance
+                if (abs(ratio - split_ratio) / split_ratio < 0.05 or 
+                    abs(ratio - (1.0/split_ratio)) / (1.0/split_ratio) < 0.05):
+                    # This looks like a real split, sources are consistent
+                    return True
+            
+            # Moderate differences (0.5-5%) without split patterns suggest source inconsistency
+            if diff_pct < 5.0:
+                self.logger.debug(f"[DATA-VALIDATION] {symbol}: Moderate price difference ({diff_pct:.2f}%) suggests source inconsistency")
+                return False
+                
+            # Large differences (>5%) likely indicate real market moves or splits
+            return True
+            
+        except (ZeroDivisionError, ValueError) as e:
+            self.logger.warning(f"[DATA-VALIDATION] {symbol}: Error checking price consistency: {e}")
+            return True  # Default to consistent to avoid blocking trades
+    
+    def validate_data(self, symbol: str, current_price: float, source: str = "alpaca") -> ValidationResult:
+        """
+        Validate current price data against multiple sources"""
+        
+        # Check UVXY throttling state first
+        if symbol == "UVXY" and self._is_uvxy_throttled(symbol):
+            logger.info(f"[UVXY-THROTTLE] {symbol}: LLM evaluation throttled due to data inconsistency")
+            return ValidationResult(
+                symbol=symbol,
+                primary_data=DataPoint(current_price, datetime.now(), source, symbol, "price"),
+                validation_data=None,
+                quality=DataQuality.POOR,
+                discrepancy_pct=0.0,
+                issues=[f"UVXY throttled due to persistent data discrepancy"],
+                recommendation=ValidationRecommendation.BLOCK_TRADING,
+                timestamp=datetime.now(),
+                primary_source=source,
+                validation_sources=[],
+                message=f"UVXY throttled due to persistent data discrepancy"
+            )
         try:
             # Try Alpaca corporate actions API first
             if self.alpaca_client:
@@ -468,183 +530,72 @@ class DataValidator:
             self.logger.warning(f"[DATA-VALIDATION] Corporate actions check failed for {symbol}: {e}")
             return None
     
-    def _check_cross_symbol_contamination(self, primary_price: float, validation_price: float, symbol: str) -> Optional[str]:
-        """
-        Check if the price mismatch is due to cross-symbol feed contamination
-        
-        Returns:
-            String describing the contamination if detected, None otherwise
-        """
-        # Check if either price matches another symbol's last known price within 0.05%
-        for other_symbol, last_price in self.last_good_prices.items():
-            if other_symbol == symbol:
-                continue
-                
-            # Check if primary_price matches another symbol
-            if abs(primary_price - last_price) / last_price < 0.0005:  # 0.05%
-                return f"primary_price {primary_price} matches {other_symbol} last_price {last_price}"
-                
-            # Check if validation_price matches another symbol  
-            if abs(validation_price - last_price) / last_price < 0.0005:  # 0.05%
-                return f"validation_price {validation_price} matches {other_symbol} last_price {last_price}"
-                
-        return None
-    
-    def _check_price_source_consistency(self, current_price: float, validation_price: float, symbol: str) -> bool:
-        """
-        Check if current and validation prices come from consistent adjustment sources
-        
-        Args:
-            current_price: Current market price
-            validation_price: Historical validation price
-            symbol: Stock symbol
-            
-        Returns:
-            True if prices are from consistent sources, False if adjustment mismatch detected
-        """
-        # Calculate ratio to detect potential adjustment mismatches
-        if validation_price <= 0:
-            return True  # Can't validate consistency
-            
-        ratio = current_price / validation_price
-        
-        # Common adjustment factors that suggest one price is adjusted, other is not:
-        # - Dividend adjustments (typically small, < 5%)
-        # - Split adjustments (typically 2x, 3x, 4x, etc.)
-        
-        # If ratio is very close to 1.0, prices are consistent
-        if abs(ratio - 1.0) < 0.02:  # Within 2%
-            return True
-            
-        # Check for common dividend adjustment patterns (2-10% differences)
-        if 0.90 <= ratio <= 1.10:  # 10% range suggests dividend adjustment mismatch
-            logger.debug(f"[DATA-VALIDATION] {symbol}: Potential dividend adjustment mismatch (ratio: {ratio:.3f})")
+    def _is_uvxy_throttled(self, symbol: str) -> bool:
+        """Check if UVXY is currently throttled due to data inconsistency"""
+        if symbol not in self.uvxy_throttle_state:
             return False
-            
-        # Check for split adjustment patterns (clean multiples suggest adjustment mismatch)
-        clean_multiples = [0.5, 0.333, 0.25, 0.2, 2.0, 3.0, 4.0, 5.0]
-        for multiple in clean_multiples:
-            if abs(ratio - multiple) < 0.01:  # Very close to clean multiple
-                logger.debug(f"[DATA-VALIDATION] {symbol}: Potential split adjustment mismatch (ratio: {ratio:.3f} ≈ {multiple})")
-                return False
-                
-        # Prices appear to be from consistent sources
+        
+        state = self.uvxy_throttle_state[symbol]
+        throttled_at = state.get("throttled_at")
+        
+        if not throttled_at:
+            return False
+        
+        # Check if throttle duration has expired
+        if (datetime.now() - throttled_at).total_seconds() > self.uvxy_throttle_duration:
+            # Reset throttle state after duration expires
+            self.uvxy_throttle_state[symbol] = {
+                "throttled_at": None,
+                "validation_count": 0,
+                "required_validations": self.uvxy_validation_samples
+            }
+            logger.info(f"[UVXY-THROTTLE] {symbol}: Throttle duration expired, requiring {self.uvxy_validation_samples} validation samples")
+            return False
+        
+        # Check if we have enough validation samples
+        validation_count = state.get("validation_count", 0)
+        required_validations = state.get("required_validations", self.uvxy_validation_samples)
+        
+        if validation_count >= required_validations:
+            # Clear throttle state - validation complete
+            del self.uvxy_throttle_state[symbol]
+            logger.info(f"[UVXY-THROTTLE] {symbol}: Validation complete ({validation_count}/{required_validations}), resuming LLM evaluation")
+            return False
+        
         return True
     
-    def validate_data(self, symbol: str, current_price: float, source: str = "alpaca") -> ValidationResult:
-        """Validate current price data against multiple sources"""
-        logger.debug(f"[DATA-VALIDATION] Starting validation for {symbol}: ${current_price:.2f} from {source}")
+    def _handle_uvxy_discrepancy(self, symbol: str, discrepancy_pct: float):
+        """Handle UVXY data discrepancy by activating throttling"""
+        if symbol not in self.uvxy_throttle_state:
+            self.uvxy_throttle_state[symbol] = {
+                "throttled_at": None,
+                "validation_count": 0,
+                "required_validations": self.uvxy_validation_samples
+            }
         
-        # Get symbol state manager - always validate, even if quarantined
-        state_manager = get_symbol_state_manager()
-        was_quarantined = state_manager.is_quarantined(symbol)
+        # Activate throttling
+        self.uvxy_throttle_state[symbol]["throttled_at"] = datetime.now()
+        self.uvxy_throttle_state[symbol]["validation_count"] = 0
         
-        # Get validation data points
-        validation_points = []
+        logger.warning(f"[UVXY-THROTTLE] {symbol}: Activating throttle due to {discrepancy_pct:.1f}% discrepancy "
+                      f"(threshold: {self.uvxy_throttle_threshold:.1f}%), requiring {self.uvxy_validation_samples} validation samples")
+    
+    def _update_uvxy_validation_progress(self, symbol: str):
+        """Update UVXY validation progress for normal readings"""
+        if symbol not in self.uvxy_throttle_state:
+            return
         
-        # Internal validation (Alpaca historical)
-        internal_point = self.get_internal_validation_price(symbol, current_price)
-        if internal_point:
-            validation_points.append(internal_point)
+        state = self.uvxy_throttle_state[symbol]
+        if state.get("throttled_at") is None:
+            return  # Not currently throttled
         
-        # If we have validation data, calculate discrepancy and record stable scan
-        if validation_points:
-            primary_point = DataPoint(
-                value=current_price,
-                timestamp=datetime.now(),
-                source=source,
-                symbol=symbol,
-                data_type="price"
-            )
-            
-            # Use the first (and typically only) validation point
-            validation_point = validation_points[0]
-            discrepancy = self.calculate_discrepancy(primary_point, validation_point)
-            
-            # Always record stable scan - this enables immediate auto-release
-            price_diff_pct = discrepancy  # Already calculated as percentage
-            is_unquarantined = state_manager.record_stable_scan(symbol, price_diff_pct)
-            
-            # Determine quality and recommendation
-            if was_quarantined and not is_unquarantined:
-                # Still quarantined after this scan
-                symbol_info = state_manager.get_symbol_info(symbol)
-                stable_scans = symbol_info.get('stable_scans', 0)
-                required_scans = state_manager.stability_required_scans
-                logger.info(f"[DATA-VALIDATION] {symbol} still quarantined - stable scans: {stable_scans}/{required_scans} (diff: {discrepancy:.1f}%)")
-                return ValidationResult(
-                    symbol=symbol,
-                    primary_data=primary_point,
-                    validation_data=validation_point,
-                    quality=DataQuality.POOR,
-                    discrepancy_pct=discrepancy,
-                    issues=[],
-                    recommendation=ValidationRecommendation.BLOCK_TRADING,
-                    timestamp=datetime.now(),
-                    primary_source=source,
-                    validation_sources=[validation_point.source],
-                    message=f"Symbol recovering from quarantine ({stable_scans}/{required_scans} stable scans)"
-                )
-            elif was_quarantined and is_unquarantined:
-                # Just unquarantined!
-                logger.info(f"[DATA-VALIDATION] {symbol} UNQUARANTINED via validation (diff: {discrepancy:.1f}%)")
-                quality = DataQuality.EXCELLENT
-                recommendation = ValidationRecommendation.PROCEED_NORMAL
-            else:
-                # Normal validation flow
-                quality = DataQuality.EXCELLENT
-                recommendation = ValidationRecommendation.PROCEED_NORMAL
-            
-            logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} vs {validation_point.value:.2f} (diff {discrepancy:.1f}%) -> {recommendation.value.upper()}")
-            
-            return ValidationResult(
-                symbol=symbol,
-                primary_data=primary_point,
-                validation_data=validation_point,
-                quality=quality,
-                discrepancy_pct=discrepancy,
-                issues=[],
-                recommendation=recommendation,
-                timestamp=datetime.now(),
-                primary_source=source,
-                validation_sources=[validation_point.source],
-                message=f"Validated against {validation_point.source}"
-            )
-        else:
-            # No validation data available - check if quarantined
-            if was_quarantined:
-                symbol_info = state_manager.get_symbol_info(symbol)
-                reason = symbol_info.get('reason', 'Unknown')
-                logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} (quarantined, no validation data) -> BLOCK_TRADING")
-                return ValidationResult(
-                    symbol=symbol,
-                    primary_data=DataPoint(current_price, datetime.now(), source, symbol, "price"),
-                    validation_data=None,
-                    quality=DataQuality.POOR,
-                    discrepancy_pct=None,
-                    issues=[f"Symbol quarantined: {reason}"],
-                    recommendation=ValidationRecommendation.BLOCK_TRADING,
-                    timestamp=datetime.now(),
-                    primary_source=source,
-                    validation_sources=[],
-                    message=f"Symbol quarantined: {reason}"
-                )
-            else:
-                logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} (no validation data) -> PROCEED_NORMAL")
-                return ValidationResult(
-                    symbol=symbol,
-                    primary_data=DataPoint(current_price, datetime.now(), source, symbol, "price"),
-                    validation_data=None,
-                    quality=DataQuality.GOOD,
-                    discrepancy_pct=0.0,
-                    issues=[],
-                    recommendation=ValidationRecommendation.PROCEED_NORMAL,
-                    timestamp=datetime.now(),
-                    primary_source=source,
-                    validation_sources=[],
-                    message="No validation data available"
-                )
-
+        # Increment validation count
+        state["validation_count"] = state.get("validation_count", 0) + 1
+        validation_count = state["validation_count"]
+        required_validations = state.get("required_validations", self.uvxy_validation_samples)
+        
+        logger.info(f"[UVXY-THROTTLE] {symbol}: Validation progress {validation_count}/{required_validations}")
+    
     def validate_symbol_data(self, symbol: str) -> ValidationResult:
         
         # Initialize issues list
