@@ -229,38 +229,128 @@ class MultiSymbolScanner:
             return "No rejection details available"
         
         # Categorize reasons with specific details
+        # Count explicit categories
         body_weak_count = 0
         tr_fail_count = 0
         momentum_fail_count = 0
+        quarantined_count = 0
+        validation_attention_count = 0
+        validation_no_data_count = 0
+        weekly_protection_count = 0
+        data_staleness_count = 0
+        market_closed_count = 0
+        time_cutoff_count = 0
+        cooldown_count = 0
+        max_concurrent_count = 0
         other_reasons = []
         
         for reason in rejection_reasons:
-            if "body too weak" in reason.lower():
+            if "body too weak" in reason.lower() or "body_too_weak:" in reason:
                 body_weak_count += 1
-            elif "true range too low" in reason.lower():
+            elif "tr fail" in reason.lower() or "true range" in reason.lower():
                 tr_fail_count += 1
-            elif "insufficient momentum" in reason.lower():
+            elif "insufficient momentum" in reason.lower() or "insufficient_momentum:" in reason:
                 momentum_fail_count += 1
+            elif "quarantined_corp_action:" in reason:
+                quarantined_count += 1
+            elif "validation_attention:" in reason:
+                validation_attention_count += 1
+            elif "validation_no_data:" in reason:
+                validation_no_data_count += 1
+            elif "weekly_protection:" in reason:
+                weekly_protection_count += 1
+            elif "data_staleness:" in reason:
+                data_staleness_count += 1
+            elif "market_closed:" in reason:
+                market_closed_count += 1
+            elif "time_cutoff:" in reason:
+                time_cutoff_count += 1
+            elif "cooldown:" in reason:
+                cooldown_count += 1
+            elif "max_concurrent_trades:" in reason:
+                max_concurrent_count += 1
             else:
-                # Extract just the reason type for "other"
-                if ":" in reason:
-                    reason_type = reason.split(":")[1].strip()
-                    other_reasons.append(reason_type)
-                else:
-                    other_reasons.append(reason)
+                # Only use "other" for truly unknown reasons
+                other_reasons.append(reason)
         
-        # Build actionable breakdown
+        # Build explicit breakdown
         breakdown_parts = []
+        if quarantined_count > 0:
+            breakdown_parts.append(f"quarantined_corp_action={quarantined_count}")
+        if validation_attention_count > 0:
+            breakdown_parts.append(f"validation_attention={validation_attention_count}")
+        if validation_no_data_count > 0:
+            breakdown_parts.append(f"validation_no_data={validation_no_data_count}")
+        if weekly_protection_count > 0:
+            breakdown_parts.append(f"weekly_protection={weekly_protection_count}")
+        if data_staleness_count > 0:
+            breakdown_parts.append(f"data_staleness={data_staleness_count}")
         if body_weak_count > 0:
             breakdown_parts.append(f"body_too_weak={body_weak_count}")
         if tr_fail_count > 0:
             breakdown_parts.append(f"tr_fail={tr_fail_count}")
         if momentum_fail_count > 0:
             breakdown_parts.append(f"insufficient_momentum={momentum_fail_count}")
+        if market_closed_count > 0:
+            breakdown_parts.append(f"market_closed={market_closed_count}")
+        if time_cutoff_count > 0:
+            breakdown_parts.append(f"time_cutoff={time_cutoff_count}")
+        if cooldown_count > 0:
+            breakdown_parts.append(f"cooldown={cooldown_count}")
+        if max_concurrent_count > 0:
+            breakdown_parts.append(f"max_concurrent_trades={max_concurrent_count}")
         if other_reasons:
             breakdown_parts.append(f"other={len(other_reasons)}")
         
         return f"blocked: {', '.join(breakdown_parts)}"
+
+    def _check_symbol_blocked(self, symbol: str, current_price: float) -> tuple[bool, str, str]:
+        """
+        Single source of truth for all symbol blocking decisions.
+        
+        Returns:
+            Tuple of (is_blocked, reason, category)
+        """
+        # 1. Check quarantine status first
+        state_manager = get_symbol_state_manager()
+        if not state_manager.is_symbol_tradeable(symbol):
+            symbol_info = state_manager.get_symbol_info(symbol)
+            reason = symbol_info.get('reason', 'Unknown')
+            return True, reason, "quarantined_corp_action"
+        
+        # 2. Check data validation
+        try:
+            data_allowed, data_reason = check_trading_allowed(symbol)
+            if not data_allowed:
+                if "attention" in data_reason.lower():
+                    return True, data_reason, "validation_attention"
+                elif "no data" in data_reason.lower():
+                    return True, data_reason, "validation_no_data"
+                else:
+                    return True, data_reason, "validation_blocked"
+        except Exception as e:
+            return True, f"Data validation error: {e}", "validation_error"
+        
+        # 3. Check staleness
+        try:
+            staleness_allowed, staleness_reason = check_symbol_staleness(symbol, with_retry=True)
+            if not staleness_allowed:
+                return True, staleness_reason, "data_staleness"
+        except Exception as e:
+            return True, f"Staleness check error: {e}", "staleness_error"
+        
+        # 4. Check weekly protection
+        try:
+            if self.drawdown_circuit_breaker:
+                should_disable, weekly_reason = self.drawdown_circuit_breaker.check_weekly_drawdown_limit()
+                if should_disable:
+                    return True, weekly_reason, "weekly_protection"
+        except Exception as e:
+            # Fail closed - block trading on weekly protection errors
+            return True, f"Weekly protection check failed: {e}", "weekly_protection"
+        
+        # Symbol is not blocked
+        return False, "Symbol checks passed", "allowed"
 
     def _scan_single_symbol(self, symbol: str) -> tuple[List[Dict], str]:
         """
@@ -326,44 +416,11 @@ class MultiSymbolScanner:
                 symbol, df, ha_df, breakout_analysis
             )
 
-            # Symbol state quarantine check (before data validation)
-            state_manager = get_symbol_state_manager()
-            if not state_manager.is_symbol_tradeable(symbol):
-                symbol_state = state_manager.get_symbol_state(symbol)
-                symbol_info = state_manager.get_symbol_info(symbol)
-                reason = symbol_info.get('reason', 'Unknown')
-                rejection_reason = f"Symbol quarantined: {reason}"
-                logger.warning(f"[MULTI-SYMBOL] {symbol}: Symbol quarantined - {reason}")
-                return SymbolOpportunity(
-                    symbol=symbol,
-                    signal_strength=0.0,
-                    confidence=0.0,
-                    recommendation="NO_TRADE",
-                    reason=rejection_reason,
-                    data_quality="quarantined",
-                    tr_percentage=0.0,
-                    breakout_data=None,
-                    llm_analysis=None,
-                    rejection_reason=rejection_reason
-                )
-
-            # Data quality validation gate
-            data_allowed, data_reason = check_trading_allowed(symbol)
-            if not data_allowed:
-                rejection_reason = f"Data validation blocked: {data_reason}"
-                logger.warning(f"[MULTI-SYMBOL] {symbol}: Data validation blocked trade - {data_reason}")
-                return [], rejection_reason
-            else:
-                logger.info(f"[MULTI-SYMBOL] {symbol}: Data quality check passed - {data_reason}")
-
-            # Enhanced staleness detection with retry
-            staleness_allowed, staleness_reason = check_symbol_staleness(symbol, with_retry=True)
-            if not staleness_allowed:
-                rejection_reason = f"Staleness check blocked: {staleness_reason}"
-                logger.warning(f"[MULTI-SYMBOL] {symbol}: Staleness check blocked trade - {staleness_reason}")
-                return [], rejection_reason
-            else:
-                logger.info(f"[MULTI-SYMBOL] {symbol}: Data freshness check passed - {staleness_reason}")
+            # Unified blocking check - single source of truth
+            is_blocked, block_reason, block_category = self._check_symbol_blocked(symbol, current_price)
+            if is_blocked:
+                logger.warning(f"[MULTI-SYMBOL] {symbol}: {block_category} - {block_reason}")
+                return [], f"{block_category}: {block_reason}"
 
             # Pre-LLM hard gate: check for obvious NO_TRADE conditions
             proceed, gate_reason = self._pre_llm_hard_gate(market_data, self.config)
@@ -976,8 +1033,8 @@ class MultiSymbolScanner:
                     should_disable, weekly_reason = self.drawdown_circuit_breaker.check_weekly_drawdown_limit()
                 else:
                     # Fallback to singleton function if no pre-initialized breaker
-                    from .weekly_drawdown_circuit_breaker import get_weekly_circuit_breaker
-                    weekly_cb = get_weekly_circuit_breaker(config)
+                    from .drawdown_circuit_breaker import get_drawdown_circuit_breaker
+                    weekly_cb = get_drawdown_circuit_breaker(config)
                     should_disable, weekly_reason = weekly_cb.check_weekly_drawdown_limit()
                 
                 if should_disable:
@@ -1019,8 +1076,13 @@ class MultiSymbolScanner:
                 except Exception as e:
                     logger.warning(f"[VIX-GUARDRAIL] VIX check failed for {symbol}: {e}, allowing trades (fail-safe)")
             
-            # 6a. True range minimum check with dynamic scaling and hysteresis
-            hysteresis_threshold = 0.98 * min_tr_range_pct  # 98% hysteresis to reduce knife-edge misses
+            # 6a. True range minimum check with enhanced hysteresis and momentum compensation
+            hysteresis_factor = config.get('HYSTERESIS_FACTOR', 0.92)  # Increased from 0.86 to 0.92 for fewer false negatives
+            hysteresis_threshold = hysteresis_factor * min_tr_range_pct
+            
+            # Check for strong range that can compensate for borderline momentum
+            range_compensation_threshold = 1.25 * min_tr_range_pct  # 25% above threshold
+            has_strong_range = today_tr_pct >= range_compensation_threshold
             
             if today_tr_pct < hysteresis_threshold:
                 # Near-miss detection for quality trades close to threshold (95-98% range)
@@ -1044,20 +1106,23 @@ class MultiSymbolScanner:
                 
                 return False, f"True range too low ({today_tr_pct:.4f}% < {hysteresis_threshold:.4f}% hysteresis threshold, {min_tr_range_pct:.4f}% minimum)"
             elif today_tr_pct < min_tr_range_pct:
-                # In hysteresis zone (98-100% of threshold) - allow to pass
+                # In hysteresis zone (90-100% of threshold) - allow to pass
                 logger.info(f"[TR-HYSTERESIS] {symbol}: TR={today_tr_pct:.4f}% in hysteresis zone ({hysteresis_threshold:.4f}%-{min_tr_range_pct:.4f}%), allowing trade")
                 # Continue to next gate check
             
             # 6b. Pre-LLM body percentage and momentum gates with time-of-day scaling
             pre_llm_gates = config.get("PRE_LLM_GATES", {})
             if pre_llm_gates.get("enabled", False):
-                # Body percentage check with time-of-day scaling
+                # Body percentage check with time-of-day and VIX-based scaling
                 min_body_pct_config = pre_llm_gates.get("min_body_pct", {})
                 if symbol in min_body_pct_config:
                     base_min_body_pct = min_body_pct_config[symbol]
                     
                     # Apply time-of-day scaling (60-70% of normal in first 90 minutes)
-                    scaled_min_body_pct = self._apply_time_scaling_to_body_filter(base_min_body_pct, current_et)
+                    time_scaled_pct = self._apply_time_scaling_to_body_filter(base_min_body_pct, current_et)
+                    
+                    # Apply VIX-based scaling for low volatility adjustments
+                    scaled_min_body_pct = self._apply_vix_scaling_to_body_filter(time_scaled_pct, symbol)
                     
                     current_body_pct = market_data.get("candle_body_pct", 0.0)
                     
@@ -1065,13 +1130,17 @@ class MultiSymbolScanner:
                     body_passes = current_body_pct >= scaled_min_body_pct
                     
                     if not body_passes:
-                        # Check for borderline escalation (≥80% of threshold)
-                        borderline_threshold = 0.80 * scaled_min_body_pct
+                        # Check for borderline escalation (≥90% of threshold) - widened hysteresis
+                        borderline_threshold = 0.90 * scaled_min_body_pct  # Increased from 85% to 90%
                         is_borderline = current_body_pct >= borderline_threshold
                         
                         if is_borderline:
+                            # Round to basis points for consistent comparison
+                            current_body_bp = round(current_body_pct * 10000)  # Convert to basis points
+                            threshold_bp = round(borderline_threshold * 10000)
+                            
                             # Log borderline case for potential LLM escalation
-                            logger.info(f"[BORDERLINE] {symbol}: Body {current_body_pct:.4f}% ≥ 80% of threshold ({borderline_threshold:.4f}%), flagging for potential LLM escalation")
+                            logger.info(f"[BORDERLINE] {symbol}: Body {current_body_bp/100:.2f}bp ≥ 85% of threshold ({threshold_bp/100:.2f}bp), flagging for potential LLM escalation")
                             # Mark this as a borderline case in market_data for later escalation
                             market_data["_borderline_body_case"] = {
                                 "current_pct": current_body_pct,
@@ -1079,7 +1148,10 @@ class MultiSymbolScanner:
                                 "shortfall_pct": ((scaled_min_body_pct - current_body_pct) / scaled_min_body_pct) * 100
                             }
                         else:
-                            return False, f"Candle body too weak ({current_body_pct:.4f}% < {scaled_min_body_pct:.4f}% minimum, scaled from {base_min_body_pct:.4f}%)"
+                            # Round for consistent logging
+                            current_bp = round(current_body_pct * 10000)
+                            threshold_bp = round(scaled_min_body_pct * 10000)
+                            return False, f"Candle body too weak ({current_bp/100:.2f}bp < {threshold_bp/100:.2f}bp minimum, scaled from {round(base_min_body_pct * 10000)/100:.2f}bp)"
                 
                 # Momentum checks (require at least N of 3 indicators) - relaxed thresholds
                 required_momentum_checks = pre_llm_gates.get("momentum_checks", 1)  # Reduced from 2 to 1
@@ -1131,8 +1203,13 @@ class MultiSymbolScanner:
                 except:
                     pass
                 
+                # Apply momentum compensation logic - strong range can compensate for borderline momentum
                 if momentum_score < required_momentum_checks:
-                    return False, f"Insufficient momentum ({momentum_score}/{required_momentum_checks} indicators)"
+                    if has_strong_range and momentum_score >= (required_momentum_checks - 1):
+                        logger.info(f"[MOMENTUM-COMPENSATION] {symbol}: TR={today_tr_pct:.4f}% (≥{range_compensation_threshold:.4f}%) compensates for momentum {momentum_score}/{required_momentum_checks}")
+                        # Allow trade to proceed with strong range compensation
+                    else:
+                        return False, f"Insufficient momentum ({momentum_score}/{required_momentum_checks} indicators)"
             
             # 7. Check user-configured trade window (optional)
             trade_window = config.get("TRADE_WINDOW")
@@ -1674,18 +1751,38 @@ class MultiSymbolScanner:
         Returns:
             Formatted reason string with machine-readable prefix
         """
-        # Extract machine-readable reason code
+        # Handle explicit blocking categories first
+        if "quarantined_corp_action:" in reason:
+            return reason  # Already formatted
+        elif "validation_attention:" in reason:
+            return reason  # Already formatted
+        elif "validation_no_data:" in reason:
+            return reason  # Already formatted
+        elif "weekly_protection:" in reason:
+            return reason  # Already formatted
+        elif "data_staleness:" in reason:
+            return reason  # Already formatted
+        
+        # Handle pre-LLM gate reasons with specific categories
         if "Pre-LLM gate:" in reason:
-            if "market closed" in reason.lower():
-                return f"MARKET_CLOSED: {reason}"
+            if "body too weak" in reason.lower():
+                return f"body_too_weak: {reason}"
+            elif "insufficient momentum" in reason.lower():
+                return f"insufficient_momentum: {reason}"
+            elif "market closed" in reason.lower():
+                return f"market_closed: {reason}"
             elif "time cutoff" in reason.lower():
-                return f"TIME_CUTOFF: {reason}"
+                return f"time_cutoff: {reason}"
             elif "volatility" in reason.lower():
-                return f"LOW_VOLATILITY: {reason}"
+                return f"low_volatility: {reason}"
             elif "trade window" in reason.lower():
-                return f"TRADE_WINDOW: {reason}"
+                return f"trade_window: {reason}"
+            elif "cooldown" in reason.lower():
+                return f"cooldown: {reason}"
+            elif "max concurrent" in reason.lower():
+                return f"max_concurrent_trades: {reason}"
             else:
-                return f"PRE_LLM_GATE: {reason}"
+                return f"pre_llm_gate: {reason}"
         elif "LLM_ERROR:" in reason:
             return reason  # Already formatted
         elif "Confidence" in reason and "below threshold" in reason:
@@ -1898,10 +1995,20 @@ class MultiSymbolScanner:
             current_vix = 20.0
             logger.warning(f"[DYNAMIC-TR] No VIX data available, using fallback: {current_vix}")
             
-        if current_vix < 16:
-            vix_mult = 0.90
+        # Enhanced VIX scaling for low volatility regimes
+        # More aggressive reductions for index ETFs in very low VIX environments
+        index_etfs = {"SPY", "QQQ", "DIA", "IWM", "XLK", "XLF", "XLE"}
+        is_index_etf = symbol in index_etfs
+        
+        if current_vix < 12:
+            # Extremely low VIX - very aggressive reduction for index ETFs
+            vix_mult = 0.60 if is_index_etf else 0.80
+        elif current_vix < 16:
+            # Very low VIX - aggressive reduction for index ETFs
+            vix_mult = 0.70 if is_index_etf else 0.85
         elif current_vix < 20:
-            vix_mult = 1.00
+            # Low VIX - moderate reduction for index ETFs
+            vix_mult = 0.85 if is_index_etf else 0.95
         elif current_vix < 25:
             vix_mult = 1.10
         else:
@@ -1913,7 +2020,7 @@ class MultiSymbolScanner:
         et_tz = pytz.timezone('US/Eastern')
         now_et = datetime.now(et_tz)
         hour_decimal = now_et.hour + now_et.minute / 60.0
-        lunch_mult = 1.10 if 12.5 <= hour_decimal <= 14.5 else 1.00
+        lunch_mult = 1.05 if 12.5 <= hour_decimal <= 14.5 else 1.00
         
         # Special handling for UVXY with VIX-based thresholds
         if symbol == "UVXY":
@@ -1921,7 +2028,7 @@ class MultiSymbolScanner:
             if uvxy_dynamic.get("enabled", False):
                 vix_low = uvxy_dynamic.get("vix_low", 18.0)
                 vix_high = uvxy_dynamic.get("vix_high", 25.0)
-                tr_low = uvxy_dynamic.get("tr_low", 0.60)
+                tr_low = uvxy_dynamic.get("tr_low", 0.45)
                 tr_medium = uvxy_dynamic.get("tr_medium", 0.80)
                 tr_high = uvxy_dynamic.get("tr_high", 1.00)
                 
@@ -1997,28 +2104,45 @@ class MultiSymbolScanner:
         """
         Apply time-of-day scaling to body percentage filter.
         
-        In the first 90 minutes of trading (9:30-11:00 ET), use 60-70% of normal thresholds
+        Reduces thresholds during opening period (9:30-11:00 AM ET)
         to allow more opportunities during the volatile opening period.
         
         Args:
             base_min_body_pct: Base minimum body percentage
-            current_et: Current Eastern time
+            current_et: Current Eastern time (datetime object)
             
         Returns:
             Scaled minimum body percentage
         """
-        from datetime import time as dt_time
-        
         try:
+            # Ensure current_et is a datetime object and convert to time object
+            if isinstance(current_et, int):
+                logger.warning(f"[TIME-SCALE] Received int {current_et} instead of datetime, using current time")
+                et_tz = pytz.timezone('US/Eastern')
+                current_et = datetime.now(et_tz)
+            elif not hasattr(current_et, 'time'):
+                logger.warning(f"[TIME-SCALE] Invalid current_et type {type(current_et)}, using current time")
+                et_tz = pytz.timezone('US/Eastern')
+                current_et = datetime.now(et_tz)
+                
             current_time = current_et.time()
-            market_open = dt_time(9, 30)  # 9:30 AM ET
-            scaling_end = dt_time(11, 0)  # 11:00 AM ET (90 minutes after open)
             
-            # Check if we're in the scaling window
-            if market_open <= current_time <= scaling_end:
+            # Check if we're in the opening period (9:30-11:00 AM ET)
+            from datetime import time as dt_time
+            opening_time_obj = dt_time(9, 30)
+            end_opening_obj = dt_time(11, 0)
+            
+            if current_time >= opening_time_obj and current_time < end_opening_obj:
                 # Linear scaling from 60% at open to 100% at 11:00 AM
-                minutes_since_open = (current_time.hour - 9) * 60 + (current_time.minute - 30)
-                scaling_factor = 0.60 + (0.40 * (minutes_since_open / 90))  # 60% to 100% over 90 min
+                # Calculate minutes since 9:30 AM ET properly
+                current_minutes = current_time.hour * 60 + current_time.minute
+                opening_minutes = opening_time_obj.hour * 60 + opening_time_obj.minute
+                minutes_since_open = float(current_minutes - opening_minutes)
+                
+                # Ensure non-negative and within bounds
+                minutes_since_open = max(0.0, min(90.0, minutes_since_open))
+                
+                scaling_factor = 0.60 + (0.40 * (minutes_since_open / 90.0))  # 60% to 100% over 90 min
                 scaled_pct = base_min_body_pct * scaling_factor
                 
                 logger.debug(f"[TIME-SCALE] Body filter: {base_min_body_pct:.4f}% * {scaling_factor:.2f} = {scaled_pct:.4f}% (opening period)")
@@ -2030,6 +2154,73 @@ class MultiSymbolScanner:
         except Exception as e:
             logger.warning(f"[TIME-SCALE] Error applying time scaling: {e}, using base threshold")
             return base_min_body_pct
+
+    def _apply_vix_scaling_to_body_filter(self, time_scaled_pct: float, symbol: str) -> float:
+        """
+        Apply VIX-based scaling to body percentage filter for low volatility adjustments.
+        
+        Reduces thresholds during low VIX periods to allow more trades when market
+        conditions are calm but breakouts may still be valid with smaller candle bodies.
+        
+        VIX Scaling Logic:
+        - VIX < 15: 70% of threshold (very low volatility)
+        - VIX 15-20: 80% of threshold (low volatility) 
+        - VIX 20-25: 90% of threshold (normal-low volatility)
+        - VIX > 25: 100% of threshold (normal/high volatility)
+        
+        Args:
+            time_scaled_pct: Time-scaled minimum body percentage
+            symbol: Trading symbol for logging context
+            
+        Returns:
+            VIX-adjusted minimum body percentage
+        """
+        try:
+            # Import VIX monitor
+            from .vix_monitor import get_vix_monitor
+            
+            # Get current VIX data
+            vix_monitor = get_vix_monitor()
+            vix_data = vix_monitor.get_current_vix()
+            
+            if not vix_data:
+                logger.debug(f"[VIX-SCALE] {symbol}: No VIX data available, using time-scaled threshold")
+                return time_scaled_pct
+            
+            vix_value = vix_data.value
+            
+            # Determine VIX-based scaling factor
+            if vix_value < 15.0:
+                # Very low volatility - reduce threshold by 30%
+                vix_scaling_factor = 0.70
+                regime = "very-low"
+            elif vix_value < 20.0:
+                # Low volatility - reduce threshold by 20%
+                vix_scaling_factor = 0.80
+                regime = "low"
+            elif vix_value < 25.0:
+                # Normal-low volatility - reduce threshold by 10%
+                vix_scaling_factor = 0.90
+                regime = "normal-low"
+            else:
+                # Normal/high volatility - no reduction
+                vix_scaling_factor = 1.00
+                regime = "normal-high"
+            
+            vix_scaled_pct = time_scaled_pct * vix_scaling_factor
+            
+            # Log VIX adjustment details
+            if vix_scaling_factor < 1.0:
+                logger.info(f"[VIX-SCALE] {symbol}: VIX {vix_value:.1f} ({regime}) - reducing body threshold "
+                           f"{time_scaled_pct:.4f}% → {vix_scaled_pct:.4f}% ({vix_scaling_factor:.0%})")
+            else:
+                logger.debug(f"[VIX-SCALE] {symbol}: VIX {vix_value:.1f} ({regime}) - no threshold adjustment")
+            
+            return vix_scaled_pct
+            
+        except Exception as e:
+            logger.warning(f"[VIX-SCALE] {symbol}: Error applying VIX scaling: {e}, using time-scaled threshold")
+            return time_scaled_pct
 
     def _send_no_trade_heartbeat(self, rejection_reasons: List[str] = None):
         """

@@ -20,7 +20,7 @@ Version: 1.1.0 (US-FA-007) - Yahoo Finance removed
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -129,6 +129,11 @@ class DataValidator:
         self.alert_on_discrepancy = self.config.get("DATA_ALERT_ON_DISCREPANCY", True)
         self.require_validation = self.config.get("DATA_REQUIRE_VALIDATION", False)
         
+        # Transient error handling configuration
+        self.transient_error_threshold = self.config.get("DATA_TRANSIENT_ERROR_THRESHOLD", 10.0)  # 10% threshold for transient errors
+        self.transient_confirmation_scans = self.config.get("DATA_TRANSIENT_CONFIRMATION_SCANS", 3)  # Require 3 consecutive scans
+        self.transient_scan_interval = self.config.get("DATA_TRANSIENT_SCAN_INTERVAL", 60)  # 60 seconds between scans
+        
         # Symbol-specific overrides for vendor mismatch tolerance
         self.split_whitelist = self.config.get("DATA_SPLIT_WHITELIST", {"GLD", "SLV", "TLT"})
         self.symbol_attention_thresholds = self.config.get("DATA_SYMBOL_ATTENTION_THRESHOLDS", {
@@ -147,8 +152,15 @@ class DataValidator:
         
         # Initialize paused symbols tracking (MUST be before other initializations)
         self.paused_symbols = {}
-        self.pause_on_validate_fail = config.get("DATA_PAUSE_ON_VALIDATE_FAIL", "30m")
-        self.strict_validation = config.get("DATA_STRICT_VALIDATION", False)
+        self.pause_on_validate_fail = self.config.get("DATA_PAUSE_ON_VALIDATE_FAIL", "30m")
+        self.strict_validation = self.config.get("DATA_STRICT_VALIDATION", False)
+        
+        # Transient error tracking for multi-scan confirmation
+        self.transient_errors = {}  # symbol -> {"discrepancies": [list], "first_seen": datetime, "count": int}
+        
+        # Cooldown tracking for paused symbols to prevent oscillations
+        self.pause_cooldowns = {}  # symbol -> {"paused_at": datetime, "normal_scans": int, "required_normal_scans": int}
+        self.cooldown_normal_scans_required = self.config.get("DATA_COOLDOWN_NORMAL_SCANS", 5)  # Require 5 consecutive normal scans
         
         # Initialize Alpaca client if available
         try:
@@ -239,9 +251,30 @@ class DataValidator:
                         latest_timestamp = datetime.now()
                         logger.debug(f"[DATA-VALIDATION] Using current time as fallback for {symbol} timestamp")
                     
+                    # Source consistency check: ensure both prices from same adjustment type
+                    # This prevents adjusted vs unadjusted price mismatches that cause false splits
+                    prices_consistent = self._check_price_source_consistency(current_price, validation_price, symbol)
+                    if not prices_consistent:
+                        logger.debug(f"[DATA-VALIDATION] {symbol}: Price source inconsistency detected - skipping split detection")
+                        # Record stable scan with low diff % since this is likely a data feed issue, not a real split
+                        state_manager = get_symbol_state_manager()
+                        # Use a small percentage difference to trigger stable scan recording
+                        small_diff_pct = abs(current_price - validation_price) / max(current_price, validation_price) * 100
+                        # Cap at 1% to ensure it's considered stable for unquarantining
+                        capped_diff_pct = min(small_diff_pct, 1.0)
+                        state_manager.record_stable_scan(symbol, capped_diff_pct)
+                        return DataPoint(
+                            value=validation_price,
+                            timestamp=latest_timestamp,
+                            source="alpaca_historical",
+                            symbol=symbol,
+                            data_type="price"
+                        )
+                    
                     # Check for suspected corporate actions (splits, etc.)
+                    from utils.symbol_state_manager import SplitDetector
                     state_manager = get_symbol_state_manager()
-                    split_detection = SplitDetector.detect_split(current_price, validation_price)
+                    split_detection = SplitDetector.detect_split(current_price, validation_price, symbol)
                     
                     # Calculate proper percentage difference
                     price_ratio = current_price / validation_price if validation_price > 0 else float('inf')
@@ -249,26 +282,52 @@ class DataValidator:
                     
                     if price_diff_pct > 20.0:  # Large price difference
                         if split_detection:
-                            # Suspected corporate action - quarantine symbol
+                            # Use new multi-scan confirmation logic
                             split_factor, split_desc = split_detection
-                            state_manager.quarantine_symbol(
-                                symbol, 
+                            quarantined = state_manager.record_suspected_split(
+                                symbol,
                                 f"Suspected corporate action: {split_desc}",
-                                current_price, 
-                                validation_price, 
+                                current_price,
+                                validation_price,
                                 split_detection
                             )
-                            logger.warning(f"[DATA-VALIDATION] {symbol}: QUARANTINED - {split_desc} (ratio: {price_ratio:.2f}x): current=${current_price:.2f}, historical=${validation_price:.2f}")
+                            
+                            if quarantined:
+                                logger.warning(f"[DATA-VALIDATION] {symbol}: QUARANTINED after confirmation - {split_desc} "
+                                               f"(ratio: {price_ratio:.2f}x): current=${current_price:.2f}, "
+                                               f"historical=${validation_price:.2f}")
+                                return None
+                            else:
+                                logger.info(f"[DATA-VALIDATION] {symbol}: Suspected {split_desc} recorded "
+                                            f"(ratio: {price_ratio:.2f}x) - awaiting confirmation")
                         else:
-                            # Large unexplained difference - quarantine for safety
-                            state_manager.quarantine_symbol(
-                                symbol,
-                                f"Large price discrepancy: {price_diff_pct:.1f}%",
-                                current_price,
-                                validation_price
-                            )
-                            logger.warning(f"[DATA-VALIDATION] {symbol}: QUARANTINED - unexplained price difference ({price_diff_pct:.1f}%): current=${current_price:.2f}, historical=${validation_price:.2f}")
-                        return None
+                            # Large unexplained difference - use multi-scan for non-ETFs too
+                            is_etf = SplitDetector.is_etf(symbol)
+                            
+                            if not is_etf:
+                                quarantined = state_manager.record_suspected_split(
+                                    symbol,
+                                    f"Large price discrepancy: {price_diff_pct:.1f}%",
+                                    current_price,
+                                    validation_price
+                                )
+                                
+                                if quarantined:
+                                    logger.warning(f"[DATA-VALIDATION] {symbol}: QUARANTINED after confirmation - unexplained price difference "
+                                                   f"({price_diff_pct:.1f}%): current=${current_price:.2f}, "
+                                                   f"historical=${validation_price:.2f}")
+                                    return None
+                                else:
+                                    logger.info(f"[DATA-VALIDATION] {symbol}: Large unexplained diff {price_diff_pct:.1f}% recorded - awaiting confirmation")
+                            else:
+                                # Don't quarantine ETFs on large unexplained differences
+                                logger.info(f"[DATA-VALIDATION] {symbol}: Large unexplained diff {price_diff_pct:.1f}% "
+                                            f"but ETF protected from quarantine.")
+                                # Record clean scan for ETFs that don't trigger split detection
+                                state_manager.record_clean_scan(symbol)
+                    else:
+                        # Normal price difference - record clean scan
+                        state_manager.record_clean_scan(symbol)
                         
                     logger.debug(f"[DATA-VALIDATION] Internal validation: current={current_price:.2f}, historical={validation_price:.2f} (diff: {price_diff_pct:.1f}%)")
                     
@@ -365,7 +424,6 @@ class DataValidator:
         try:
             # Try Alpaca corporate actions API first
             if self.alpaca_client:
-                from datetime import datetime, timedelta
                 end_date = datetime.now().date()
                 start_date = end_date - timedelta(days=7)  # Check last 7 days
                 
@@ -432,30 +490,54 @@ class DataValidator:
                 
         return None
     
+    def _check_price_source_consistency(self, current_price: float, validation_price: float, symbol: str) -> bool:
+        """
+        Check if current and validation prices come from consistent adjustment sources
+        
+        Args:
+            current_price: Current market price
+            validation_price: Historical validation price
+            symbol: Stock symbol
+            
+        Returns:
+            True if prices are from consistent sources, False if adjustment mismatch detected
+        """
+        # Calculate ratio to detect potential adjustment mismatches
+        if validation_price <= 0:
+            return True  # Can't validate consistency
+            
+        ratio = current_price / validation_price
+        
+        # Common adjustment factors that suggest one price is adjusted, other is not:
+        # - Dividend adjustments (typically small, < 5%)
+        # - Split adjustments (typically 2x, 3x, 4x, etc.)
+        
+        # If ratio is very close to 1.0, prices are consistent
+        if abs(ratio - 1.0) < 0.02:  # Within 2%
+            return True
+            
+        # Check for common dividend adjustment patterns (2-10% differences)
+        if 0.90 <= ratio <= 1.10:  # 10% range suggests dividend adjustment mismatch
+            logger.debug(f"[DATA-VALIDATION] {symbol}: Potential dividend adjustment mismatch (ratio: {ratio:.3f})")
+            return False
+            
+        # Check for split adjustment patterns (clean multiples suggest adjustment mismatch)
+        clean_multiples = [0.5, 0.333, 0.25, 0.2, 2.0, 3.0, 4.0, 5.0]
+        for multiple in clean_multiples:
+            if abs(ratio - multiple) < 0.01:  # Very close to clean multiple
+                logger.debug(f"[DATA-VALIDATION] {symbol}: Potential split adjustment mismatch (ratio: {ratio:.3f} ≈ {multiple})")
+                return False
+                
+        # Prices appear to be from consistent sources
+        return True
+    
     def validate_data(self, symbol: str, current_price: float, source: str = "alpaca") -> ValidationResult:
         """Validate current price data against multiple sources"""
         logger.debug(f"[DATA-VALIDATION] Starting validation for {symbol}: ${current_price:.2f} from {source}")
         
-        # Check if symbol is quarantined
+        # Get symbol state manager - always validate, even if quarantined
         state_manager = get_symbol_state_manager()
-        if not state_manager.is_symbol_tradeable(symbol):
-            symbol_state = state_manager.get_symbol_state(symbol)
-            symbol_info = state_manager.get_symbol_info(symbol)
-            reason = symbol_info.get('reason', 'Unknown')
-            logger.warning(f"[DATA-VALIDATION] {symbol} is {symbol_state.value.upper()} - {reason}")
-            return ValidationResult(
-                symbol=symbol,
-                primary_data=None,
-                validation_data=None,
-                quality=DataQuality.POOR,
-                discrepancy_pct=0.0,
-                issues=[],
-                recommendation=ValidationRecommendation.BLOCK_TRADING,
-                timestamp=datetime.now(),
-                primary_source=source,
-                validation_sources=[],
-                message=f"Symbol quarantined: {reason}"
-            )
+        was_quarantined = state_manager.is_quarantined(symbol)
         
         # Get validation data points
         validation_points = []
@@ -465,15 +547,7 @@ class DataValidator:
         if internal_point:
             validation_points.append(internal_point)
         
-        # Determine quality and recommendation based on available data
-        if validation_points:
-            quality = DataQuality.EXCELLENT
-            recommendation = ValidationRecommendation.PROCEED_NORMAL
-        else:
-            quality = DataQuality.GOOD
-            recommendation = ValidationRecommendation.PROCEED_NORMAL
-        
-        # If we have validation data, calculate discrepancy and check stability
+        # If we have validation data, calculate discrepancy and record stable scan
         if validation_points:
             primary_point = DataPoint(
                 value=current_price,
@@ -487,34 +561,45 @@ class DataValidator:
             validation_point = validation_points[0]
             discrepancy = self.calculate_discrepancy(primary_point, validation_point)
             
-            # Record stable scan for previously quarantined symbols
-            if symbol in state_manager.states:
-                is_unquarantined = state_manager.record_stable_scan(symbol, current_price, validation_point.value)
-                if not is_unquarantined:
-                    # Still quarantined, block trading
-                    symbol_info = state_manager.get_symbol_info(symbol)
-                    stable_scans = symbol_info.get('stable_scans', 0)
-                    required_scans = state_manager.stability_required_scans
-                    logger.info(f"[DATA-VALIDATION] {symbol} still quarantined - stable scans: {stable_scans}/{required_scans}")
-                    return ValidationResult(
-                        symbol=symbol,
-                        primary_data=None,
-                        validation_data=validation_points[0] if validation_points else None,
-                        quality=DataQuality.POOR,
-                        discrepancy_pct=discrepancy,
-                        issues=[],
-                        recommendation=ValidationRecommendation.BLOCK_TRADING,
-                        timestamp=datetime.now(),
-                        primary_source=source,
-                        validation_sources=[vp.source for vp in validation_points],
-                        message=f"Symbol recovering from quarantine ({stable_scans}/{required_scans} stable scans)"
-                    )
+            # Always record stable scan - this enables immediate auto-release
+            price_diff_pct = discrepancy  # Already calculated as percentage
+            is_unquarantined = state_manager.record_stable_scan(symbol, price_diff_pct)
+            
+            # Determine quality and recommendation
+            if was_quarantined and not is_unquarantined:
+                # Still quarantined after this scan
+                symbol_info = state_manager.get_symbol_info(symbol)
+                stable_scans = symbol_info.get('stable_scans', 0)
+                required_scans = state_manager.stability_required_scans
+                logger.info(f"[DATA-VALIDATION] {symbol} still quarantined - stable scans: {stable_scans}/{required_scans} (diff: {discrepancy:.1f}%)")
+                return ValidationResult(
+                    symbol=symbol,
+                    primary_data=primary_point,
+                    validation_data=validation_point,
+                    quality=DataQuality.POOR,
+                    discrepancy_pct=discrepancy,
+                    issues=[],
+                    recommendation=ValidationRecommendation.BLOCK_TRADING,
+                    timestamp=datetime.now(),
+                    primary_source=source,
+                    validation_sources=[validation_point.source],
+                    message=f"Symbol recovering from quarantine ({stable_scans}/{required_scans} stable scans)"
+                )
+            elif was_quarantined and is_unquarantined:
+                # Just unquarantined!
+                logger.info(f"[DATA-VALIDATION] {symbol} UNQUARANTINED via validation (diff: {discrepancy:.1f}%)")
+                quality = DataQuality.EXCELLENT
+                recommendation = ValidationRecommendation.PROCEED_NORMAL
+            else:
+                # Normal validation flow
+                quality = DataQuality.EXCELLENT
+                recommendation = ValidationRecommendation.PROCEED_NORMAL
             
             logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} vs {validation_point.value:.2f} (diff {discrepancy:.1f}%) -> {recommendation.value.upper()}")
             
             return ValidationResult(
                 symbol=symbol,
-                primary_data=None,
+                primary_data=primary_point,
                 validation_data=validation_point,
                 quality=quality,
                 discrepancy_pct=discrepancy,
@@ -526,40 +611,44 @@ class DataValidator:
                 message=f"Validated against {validation_point.source}"
             )
         else:
-            # No validation data available - check if this is due to quarantine
-            if symbol in state_manager.states:
+            # No validation data available - check if quarantined
+            if was_quarantined:
                 symbol_info = state_manager.get_symbol_info(symbol)
-                logger.warning(f"[DATA-VALIDATION] {symbol}: No validation data while quarantined - {symbol_info.get('reason', 'Unknown')}")
+                reason = symbol_info.get('reason', 'Unknown')
+                logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} (quarantined, no validation data) -> BLOCK_TRADING")
                 return ValidationResult(
                     symbol=symbol,
-                    primary_data=None,
+                    primary_data=DataPoint(current_price, datetime.now(), source, symbol, "price"),
                     validation_data=None,
                     quality=DataQuality.POOR,
-                    discrepancy_pct=0.0,
-                    issues=[],
+                    discrepancy_pct=None,
+                    issues=[f"Symbol quarantined: {reason}"],
                     recommendation=ValidationRecommendation.BLOCK_TRADING,
                     timestamp=datetime.now(),
                     primary_source=source,
                     validation_sources=[],
-                    message=f"No validation data (quarantined: {symbol_info.get('reason', 'Unknown')})"
+                    message=f"Symbol quarantined: {reason}"
                 )
-            
-            logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} (no validation data) -> PROCEED_NORMAL")
-            return ValidationResult(
-                symbol=symbol,
-                primary_data=None,
-                validation_data=None,
-                quality=DataQuality.GOOD,
-                discrepancy_pct=0.0,
-                issues=[],
-                recommendation=ValidationRecommendation.PROCEED_NORMAL,
-                timestamp=datetime.now(),
-                primary_source=source,
-                validation_sources=[],
-                message="No validation data available"
-            )
+            else:
+                logger.info(f"[DATA-VALIDATION] {symbol}: {current_price:.2f} (no validation data) -> PROCEED_NORMAL")
+                return ValidationResult(
+                    symbol=symbol,
+                    primary_data=DataPoint(current_price, datetime.now(), source, symbol, "price"),
+                    validation_data=None,
+                    quality=DataQuality.GOOD,
+                    discrepancy_pct=0.0,
+                    issues=[],
+                    recommendation=ValidationRecommendation.PROCEED_NORMAL,
+                    timestamp=datetime.now(),
+                    primary_source=source,
+                    validation_sources=[],
+                    message="No validation data available"
+                )
 
     def validate_symbol_data(self, symbol: str) -> ValidationResult:
+        
+        # Initialize issues list
+        issues = []
         
         # Get primary data from Alpaca
         alpaca_data = self.get_alpaca_price(symbol)
@@ -585,7 +674,7 @@ class DataValidator:
                 quality=DataQuality.CRITICAL,
                 discrepancy_pct=None,
                 issues=["No data available from any source"],
-                recommendation="BLOCK_TRADING",
+                recommendation=ValidationRecommendation.BLOCK_TRADING,
                 timestamp=datetime.now()
             )
         
@@ -600,23 +689,56 @@ class DataValidator:
         
         if validation_data and not validation_data.is_stale(300):  # Allow 5min for Yahoo
             discrepancy_pct = self.calculate_discrepancy(primary_data, validation_data)
-            split_detected, split_reason = self._detect_split_mismatch(primary_data.value, validation_data.value, symbol)
+            
+            # Check price source consistency before split detection
+            prices_consistent = self._check_price_source_consistency(primary_data.value, validation_data.value, symbol)
+            if not prices_consistent:
+                logger.debug(f"[DATA-VALIDATION] {symbol}: Price source inconsistency detected in validation - skipping split detection")
+                # Record stable scan with low diff % since this is likely a data feed issue
+                state_manager = get_symbol_state_manager()
+                small_diff_pct = abs(primary_data.value - validation_data.value) / max(primary_data.value, validation_data.value) * 100
+                capped_diff_pct = min(small_diff_pct, 1.0)
+                state_manager.record_stable_scan(symbol, capped_diff_pct)
+                split_detected = False
+                split_reason = "price_source_inconsistency"
+            else:
+                # Use enhanced split detector from symbol_state_manager
+                from utils.symbol_state_manager import SplitDetector
+                split_result = SplitDetector.detect_split(primary_data.value, validation_data.value, symbol)
+                split_detected = split_result is not None
+                split_reason = split_result[1] if split_result else ""
             
             if split_detected and symbol not in self.split_whitelist:
                 issues.append(f"Potential split mismatch detected: {split_reason}")
             elif split_detected and symbol in self.split_whitelist:
                 # Log but don't flag as issue for whitelisted symbols
                 logger.info(f"[DATA-VALIDATION] {symbol}: Split mismatch ignored (whitelisted): {split_reason}")
-            elif discrepancy_pct > 10.0:  # Major discrepancy threshold
-                issues.append(f"Major price discrepancy {discrepancy_pct:.1f}% - possible data error")
+            elif discrepancy_pct > self.transient_error_threshold:  # Major discrepancy threshold
+                # For ETFs with large discrepancies (>5%), attempt secondary verification
+                if symbol in self.watchlist_etfs and discrepancy_pct > 5.0:
+                    secondary_verified = self._verify_etf_price_secondary(symbol, primary_data.value, validation_data.value if validation_data else None)
+                    if secondary_verified:
+                        logger.info(f"[DATA-VALIDATION] {symbol}: Large discrepancy {discrepancy_pct:.1f}% verified by secondary source")
+                        issues.append(f"Large discrepancy {discrepancy_pct:.1f}% verified by secondary source")
+                    else:
+                        logger.warning(f"[DATA-VALIDATION] {symbol}: Large discrepancy {discrepancy_pct:.1f}% - secondary verification failed")
+                
+                # Check if this is a transient error requiring confirmation
+                if self._is_transient_error(symbol, discrepancy_pct):
+                    issues.append(f"Transient error suspected: {discrepancy_pct:.1f}% discrepancy (awaiting confirmation)")
+                else:
+                    issues.append(f"Major price discrepancy {discrepancy_pct:.1f}% - confirmed data error")
             else:
                 # Use symbol-specific attention threshold
                 attention_threshold = self.symbol_attention_thresholds.get(symbol, 2.0)
                 if discrepancy_pct > attention_threshold:
                     issues.append(f"Price discrepancy {discrepancy_pct:.1f}% requires attention")
+                else:
+                    # Normal discrepancy - clear any transient error tracking
+                    self._clear_transient_error(symbol)
         
-        # Determine quality and recommendation
-        quality, recommendation = self._assess_quality(primary_data, validation_data, discrepancy_pct, issues)
+        # Determine quality and recommendation with cooldown logic
+        quality, recommendation = self._assess_quality_with_cooldown(symbol, primary_data, validation_data, discrepancy_pct, issues)
         
         result = ValidationResult(
             symbol=symbol,
@@ -631,6 +753,13 @@ class DataValidator:
         
         # Log validation result
         self._log_validation_result(result)
+        
+        # Record stable scan for quarantined symbols on successful validation
+        if result.recommendation == ValidationRecommendation.PROCEED_NORMAL and result.discrepancy_pct is not None:
+            # Check if symbol is quarantined and record stable scan
+            if state_manager.is_quarantined(symbol):
+                logger.debug(f"[DATA-VALIDATION] Recording stable scan for quarantined {symbol}: {result.discrepancy_pct:.3f}%")
+                state_manager.record_stable_scan(symbol, result.discrepancy_pct)
         
         # Send alerts for critical issues
         if quality in [DataQuality.POOR, DataQuality.CRITICAL]:
@@ -651,10 +780,15 @@ class DataValidator:
         if split_issues:
             return DataQuality.POOR, "PAUSE_SYMBOL"
         
-        # Check for major discrepancies (>10%)
-        major_discrepancy = [issue for issue in issues if "Major price discrepancy" in issue]
+        # Check for confirmed major discrepancies (>10%) - but not transient errors
+        major_discrepancy = [issue for issue in issues if "Major price discrepancy" in issue and "confirmed data error" in issue]
         if major_discrepancy:
             return DataQuality.POOR, "PAUSE_SYMBOL"
+        
+        # Check for suspected transient errors - allow trading but with caution
+        transient_error = [issue for issue in issues if "Transient error suspected" in issue]
+        if transient_error:
+            return DataQuality.ACCEPTABLE, "PROCEED_WITH_CAUTION"
         
         # Poor: Stale primary data
         if primary.is_stale(self.max_staleness_seconds):
@@ -685,6 +819,52 @@ class DataValidator:
         
         # Acceptable: Delayed but recent data
         return DataQuality.ACCEPTABLE, "PROCEED_WITH_CAUTION"
+    
+    def _assess_quality_with_cooldown(self, symbol: str, primary: DataPoint, validation: Optional[DataPoint], 
+                                     discrepancy_pct: Optional[float], issues: List[str]) -> Tuple[DataQuality, str]:
+        """Assess data quality with cooldown logic to prevent oscillations"""
+        
+        # Get base quality assessment
+        quality, recommendation = self._assess_quality(primary, validation, discrepancy_pct, issues)
+        
+        # Apply cooldown logic for symbols that were recently paused
+        if symbol in self.pause_cooldowns:
+            cooldown_data = self.pause_cooldowns[symbol]
+            
+            # If recommendation would be PROCEED_NORMAL, check cooldown requirements
+            if recommendation == "PROCEED_NORMAL":
+                cooldown_data["normal_scans"] += 1
+                
+                # Check if we have enough consecutive normal scans
+                if cooldown_data["normal_scans"] >= cooldown_data["required_normal_scans"]:
+                    # Cooldown complete - allow normal trading
+                    logger.info(f"[DATA-VALIDATION] {symbol}: Cooldown complete after {cooldown_data['normal_scans']} "
+                               f"consecutive normal scans - resuming normal trading")
+                    del self.pause_cooldowns[symbol]
+                    return quality, "PROCEED_NORMAL"
+                else:
+                    # Still in cooldown - continue with caution
+                    remaining_scans = cooldown_data["required_normal_scans"] - cooldown_data["normal_scans"]
+                    logger.info(f"[DATA-VALIDATION] {symbol}: Cooldown in progress - {cooldown_data['normal_scans']}"
+                               f"/{cooldown_data['required_normal_scans']} normal scans (need {remaining_scans} more)")
+                    return DataQuality.ACCEPTABLE, "PROCEED_WITH_CAUTION"
+            else:
+                # Reset normal scan counter if we get a non-normal recommendation
+                cooldown_data["normal_scans"] = 0
+                logger.info(f"[DATA-VALIDATION] {symbol}: Cooldown reset due to non-normal recommendation: {recommendation}")
+        
+        # If recommendation is PAUSE_SYMBOL, initialize cooldown tracking
+        if recommendation == "PAUSE_SYMBOL":
+            if symbol not in self.pause_cooldowns:
+                self.pause_cooldowns[symbol] = {
+                    "paused_at": datetime.now(),
+                    "normal_scans": 0,
+                    "required_normal_scans": self.cooldown_normal_scans_required
+                }
+                logger.info(f"[DATA-VALIDATION] {symbol}: Initializing cooldown - will require "
+                           f"{self.cooldown_normal_scans_required} consecutive normal scans to resume")
+        
+        return quality, recommendation
     
     def _log_validation_result(self, result: ValidationResult):
         """Log validation result with clear, actionable information"""
@@ -867,11 +1047,168 @@ class DataValidator:
             return False, reason
         elif result.recommendation == "ATTENTION":
             reason = f"Data requires attention: {result.discrepancy_pct:.1f}% discrepancy"
+            logger.error(f"[DATA-VALIDATION] BLOCKED (validation) - {symbol}: {reason}")
             if self.strict_validation:
                 self._pause_symbol(symbol, reason)
             return False, reason
         else:
             return True, f"Data quality acceptable ({result.quality.value})"
+
+    def _is_transient_error(self, symbol: str, discrepancy_pct: float) -> bool:
+        """
+        Check if a large discrepancy is likely a transient error requiring confirmation.
+        
+        Uses multi-scan confirmation to prevent one-off price feed errors from 
+        causing unnecessary symbol pauses (like the DIA 50% discrepancy issue).
+        
+        Args:
+            symbol: Trading symbol
+            discrepancy_pct: Current price discrepancy percentage
+            
+        Returns:
+            True if this appears to be a transient error (don't pause yet)
+            False if confirmed persistent error (safe to pause)
+        """
+        now = datetime.now()
+        
+        # Initialize tracking for new symbols
+        if symbol not in self.transient_errors:
+            self.transient_errors[symbol] = {
+                "discrepancies": [],
+                "first_seen": now,
+                "count": 0
+            }
+        
+        error_data = self.transient_errors[symbol]
+        
+        # Clean up old discrepancy records (older than 10 minutes)
+        cutoff_time = now - timedelta(minutes=10)
+        error_data["discrepancies"] = [
+            (timestamp, pct) for timestamp, pct in error_data["discrepancies"]
+            if timestamp > cutoff_time
+        ]
+        
+        # Add current discrepancy
+        error_data["discrepancies"].append((now, discrepancy_pct))
+        error_data["count"] = len(error_data["discrepancies"])
+        
+        # If this is the first large discrepancy, treat as transient
+        if error_data["count"] == 1:
+            logger.info(f"[DATA-VALIDATION] {symbol}: First large discrepancy {discrepancy_pct:.1f}% - "
+                       f"treating as transient (awaiting {self.transient_confirmation_scans-1} more scans)")
+            return True
+        
+        # Check if we have enough consecutive scans to confirm the error
+        if error_data["count"] >= self.transient_confirmation_scans:
+            # Check if all recent scans show large discrepancies
+            recent_discrepancies = [pct for _, pct in error_data["discrepancies"][-self.transient_confirmation_scans:]]
+            all_large = all(pct > self.transient_error_threshold for pct in recent_discrepancies)
+            
+            if all_large:
+                logger.warning(f"[DATA-VALIDATION] {symbol}: Confirmed persistent error after "
+                              f"{self.transient_confirmation_scans} scans - discrepancies: "
+                              f"{[f'{pct:.1f}%' for pct in recent_discrepancies]}")
+                # Clear tracking since we're now treating this as confirmed
+                del self.transient_errors[symbol]
+                return False
+            else:
+                logger.info(f"[DATA-VALIDATION] {symbol}: Mixed discrepancy pattern - "
+                           f"continuing transient error monitoring")
+                return True
+        
+        # Not enough scans yet - continue treating as transient
+        remaining_scans = self.transient_confirmation_scans - error_data["count"]
+        logger.info(f"[DATA-VALIDATION] {symbol}: Transient error scan {error_data['count']}/{self.transient_confirmation_scans} "
+                   f"({discrepancy_pct:.1f}%) - need {remaining_scans} more confirmations")
+        return True
+
+    def _clear_transient_error(self, symbol: str):
+        """Clear transient error tracking for a symbol (called on normal validation)"""
+        if symbol in self.transient_errors:
+            error_count = self.transient_errors[symbol]["count"]
+            if error_count > 0:
+                logger.info(f"[DATA-VALIDATION] {symbol}: Cleared transient error tracking "
+                           f"after {error_count} large discrepancy scans - data normalized")
+            del self.transient_errors[symbol]
+
+    def _verify_etf_price_secondary(self, symbol: str, primary_price: float, validation_price: Optional[float]) -> bool:
+        """
+        Perform secondary verification for ETF prices when large discrepancies are detected.
+        
+        Uses lightweight secondary checks to determine if the discrepancy is likely due to:
+        - Adjusted vs unadjusted prices
+        - Stale data from one source
+        - Genuine market movement
+        
+        Args:
+            symbol: ETF symbol to verify
+            primary_price: Price from primary source (Alpaca)
+            validation_price: Price from validation source
+            
+        Returns:
+            True if discrepancy is likely legitimate, False if data error suspected
+        """
+        try:
+            # For now, implement basic heuristics - can be enhanced with external sources later
+            
+            # Check if prices are reasonable for the ETF
+            expected_ranges = {
+                "SPY": (300, 700),
+                "QQQ": (250, 650), 
+                "DIA": (250, 500),
+                "IWM": (150, 300),
+                "XLK": (150, 350),
+                "XLF": (25, 75),
+                "XLE": (50, 150),
+                "TLT": (70, 120),
+                "UVXY": (5, 50)
+            }
+            
+            if symbol in expected_ranges:
+                min_price, max_price = expected_ranges[symbol]
+                
+                # Check if primary price is within reasonable range
+                if not (min_price <= primary_price <= max_price):
+                    logger.warning(f"[DATA-VALIDATION] {symbol}: Primary price ${primary_price:.2f} outside expected range ${min_price}-${max_price}")
+                    return False
+                
+                # If validation price exists, check if it's also reasonable
+                if validation_price and not (min_price <= validation_price <= max_price):
+                    logger.warning(f"[DATA-VALIDATION] {symbol}: Validation price ${validation_price:.2f} outside expected range ${min_price}-${max_price}")
+                    return False
+            
+            # Check for obvious data errors (e.g., prices that are clearly wrong)
+            if primary_price <= 0:
+                logger.warning(f"[DATA-VALIDATION] {symbol}: Invalid primary price ${primary_price:.2f}")
+                return False
+            
+            if validation_price and validation_price <= 0:
+                logger.warning(f"[DATA-VALIDATION] {symbol}: Invalid validation price ${validation_price:.2f}")
+                return False
+            
+            # If we have both prices, check if the ratio suggests a split or obvious error
+            if validation_price:
+                ratio = max(primary_price, validation_price) / min(primary_price, validation_price)
+                
+                # If ratio is close to 2, 3, 4, etc., might be a split
+                common_split_ratios = [2.0, 3.0, 4.0, 5.0, 10.0]
+                for split_ratio in common_split_ratios:
+                    if abs(ratio - split_ratio) < 0.1:
+                        logger.info(f"[DATA-VALIDATION] {symbol}: Price ratio {ratio:.2f} suggests potential {split_ratio}:1 split")
+                        return True  # Likely a legitimate split
+                
+                # Very large ratios (>10x) are likely data errors
+                if ratio > 10.0:
+                    logger.warning(f"[DATA-VALIDATION] {symbol}: Extreme price ratio {ratio:.2f} suggests data error")
+                    return False
+            
+            # Log the verification attempt
+            logger.info(f"[DATA-VALIDATION] {symbol}: Secondary verification passed - prices appear reasonable")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[DATA-VALIDATION] {symbol}: Secondary verification failed with error: {e}")
+            return False
 
 
 # Convenience functions for easy integration

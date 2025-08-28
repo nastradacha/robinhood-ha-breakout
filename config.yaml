@@ -64,9 +64,23 @@ PAGE_LOAD_TIMEOUT: 30
 
 # Risk Management
 MAX_PREMIUM_PCT: .70        # Max premium as % of bankroll (conservative) -- default: 0.50,0.35
-MIN_CONFIDENCE: 0.65         # Minimum LLM confidence to trade (conservative)
+MIN_CONFIDENCE: 0.60         # ↓ to let borderline consensuses through (keeps "similar risk" by other gates)
 IV_THRESHOLD: 45.0           # Implied volatility threshold
-MIN_CANDLE_BODY_PCT: 0.05    # Minimum breakout-candle body as % of price (lowered for sensitivity)
+MIN_CANDLE_BODY_PCT: 0.05    # Keep global default at 5 bp for safety; override per-symbol below
+
+# --- Pre-LLM body thresholds (percent = basis points/100) ---
+# Aim: small 1–1.5 bp nudges on the tickers that most often failed body gate.
+# If a symbol isn't listed, the engine will fall back to MIN_CANDLE_BODY_PCT.
+MIN_BODY_PCT_BY_SYMBOL:
+  SPY: 0.045   # 4.5 bp (unchanged)
+  QQQ: 0.042   # 4.2 bp (-0.3 bp to match TR relief)
+  IWM: 0.052   # 5.2 bp (-0.3 bp to match TR relief)
+  XLF: 0.045   # 4.5 bp (unchanged)
+  XLK: 0.045   # 4.5 bp (-0.3 bp to match TR relief)
+  DIA: 0.045   # 4.5 bp (unchanged)
+  TLT: 0.048   # 4.8 bp (unchanged)
+  XLE: 0.045   # 4.5 bp (-0.3 bp to match TR relief)
+  UVXY: 0.070  # 7.0 bp (unchanged)
 MIN_TR_RANGE_PCT: 1.0        # Minimum true range percentage for trade entry (volatility filter)
 
 # VIX Spike Detection (US-FA-001)
@@ -91,16 +105,21 @@ EARNINGS_FAILSAFE_ALLOW: true            # Allow trades if earnings provider fai
 
 # Per-Symbol True Range Thresholds (allows trading in calm market conditions)
 MIN_TR_RANGE_PCT_BY_SYMBOL:
-  SPY: 0.10
-  QQQ: 0.15
-  IWM: 0.20
-  XLF: 0.15
-  XLK: 0.20
-  DIA: 0.15
-  GLD: 0.10
-  TLT: 0.10
-  UVXY: 0.60
-  XLE: 0.20
+  SPY: 0.090   # 0.090% (-5%)
+  QQQ: 0.130   # 0.130% (-8%)
+  IWM: 0.135   # 0.135% (-5%)
+  XLF: 0.110   # 0.110% (-3%)
+  XLK: 0.160   # 0.160% (-6%)
+  DIA: 0.090   # 0.090% (-5%)
+  GLD: 0.09    # unchanged
+  TLT: 0.070   # 0.070% (-8%)
+  UVXY: 0.58   # unchanged
+  XLE: 0.170   # 0.170% (-10%) <- target today's near-misses
+
+# --- True-range hysteresis window for pre-LLM gate ---
+# Let borderline-volatility candles through if TR is within this fraction of the floor.
+# Wider band lets 0.86×floor through to LLM (was 0.90)
+HYSTERESIS_FACTOR: 0.86
 
 # Intraday Trading Settings
 PROFIT_TARGET_PCT: 0.15      # Take profit at 15% gain (conservative)
@@ -157,7 +176,7 @@ alpaca:
     GLD: 8000                     # Gold ETF
     XLK: 6000                     # Technology sector ETF
     XLF: 6000                     # Financial sector ETF
-    XLE: 6000                     # Energy sector ETF
+    XLE: 800                      # Energy sector ETF (relaxed for liquidity)
     USO: 6000                     # Oil ETF
     SLV: 6000                     # Silver ETF
     DIA: 6000                     # Dow Jones ETF

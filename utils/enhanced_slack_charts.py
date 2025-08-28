@@ -136,6 +136,10 @@ class EnhancedSlackChartSender:
         if not self.enabled:
             logger.warning("[ENHANCED-CHARTS] Slack not configured - chart not sent")
             return False
+        
+        # Validate data sufficiency before generating chart
+        if not self._validate_chart_data(market_data, symbol):
+            return False
             
         try:
             # Generate high-quality chart
@@ -223,44 +227,124 @@ class EnhancedSlackChartSender:
         
         logger.info(f"[ENHANCED-CHARTS] Created ultra-HQ chart: {chart_path}")
         return chart_path
+
+    def _validate_chart_data(self, market_data: pd.DataFrame, symbol: str) -> bool:
+        """
+        Validate market data sufficiency before generating charts.
+        
+        Prevents misleading charts from being generated when there's insufficient
+        data (like single candles with zero price variation).
+        
+        Args:
+            market_data: Historical OHLCV data
+            symbol: Trading symbol for logging context
+            
+        Returns:
+            True if data is sufficient for meaningful chart, False otherwise
+        """
+        if market_data is None or market_data.empty:
+            logger.warning(f"[ENHANCED-CHARTS] {symbol}: No market data available - suppressing chart")
+            self._send_text_alert_instead(symbol, "No market data available for chart generation")
+            return False
+        
+        # Check minimum number of bars - fallback to classic chart if insufficient
+        min_bars = 5
+        if len(market_data) < min_bars:
+            logger.info(f"[ENHANCED-CHARTS] {symbol}: Insufficient data ({len(market_data)} bars < {min_bars} minimum) - falling back to classic chart")
+            # Don't suppress - let classic chart handler try with its own data source
+            return True
+        
+        # Check for meaningful price variation (prevent flat-line charts)
+        try:
+            # Get price columns (try different naming conventions)
+            price_cols = []
+            for col_name in ['close', 'Close', 'c', 'high', 'High', 'h', 'low', 'Low', 'l']:
+                if col_name in market_data.columns:
+                    price_cols.append(col_name)
+            
+            if not price_cols:
+                logger.warning(f"[ENHANCED-CHARTS] {symbol}: No price columns found - suppressing chart")
+                self._send_text_alert_instead(symbol, "No price data columns found")
+                return False
+            
+            # Calculate price range using available price data
+            price_data = market_data[price_cols[0]].dropna()
+            if len(price_data) == 0:
+                logger.warning(f"[ENHANCED-CHARTS] {symbol}: No valid price data - suppressing chart")
+                self._send_text_alert_instead(symbol, "No valid price data available")
+                return False
+            
+            price_min = price_data.min()
+            price_max = price_data.max()
+            price_range_pct = ((price_max - price_min) / price_min * 100) if price_min > 0 else 0
+            
+            # Minimum price variation threshold (0.15% to avoid flat charts)
+            min_variation_pct = 0.15
+            if price_range_pct < min_variation_pct:
+                logger.warning(f"[ENHANCED-CHARTS] {symbol}: Insufficient price variation "
+                              f"({price_range_pct:.4f}% < {min_variation_pct}% minimum) - suppressing chart")
+                self._send_text_alert_instead(symbol, 
+                    f"Insufficient price movement: {price_range_pct:.4f}% variation (chart would be misleading)")
+                return False
+            
+            # Check for single-price data (all prices identical)
+            unique_prices = len(price_data.unique())
+            if unique_prices <= 1:
+                logger.warning(f"[ENHANCED-CHARTS] {symbol}: Single price point detected "
+                              f"({unique_prices} unique values) - suppressing chart")
+                self._send_text_alert_instead(symbol, "Single price point detected - chart would be misleading")
+                return False
+            
+            logger.debug(f"[ENHANCED-CHARTS] {symbol}: Data validation passed - "
+                        f"{len(market_data)} bars, {price_range_pct:.3f}% variation, {unique_prices} unique prices")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED-CHARTS] {symbol}: Data validation error: {e} - suppressing chart")
+            self._send_text_alert_instead(symbol, f"Data validation error: {str(e)}")
+            return False
+
+    def _send_text_alert_instead(self, symbol: str, reason: str):
+        """
+        Send text-only alert when chart generation is suppressed.
+        
+        Args:
+            symbol: Trading symbol
+            reason: Reason for chart suppression
+        """
+        try:
+            message = (
+                f"📊 **CHART SUPPRESSED** - {symbol}\n\n"
+                f"**Reason:** {reason}\n"
+                f"**Action:** Text alert sent instead of potentially misleading chart\n"
+                f"**Time:** {datetime.now().strftime('%H:%M:%S ET')}"
+            )
+            
+            # Send via webhook if available
+            if self.webhook_url:
+                payload = {
+                    "text": message,
+                    "username": "Trading Bot",
+                    "icon_emoji": ":chart_with_downwards_trend:"
+                }
+                response = requests.post(self.webhook_url, json=payload, timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"[ENHANCED-CHARTS] {symbol}: Sent chart suppression alert via webhook")
+                else:
+                    logger.warning(f"[ENHANCED-CHARTS] {symbol}: Webhook alert failed: {response.status_code}")
+            else:
+                logger.info(f"[ENHANCED-CHARTS] {symbol}: Chart suppressed - {reason}")
+                
+        except Exception as e:
+            logger.error(f"[ENHANCED-CHARTS] {symbol}: Failed to send suppression alert: {e}")
     
     def _generate_synthetic_price_data(self, symbol: str, num_bars: int = 60) -> pd.DataFrame:
-        """Generate synthetic price data with realistic variation for chart visualization."""
-        import numpy as np
+        """
+        DEPRECATED: Synthetic data generation removed to prevent misleading charts.
+        This method now raises an exception to prevent accidental usage.
+        """
+        raise ValueError(f"Synthetic data generation disabled for {symbol} - charts suppressed for data quality")
         
-        # Base price around typical values for common symbols
-        base_prices = {
-            'SPY': 450, 'QQQ': 380, 'IWM': 200, 'DIA': 350,
-            'XLF': 35, 'XLK': 180, 'XLE': 85, 'TLT': 95, 'UVXY': 14
-        }
-        base_price = base_prices.get(symbol, 100)
-        
-        # Generate realistic price movement
-        np.random.seed(42)  # Consistent for testing
-        returns = np.random.normal(0, 0.02, num_bars)  # 2% daily volatility
-        prices = [base_price]
-        
-        for ret in returns:
-            new_price = prices[-1] * (1 + ret)
-            prices.append(new_price)
-        
-        prices = prices[1:]  # Remove initial price
-        
-        # Create OHLC data with realistic spreads
-        data = []
-        for i, close in enumerate(prices):
-            high = close * (1 + abs(np.random.normal(0, 0.01)))
-            low = close * (1 - abs(np.random.normal(0, 0.01)))
-            open_price = prices[i-1] if i > 0 else close
-            
-            data.append({
-                'Open': open_price, 'High': high, 'Low': low, 'Close': close,
-                'Volume': np.random.randint(1000000, 5000000)
-            })
-        
-        df = pd.DataFrame(data)
-        logger.info(f"[ENHANCED-CHARTS] Generated synthetic data for {symbol}: {len(df)} bars, price range {df['Close'].min():.2f}-{df['Close'].max():.2f}")
-        return df
     
     def _plot_enhanced_price_action(
         self, 
@@ -302,13 +386,15 @@ class EnhancedSlackChartSender:
                 
                 logger.debug(f"[ENHANCED-CHARTS] Price variation: {variation_pct:.2f}% (range: {price_range:.4f}, mean: {price_mean:.2f})")
                 
-                # If price variation is too low, generate synthetic test data for visualization
+                # If price variation is too low, skip chart generation
                 if variation_pct < 0.01:  # Less than 0.01% variation
-                    logger.warning(f"[ENHANCED-CHARTS] Low price variation ({variation_pct:.4f}%), using synthetic data for chart")
-                    ha_data = self._generate_synthetic_price_data(symbol, len(ha_data))
+                    logger.warning(f"[ENHANCED-CHARTS] Low price variation ({variation_pct:.4f}%) - skipping chart")
+                    self._send_text_alert_instead(symbol, f"Low price variation ({variation_pct:.4f}%) - chart would be misleading")
+                    return None
             else:
-                logger.warning("[ENHANCED-CHARTS] No price columns found, using synthetic data")
-                ha_data = self._generate_synthetic_price_data(symbol, max(20, len(ha_data)))
+                logger.warning("[ENHANCED-CHARTS] No price columns found - skipping chart")
+                self._send_text_alert_instead(symbol, "No price columns found for chart generation")
+                return None
         
         # Plot enhanced Heikin-Ashi candles with maximum mobile visibility
         for i, (idx, row) in enumerate(ha_data.iterrows()):

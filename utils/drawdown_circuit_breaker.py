@@ -422,6 +422,36 @@ class DrawdownCircuitBreaker:
             # Fail-safe: allow trading if we can't calculate P&L
             return False, f"Circuit breaker check failed (allowing trading): {str(e)}"
     
+    def check_weekly_drawdown_limit(self) -> Tuple[bool, str]:
+        """
+        Check weekly drawdown limit via the weekly P&L tracker.
+        
+        Returns:
+            Tuple[bool, str]: (should_disable_trading, reason)
+        """
+        try:
+            if not hasattr(self, 'weekly_tracker') or not self.weekly_tracker:
+                # Fail closed - block trading if weekly tracker not available
+                return True, "Weekly protection unavailable (blocking for safety)"
+            
+            weekly_status = self.weekly_tracker.get_weekly_status()
+            weekly_pnl_pct = weekly_status.get('weekly_pnl_percent', 0.0)
+            weekly_threshold = weekly_status.get('weekly_threshold_percent', 15.0)
+            
+            if weekly_pnl_pct <= -weekly_threshold:
+                return True, f"Weekly drawdown limit exceeded: {weekly_pnl_pct:.1f}% <= -{weekly_threshold}%"
+            
+            return False, f"Weekly protection OK: {weekly_pnl_pct:.1f}% > -{weekly_threshold}%"
+            
+        except Exception as e:
+            logger.error(f"[WEEKLY-PROTECTION] Check failed: {e}")
+            # Fail closed - block trading on error
+            return True, f"Weekly protection check failed (blocking for safety): {e}"
+    
+    # Back-compat alias for older callers
+    def check_weekly_limit(self, *args, **kwargs):
+        return self.check_weekly_drawdown_limit(*args, **kwargs)
+    
     def _activate_circuit_breaker(self, pnl_percent: float, pnl_amount: float, breakdown: Dict):
         """Activate the circuit breaker due to drawdown threshold breach"""
         now_et = datetime.now(ET_TZ)

@@ -108,7 +108,15 @@ def fetch_market_data(
             else:
                 logger.info(f"[DATA-VALIDATION] Data quality acceptable for {symbol}: {reason}")
         except Exception as e:
-            logger.warning(f"[DATA-VALIDATION] Validation failed, proceeding without validation: {e}")
+            # Check if strict mode is enabled OR if validation returned ATTENTION level
+            if hasattr(validator, 'strict_validation') and validator.strict_validation:
+                logger.error(f"[DATA-VALIDATION] Validation failed in strict mode, blocking: {e}")
+                return None  # Block data fetch in strict mode
+            elif "ATTENTION" in str(e) or "requires attention" in str(e).lower():
+                logger.error(f"[DATA-VALIDATION] Hard block for ATTENTION-level discrepancy: {e}")
+                return None  # Block data fetch for attention-level issues
+            else:
+                logger.warning(f"[DATA-VALIDATION] Validation failed, proceeding without validation: {e}")
     
     # Try Alpaca first (real-time data) with recovery
     def _fetch_alpaca_data():
@@ -202,7 +210,15 @@ def get_current_price(symbol: str = "SPY", env: str = "paper", validate_quality:
             else:
                 logger.debug(f"[DATA-VALIDATION] Data quality acceptable for {symbol}: {reason}")
         except Exception as e:
-            logger.warning(f"[DATA-VALIDATION] Validation failed, proceeding without validation: {e}")
+            # Check if strict mode is enabled OR if validation returned ATTENTION level
+            if hasattr(validator, 'strict_validation') and validator.strict_validation:
+                logger.error(f"[DATA-VALIDATION] Validation failed in strict mode, blocking: {e}")
+                return None  # Block price fetch in strict mode
+            elif "ATTENTION" in str(e) or "requires attention" in str(e).lower():
+                logger.error(f"[DATA-VALIDATION] Hard block for ATTENTION-level discrepancy: {e}")
+                return None  # Block price fetch for attention-level issues
+            else:
+                logger.warning(f"[DATA-VALIDATION] Validation failed, proceeding without validation: {e}")
     
     # Try Alpaca first (real-time)
     try:

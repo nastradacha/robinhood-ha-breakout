@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Callable
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ class SlackTradeListener:
         self.channel_id = channel_id
         self.last_timestamp = None
         self.running = False
+        self.consecutive_errors = 0
+        self.max_retries = 5
         
     def start_listening(self, message_handler: Callable[[str], bool], poll_interval: int = 5):
         """
@@ -44,13 +47,26 @@ class SlackTradeListener:
         while self.running:
             try:
                 self._check_for_messages(message_handler)
+                self.consecutive_errors = 0  # Reset on success
                 time.sleep(poll_interval)
             except KeyboardInterrupt:
                 logger.info("[SLACK-LISTENER] Stopped by user")
                 break
             except Exception as e:
-                logger.error(f"[SLACK-LISTENER] Error: {e}")
-                time.sleep(poll_interval)
+                self.consecutive_errors += 1
+                logger.error(f"[SLACK-LISTENER] Error #{self.consecutive_errors}: {e}")
+                
+                if self.consecutive_errors >= self.max_retries:
+                    logger.error(f"[SLACK-LISTENER] Max retries ({self.max_retries}) exceeded, stopping listener")
+                    break
+                
+                # Exponential backoff with jitter
+                backoff_time = min(poll_interval * (2 ** self.consecutive_errors), 300)  # Max 5 minutes
+                jitter = random.uniform(0.1, 0.3) * backoff_time
+                sleep_time = backoff_time + jitter
+                
+                logger.info(f"[SLACK-LISTENER] Retrying in {sleep_time:.1f}s (attempt {self.consecutive_errors}/{self.max_retries})")
+                time.sleep(sleep_time)
     
     def stop_listening(self):
         """Stop the polling loop."""

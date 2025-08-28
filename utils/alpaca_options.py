@@ -106,7 +106,23 @@ def _get_dynamic_filter_tiers(mid_price: float, is_short_dte: bool = False) -> L
             "max_spread_abs": 0.20
         }
         
-        return [base_tier, tier1, tier2]
+        # Tier 3: Very relaxed for difficult low-priced symbols
+        tier3 = {
+            "name": "very_relaxed_low_price",
+            "min_oi": 25 if not is_short_dte else 10,
+            "max_spread_pct": 0.65,  # 65%
+            "max_spread_abs": 0.25
+        }
+        
+        # Tier 4: Emergency fallback for low-priced
+        tier4 = {
+            "name": "emergency_fallback_low_price",
+            "min_oi": 10 if not is_short_dte else 5,
+            "max_spread_pct": 0.80,  # 80%
+            "max_spread_abs": 0.30
+        }
+        
+        return [base_tier, tier1, tier2, tier3, tier4]
     
     # Standard tiers for higher-priced contracts
     tier1 = {
@@ -123,7 +139,23 @@ def _get_dynamic_filter_tiers(mid_price: float, is_short_dte: bool = False) -> L
         "max_spread_abs": 0.20
     }
     
-    return [base_tier, tier1, tier2]
+    # Tier 3: Very relaxed for difficult symbols like XLK
+    tier3 = {
+        "name": "very_relaxed",
+        "min_oi": 25,
+        "max_spread_pct": 0.50,  # 50%
+        "max_spread_abs": 0.30
+    }
+    
+    # Tier 4: Emergency fallback - minimal requirements
+    tier4 = {
+        "name": "emergency_fallback",
+        "min_oi": 10,
+        "max_spread_pct": 0.75,  # 75%
+        "max_spread_abs": 0.50
+    }
+    
+    return [base_tier, tier1, tier2, tier3, tier4]
 
 def _passes_liquidity_with_tier(tier: Dict, bid: float, ask: float, oi: int, vol: int) -> Tuple[bool, str]:
     """Check if contract passes liquidity filters for a specific tier"""
@@ -301,6 +333,40 @@ class AlpacaOptionsTrader:
             secret_key=secret_key
         )
         logger.info(f"Initialized AlpacaOptionsTrader (paper={paper})")
+    
+    def _get_quote_bid(self, quote) -> float:
+        """Robust bid price accessor with fallbacks."""
+        try:
+            # Try different possible attribute names
+            if hasattr(quote, 'bid') and quote.bid is not None:
+                return float(quote.bid)
+            elif hasattr(quote, 'bid_price') and quote.bid_price is not None:
+                return float(quote.bid_price)
+            elif hasattr(quote, 'bp') and quote.bp is not None:
+                return float(quote.bp)
+            else:
+                logger.warning(f"No bid price found in quote: {dir(quote)}")
+                return 0.0
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Error parsing bid price: {e}")
+            return 0.0
+    
+    def _get_quote_ask(self, quote) -> float:
+        """Robust ask price accessor with fallbacks."""
+        try:
+            # Try different possible attribute names
+            if hasattr(quote, 'ask') and quote.ask is not None:
+                return float(quote.ask)
+            elif hasattr(quote, 'ask_price') and quote.ask_price is not None:
+                return float(quote.ask_price)
+            elif hasattr(quote, 'ap') and quote.ap is not None:
+                return float(quote.ap)
+            else:
+                logger.warning(f"No ask price found in quote: {dir(quote)}")
+                return 0.0
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Error parsing ask price: {e}")
+            return 0.0
 
     def is_market_open_and_valid_time(self) -> Tuple[bool, str]:
         """Check if market is open and within valid trading window.
@@ -339,81 +405,104 @@ class AlpacaOptionsTrader:
             logger.error(f"Error checking market status: {e}")
             return False, f"Error checking market status: {e}"
 
-    def get_expiry_policy(self) -> Tuple[str, str]:
-        """Determine expiry policy based on current time.
+    def get_expiry_policy(self, symbol: str = "SPY") -> Tuple[str, str]:
+        """Determine expiry policy based on current time and symbol-specific calendar.
+        
+        Args:
+            symbol: Trading symbol to check expiry availability for
         
         Returns:
-            Tuple of (policy, expiry_date) where policy is '0DTE' or 'WEEKLY'
+            Tuple of (policy, expiry_date) where policy is '0DTE', 'SHORT_DTE', 'WEEKLY', or None
         """
+        from utils.expiry_calendar import get_expiry_policy_with_calendar, validate_expiry_constraints
+        
         try:
             clock = self.client.get_clock()
             now_et = clock.timestamp.astimezone()
-            hour = now_et.hour
-            minute = now_et.minute
             
-            # Use 0DTE between 10:00-15:15 ET
-            if 10 <= hour < 15 or (hour == 15 and minute <= 15):
-                # Today's date for 0DTE
-                today = now_et.date()
-                return "0DTE", today.strftime("%Y-%m-%d")
-            else:
-                # Find nearest weekly Friday
-                today = now_et.date()
-                days_until_friday = (4 - today.weekday()) % 7
-                if days_until_friday == 0:  # Today is Friday
-                    days_until_friday = 7  # Next Friday
-                
-                next_friday = today + timedelta(days=days_until_friday)
-                return "WEEKLY", next_friday.strftime("%Y-%m-%d")
+            # Use symbol-specific expiry calendar
+            policy, expiry_date = get_expiry_policy_with_calendar(symbol, now_et)
+            
+            if policy is None or expiry_date is None:
+                logger.warning(f"No valid expiry found for {symbol} - skipping trade")
+                return None, None
+            
+            # Validate expiry constraints
+            is_valid, reason = validate_expiry_constraints(symbol, expiry_date)
+            if not is_valid:
+                logger.warning(f"Expiry validation failed for {symbol}: {reason}")
+                return None, None
+            
+            logger.info(f"Selected expiry policy for {symbol}: {policy} ({expiry_date})")
+            return policy, expiry_date
                 
         except Exception as e:
-            logger.error(f"Error determining expiry policy: {e}")
-            # Fallback to weekly
-            today = datetime.now().date()
-            days_until_friday = (4 - today.weekday()) % 7
-            if days_until_friday == 0:
-                days_until_friday = 7
-            next_friday = today + timedelta(days=days_until_friday)
-            return "WEEKLY", next_friday.strftime("%Y-%m-%d")
+            logger.error(f"Error determining expiry policy for {symbol}: {e}")
+            return None, None
 
     def find_atm_contract(
         self,
         symbol: str,
         side: str,  # 'CALL' or 'PUT'
-        policy: str,  # '0DTE' or 'WEEKLY'
+        policy: str,  # '0DTE', 'SHORT_DTE', or 'WEEKLY'
         expiry_date: str,
         min_oi: int = None,
         min_vol: int = None,
         max_spread_pct: float = None
     ) -> Optional[ContractInfo]:
-        """Find ATM option contract meeting liquidity requirements.
+        """Find ATM option contract meeting tiered liquidity requirements.
         
         Args:
             symbol: Underlying symbol (e.g., 'SPY')
             side: Option type ('CALL' or 'PUT')
-            policy: Expiry policy ('0DTE' or 'WEEKLY')
+            policy: Expiry policy ('0DTE', 'SHORT_DTE', or 'WEEKLY')
             expiry_date: Target expiry date (YYYY-MM-DD)
-            min_oi: Minimum open interest (auto-determined if None)
-            min_vol: Minimum daily volume (auto-determined if None)
-            max_spread_pct: Maximum bid-ask spread as % of mid (auto-determined if None)
+            min_oi: Override minimum open interest
+            min_vol: Override minimum daily volume
+            max_spread_pct: Override maximum bid-ask spread %
             
         Returns:
             ContractInfo if suitable contract found, None otherwise
         """
+        from utils.option_filters import get_filter_summary, validate_contract_liquidity, should_attempt_fallback
+        
         try:
-            # Load config for symbol-specific liquidity requirements
-            config = load_config()
+            logger.info(f"Finding {side} contract for {symbol}: {get_filter_summary(symbol)}")
             
-            # Get symbol-specific options configuration
-            symbol_config = _get_symbol_options_config(symbol, config)
+            # Try primary filters first
+            contract = self._find_contract_with_filters(symbol, side, expiry_date, use_fallback=False)
             
-            # Override with provided parameters or use symbol config
-            min_oi = min_oi or symbol_config["min_oi"]
-            min_vol = min_vol or symbol_config["min_vol"]
-            max_spread_pct = max_spread_pct or symbol_config["max_spread_pct"]
+            if contract:
+                logger.info(f"Found {side} contract with primary filters: {contract.symbol}")
+                return contract
             
-            logger.info(f"Using filtering criteria for {symbol}: min_oi={min_oi}, min_vol={min_vol}, "
-                       f"max_spread_pct={max_spread_pct:.1%}, max_spread_abs=${symbol_config.get('max_spread_abs', 'N/A')}")
+            # Try fallback filters if available
+            if should_attempt_fallback(symbol):
+                logger.info(f"Primary filters failed for {symbol}, trying fallback filters")
+                contract = self._find_contract_with_filters(symbol, side, expiry_date, use_fallback=True)
+                
+                if contract:
+                    logger.warning(f"Found {side} contract with fallback filters: {contract.symbol}")
+                    return contract
+            
+            logger.error(f"No suitable {side} contract found for {symbol} - all filters failed")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding ATM contract for {symbol}: {e}")
+            return None
+    
+    def _find_contract_with_filters(
+        self,
+        symbol: str,
+        side: str,
+        expiry_date: str,
+        use_fallback: bool = False
+    ) -> Optional[ContractInfo]:
+        """Find contract using specified filter tier."""
+        from utils.option_filters import validate_contract_liquidity
+        
+        try:
             # Get current stock price for ATM calculation
             from utils.alpaca_client import AlpacaClient
             alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
@@ -422,8 +511,6 @@ class AlpacaOptionsTrader:
             if not current_price:
                 logger.error(f"Could not get current price for {symbol}")
                 return None
-            
-            logger.info(f"Finding {side} contract for {symbol} @ ${current_price:.2f} (policy: {policy}, expiry: {expiry_date})")
             
             # Convert side to Alpaca enum
             contract_type = ContractType.CALL if side == 'CALL' else ContractType.PUT
@@ -440,33 +527,73 @@ class AlpacaOptionsTrader:
             try:
                 contracts = self.client.get_option_contracts(request)
             except APIError as e:
-                # Handle 401 authorization errors gracefully
                 if "401" in str(e) or "40110000" in str(e):
-                    logger.error(f"[ALPACA] 401 options authorization error for {symbol}: verify paper options entitlement & API keys in env; falling back to Yahoo for price only")
+                    logger.error(f"[ALPACA] 401 options authorization error for {symbol}: verify paper options entitlement & API keys")
                     return None
                 else:
-                    raise  # Re-raise other API errors
+                    raise
             
             if not contracts or not hasattr(contracts, 'option_contracts') or not contracts.option_contracts:
                 logger.warning(f"No {side} contracts found for {symbol} expiring {expiry_date}")
-                
-                # Fallback to next available expiry within 2 trading days
-                fallback_contract = self._try_expiry_fallback(symbol, side, policy, expiry_date, min_oi, min_vol, max_spread_pct)
-                if fallback_contract:
-                    return fallback_contract
-                
-                # Check if shares fallback is allowed for this symbol
-                if symbol_config.get("allow_shares_fallback", False):
-                    logger.info(f"Options failed for {symbol}, shares fallback allowed")
-                    return self._create_shares_fallback_info(symbol, current_price, symbol_config)
-                
                 return None
             
-            contract_list = contracts.option_contracts
-            logger.info(f"Found {len(contract_list)} {side} contracts for {symbol}")
+            # Find ATM strike (closest to current price)
+            best_contract = None
+            min_strike_diff = float('inf')
             
-            # Progressive backoff filtering with dynamic tiers
-            is_short_dte = policy == "0DTE" or (policy == "WEEKLY" and expiry_date == datetime.now().strftime("%Y-%m-%d"))
+            filter_type = "fallback" if use_fallback else "primary"
+            contracts_checked = 0
+            contracts_passed = 0
+            
+            for contract in contracts.option_contracts:
+                contracts_checked += 1
+                strike_diff = abs(contract.strike_price - current_price)
+                
+                # Get real-time quote for liquidity validation
+                quote = self.get_latest_quote(contract.symbol)
+                if not quote or quote.bid <= 0 or quote.ask <= 0:
+                    continue
+                
+                # Get contract stats (open interest, volume)
+                oi = getattr(contract, 'open_interest', 0)
+                volume = getattr(contract, 'volume', 0)
+                
+                # Validate liquidity using tiered filters
+                passes_filter, reason = validate_contract_liquidity(
+                    symbol, quote.bid, quote.ask, oi, volume, use_fallback
+                )
+                
+                if passes_filter and strike_diff < min_strike_diff:
+                    min_strike_diff = strike_diff
+                    best_contract = ContractInfo(
+                        symbol=contract.symbol,
+                        underlying_symbol=symbol,
+                        strike=contract.strike_price,
+                        expiry=expiry_date,
+                        side=side,
+                        bid=quote.bid,
+                        ask=quote.ask,
+                        open_interest=oi,
+                        volume=volume
+                    )
+                    contracts_passed += 1
+                    logger.debug(f"New best {side} contract: {contract.symbol} (strike ${contract.strike_price}, {reason})")
+                else:
+                    logger.debug(f"Rejected {contract.symbol}: {reason}")
+            
+            if best_contract:
+                logger.info(f"Selected {side} contract using {filter_type} filters: {best_contract.symbol} "
+                           f"(${best_contract.strike}, OI:{best_contract.open_interest}, "
+                           f"spread:${best_contract.ask - best_contract.bid:.3f})")
+            else:
+                logger.warning(f"No {side} contracts passed {filter_type} filters for {symbol} "
+                              f"({contracts_passed}/{contracts_checked} passed)")
+            
+            return best_contract
+            
+        except Exception as e:
+            logger.error(f"Error in _find_contract_with_filters for {symbol}: {e}")
+            return None
             
             # Try progressive filtering tiers
             candidates = []
@@ -476,6 +603,21 @@ class AlpacaOptionsTrader:
             all_contracts = []
             for contract in contract_list:
                 try:
+                    # CRITICAL: Validate option side matches request using robust OCC parsing
+                    # OCC symbol format: ROOT + YYMMDD + C/P + 8-digit strike
+                    # Examples: XLE250829C00090000, SPY250829P00645000
+                    import re
+                    occ_match = re.match(r'^([A-Z]{1,6})(\d{6})([CP])(\d{8})$', contract.symbol)
+                    if not occ_match:
+                        logger.warning(f"Invalid OCC symbol format: {contract.symbol}")
+                        continue
+                    
+                    root, yymmdd, cp_flag, strike_raw = occ_match.groups()
+                    expected_side = 'C' if side == 'CALL' else 'P'
+                    if cp_flag != expected_side:
+                        logger.warning(f"Side mismatch: requested {side} but got {contract.symbol} (OCC side: {cp_flag})")
+                        continue
+                    
                     # Get quote data using correct Alpaca API
                     quote_request = OptionLatestQuoteRequest(symbol_or_symbols=contract.symbol)
                     quote_response = self.data_client.get_option_latest_quote(quote_request)
@@ -485,14 +627,18 @@ class AlpacaOptionsTrader:
                         continue
                     
                     quote = quote_response[contract.symbol]
-                    if not quote or not quote.bid_price or not quote.ask_price:
+                    if not quote:
                         continue
                     
-                    bid = float(quote.bid_price)
-                    ask = float(quote.ask_price)
+                    # Robust bid/ask accessor with fallbacks
+                    bid = self._get_quote_bid(quote)
+                    ask = self._get_quote_ask(quote)
+                    
+                    if bid <= 0 or ask <= 0:
+                        continue
                     
                     # Skip stale or crossed quotes
-                    if bid <= 0 or ask <= 0 or bid >= ask:
+                    if bid >= ask:
                         continue
                     
                     mid = (bid + ask) / 2
@@ -574,13 +720,20 @@ class AlpacaOptionsTrader:
                 if successful_tier:
                     logger.info(f"Last successful tier was '{successful_tier}' but no candidates passed all filters")
                 else:
-                    logger.info(f"All progressive filtering tiers failed - consider manual review for {symbol}")
+                    logger.info(f"All progressive filtering tiers failed - trying next expiry fallback for {symbol}")
+                
+                # Try next expiry fallback before giving up
+                fallback_contract = self._try_expiry_fallback(symbol, side, policy, expiry_date, min_oi, min_vol, max_spread_pct)
+                if fallback_contract:
+                    logger.info(f"Next expiry fallback succeeded for {symbol}")
+                    return fallback_contract
                 
                 # Check if shares fallback is enabled for this symbol
                 if symbol_config.get("allow_shares_fallback", False):
-                    logger.info(f"Options failed for {symbol}, shares fallback allowed")
+                    logger.info(f"Options and next expiry failed for {symbol}, shares fallback allowed")
                     return self._create_shares_fallback_info(symbol, current_price, symbol_config)
                 
+                logger.warning(f"All fallback options exhausted for {symbol} - no suitable contracts found")
                 return None
             
             logger.info(f"Found {len(candidates)} suitable {side} candidates for {symbol} using tier '{successful_tier}'")
@@ -1100,13 +1253,30 @@ class AlpacaOptionsTrader:
             
             if symbol in quotes:
                 quote_data = quotes[symbol]
-                return Quote(
-                    bid=quote_data.bid,
-                    ask=quote_data.ask,
-                    bid_size=quote_data.bid_size,
-                    ask_size=quote_data.ask_size,
-                    timestamp=quote_data.timestamp
-                )
+                # Handle different Alpaca Quote object structures
+                try:
+                    # Try direct attribute access first
+                    bid = getattr(quote_data, 'bid_price', None) or getattr(quote_data, 'bid', None)
+                    ask = getattr(quote_data, 'ask_price', None) or getattr(quote_data, 'ask', None)
+                    bid_size = getattr(quote_data, 'bid_size', 0)
+                    ask_size = getattr(quote_data, 'ask_size', 0)
+                    timestamp = getattr(quote_data, 'timestamp', None)
+                    
+                    if bid is None or ask is None:
+                        logger.warning(f"Quote for {symbol} missing bid/ask: bid={bid}, ask={ask}")
+                        return None
+                        
+                    return Quote(
+                        bid=float(bid),
+                        ask=float(ask),
+                        bid_size=int(bid_size),
+                        ask_size=int(ask_size),
+                        timestamp=timestamp
+                    )
+                except Exception as attr_error:
+                    logger.error(f"Error accessing quote attributes for {symbol}: {attr_error}")
+                    logger.debug(f"Quote object attributes: {dir(quote_data)}")
+                    return None
             
             return None
         

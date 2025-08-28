@@ -179,7 +179,28 @@ class SystemHealthMonitor:
             
             self._handle_health_alerts(report)
             
-            logger.info(f"[HEALTH-MONITOR] Health check completed - Status: {overall_status.value}, Trading: {trading_allowed}")
+            # Surface specific warning reasons in logs
+            if report.warnings:
+                warning_details = []
+                for warning in report.warnings:
+                    warning_details.append(f"• {warning}")
+                logger.warning(f"[HEALTH-MONITOR] Health warnings detected:\n" + "\n".join(warning_details))
+            
+            if report.critical_issues:
+                critical_details = []
+                for issue in report.critical_issues:
+                    critical_details.append(f"• {issue}")
+                logger.error(f"[HEALTH-MONITOR] Critical health issues detected:\n" + "\n".join(critical_details))
+            
+            # Enhanced status logging with specific reasons
+            status_msg = f"[HEALTH-MONITOR] Health check completed - Status: {overall_status.value}, Trading: {trading_allowed}"
+            if not trading_allowed and (report.warnings or report.critical_issues):
+                total_issues = len(report.warnings) + len(report.critical_issues)
+                status_msg += f" (blocked by {total_issues} health issues)"
+            elif report.warnings:
+                status_msg += f" (with {len(report.warnings)} warnings)"
+            
+            logger.info(status_msg)
             return report
             
         except Exception as e:

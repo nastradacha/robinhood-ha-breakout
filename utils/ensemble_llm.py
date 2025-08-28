@@ -115,7 +115,7 @@ class EnsembleLLM:
         # Collect decisions from all available models in parallel with timeout
         decisions = []
         failed_models = []
-        timeout_seconds = self.config.get("ENSEMBLE_TIMEOUT", 6)  # 6s total timeout
+        timeout_seconds = self.config.get("ENSEMBLE_TIMEOUT", 15)  # Increased to 15s for DeepSeek latency
         early_exit_confidence = self.config.get("ENSEMBLE_EARLY_EXIT_CONFIDENCE", 0.7)
         
         def query_model(model_name, client):
@@ -147,17 +147,64 @@ class EnsembleLLM:
                 for model_name, client in self.clients.items()
             }
             
-            # Process results as they complete, with improved timeout handling
+            # Process results as they complete, with improved timeout handling and fail-open logic
+            fast_model_threshold = 8.0  # If first model responds within 8s, consider fail-open
+            first_response_time = None
+            
             try:
                 for future in concurrent.futures.as_completed(future_to_model, timeout=timeout_seconds):
                     model_name = future_to_model[future]
                     try:
-                        result = future.result(timeout=1.0)  # Individual result timeout
+                        result = future.result(timeout=3.0)  # Increased individual timeout to 3.0s
                         decisions.append(result)
+                        
+                        # Track first response time for fail-open logic
+                        if first_response_time is None:
+                            first_response_time = result["elapsed"]
+                        
+                        # Tightened fail-open logic: More conservative for trade execution
+                        if (len(decisions) == 1 and 
+                            result["elapsed"] <= fast_model_threshold and
+                            result["decision"] != "NO_TRADE" and
+                            result["confidence"] >= 0.70):  # Higher threshold for trade decisions
+                            
+                            # Wait longer (4s) to see if second model responds
+                            remaining_futures = [f for f in future_to_model if f != future and not f.done()]
+                            if remaining_futures:
+                                logger.info(f"[ENSEMBLE] {model_name} responded quickly ({result['elapsed']:.1f}s) - waiting 4s for other models")
+                                try:
+                                    # Give other models 4 more seconds for better consensus
+                                    for quick_future in concurrent.futures.as_completed(remaining_futures, timeout=4.0):
+                                        quick_model = future_to_model[quick_future]
+                                        try:
+                                            quick_result = quick_future.result(timeout=1.0)
+                                            decisions.append(quick_result)
+                                            logger.info(f"[ENSEMBLE] {quick_model} also responded quickly ({quick_result['elapsed']:.1f}s)")
+                                            
+                                            # If second model disagrees on trade direction, require consensus
+                                            if (quick_result["decision"] != "NO_TRADE" and 
+                                                quick_result["decision"] != result["decision"]):
+                                                logger.warning(f"[ENSEMBLE] Models disagree: {model_name}={result['decision']} vs {quick_model}={quick_result['decision']}, requiring full ensemble")
+                                                break  # Continue to full ensemble evaluation
+                                                
+                                        except Exception as e:
+                                            logger.warning(f"[ENSEMBLE] {quick_model} failed in quick response: {e}")
+                                        break  # Only wait for one more quick response
+                                except concurrent.futures.TimeoutError:
+                                    logger.info(f"[ENSEMBLE] No other quick responses - using {model_name} decision")
+                            
+                            # Only use fast model decision if high confidence and no disagreement
+                            if len(decisions) == 1:  # No second model responded or disagreed
+                                logger.info(f"[ENSEMBLE] Fail-open: Using fast {model_name} decision ({result['elapsed']:.1f}s, conf: {result['confidence']:.3f})")
+                                # Cancel remaining futures
+                                for remaining_future in future_to_model:
+                                    if remaining_future != future and not remaining_future.done():
+                                        remaining_future.cancel()
+                                return result
                         
                         # Early exit if first model returns NO_TRADE with high confidence
                         if (result["decision"] == "NO_TRADE" and 
-                            result["confidence"] >= early_exit_confidence and 
+                            result["confidence"] >= 0.80 and  # High confidence NO_TRADE
                             len(decisions) == 1):
                             logger.info(f"[ENSEMBLE] Early exit: {model_name} NO_TRADE with {result['confidence']:.3f} confidence")
                             # Cancel remaining futures
@@ -188,17 +235,29 @@ class EnsembleLLM:
             logger.error("[ENSEMBLE] All LLM providers failed")
             raise RuntimeError("All LLM providers failed")
         
-        if len(decisions) == 1:
-            logger.warning(f"[ENSEMBLE] Only one model succeeded, using single decision")
-            single = decisions[0]
-            return {
-                "decision": single["decision"],
-                "confidence": single["confidence"],
-                "reason": f"{single['reason']} (single model: {single['model']})"
-            }
-        
+        if len(decisions) < 2:
+            if len(decisions) == 1:
+                MIN_CONF = 0.60  # Lowered from 0.65 to 0.60 for single-model decisions
+                single = decisions[0]
+                logger.warning(f"[ENSEMBLE] Only 1 model responded within {timeout_seconds}s, using single decision")
+                
+                # Accept single model if confidence >= 0.60 OR if it's a strong signal (>= 0.65)
+                if single["decision"] != "NO_TRADE" and single["confidence"] >= MIN_CONF:
+                    logger.info(f"[ENSEMBLE] Single model {single['decision']} with confidence {single['confidence']:.3f} >= {MIN_CONF} - accepting decision")
+                    return {
+                        "decision": single["decision"],
+                        "confidence": single["confidence"],
+                        "reason": f"Single model decision: {single['reason']}"
+                    }
+                else:
+                    logger.info(f"[ENSEMBLE] Single model {single['decision']} with confidence {single['confidence']:.3f} < {MIN_CONF} - defaulting to NO_TRADE")
+                    return {
+                        "decision": "NO_TRADE",
+                        "confidence": 0.0,
+                        "reason": f"Single model fallback: {single['reason']}"
+                    }
         # Apply ensemble voting logic
-        return self._apply_ensemble_voting(decisions, failed_models)
+        return self._aggregate_decisions(decisions)
     
     def _rule_based_fallback(self, payload: Dict) -> Dict:
         """
@@ -271,119 +330,55 @@ class EnsembleLLM:
                 "reason": f"Rule-based fallback error: {e}"
             }
     
-    def _apply_ensemble_voting(self, decisions: List[Dict], failed_models: List[str]) -> Dict:
+    def _aggregate_decisions(self, decisions: List[Dict]) -> Dict:
         """
-        Apply majority voting with tie-breaking logic.
+        Aggregate multiple model decisions into final ensemble decision.
+        
+        Fixed ensemble logic:
+        - Requires both models to agree on direction (CALL/PUT)
+        - Each model must meet minimum confidence threshold
+        - Ties result in NO_TRADE (no override)
         
         Args:
-            decisions: List of model decisions with decision, confidence, reason
-            failed_models: List of models that failed (for logging)
+            decisions: List of model decision dicts
             
         Returns:
             Final ensemble decision dict
         """
-        # Filter out ABSTAIN votes - they don't participate in voting
-        voting_decisions = [d for d in decisions if d["decision"] != "ABSTAIN"]
-        abstain_count = len(decisions) - len(voting_decisions)
+        from collections import Counter
+        from utils.config import load_config
         
-        if abstain_count > 0:
-            logger.info(f"[ENSEMBLE] {abstain_count} models abstained from voting")
+        config = load_config()
+        min_confidence = config.get("MIN_CONFIDENCE", 0.6)
         
-        # If all models abstained, default to NO_TRADE
-        if not voting_decisions:
-            logger.warning("[ENSEMBLE] All models abstained - defaulting to NO_TRADE")
-            return {
-                "decision": "NO_TRADE",
-                "confidence": 0.0,
-                "reason": "All models abstained from voting due to parse failures"
-            }
+        # Filter actionable decisions that meet confidence threshold
+        valid_votes = [
+            d for d in decisions 
+            if d["decision"] in ("CALL", "PUT") and d["confidence"] >= min_confidence
+        ]
         
-        # New ensemble veto policy: Only block if BOTH models say NO_TRADE
-        votes = [d["decision"] for d in voting_decisions if d["decision"] in {"CALL", "PUT", "NO_TRADE"}]
+        if not valid_votes:
+            return {"decision": "NO_TRADE", "confidence": 0.0, "reason": "No votes meet confidence threshold"}
+        
+        # Extract just the decisions from valid votes
+        votes = [d["decision"] for d in valid_votes]
         vote_counts = Counter(votes)
+        max_votes = max(vote_counts.values())
+        winners = [k for k, v in vote_counts.items() if v == max_votes]
+
+        # Require unanimous agreement - no ties allowed
+        if len(winners) > 1:
+            return {"decision": "NO_TRADE", "confidence": 0.0, "reason": "Models disagree - treating as NO_TRADE"}
         
-        logger.info(f"[ENSEMBLE] Vote counts: {dict(vote_counts)} (abstained: {abstain_count})")
-        
-        # Case 1: No valid votes - defer to rules
-        if len(votes) == 0:
-            logger.info("[ENSEMBLE] No valid votes - deferring to rules")
-            return {
-                "decision": "NO_TRADE",
-                "confidence": 0.0,
-                "reason": "No valid ensemble votes - deferred to rules"
-            }
-        
-        # Case 2: Both models say NO_TRADE - block trade
-        if len(votes) >= 2 and all(v == "NO_TRADE" for v in votes):
-            no_trade_votes = [d for d in voting_decisions if d["decision"] == "NO_TRADE"]
-            avg_confidence = sum(d["confidence"] for d in no_trade_votes) / len(no_trade_votes)
-            reasons = [d["reason"] for d in no_trade_votes]
-            
-            logger.info(f"[ENSEMBLE] Both models agree: NO_TRADE (conf: {avg_confidence:.3f})")
-            
-            return {
-                "decision": "NO_TRADE",
-                "confidence": round(avg_confidence, 3),
-                "reason": f"Unanimous NO_TRADE ({len(no_trade_votes)}/{len(voting_decisions)} models). Reasons: {'; '.join(reasons)}"
-            }
-        
-        # Case 3: Mixed votes (TRADE + NO_TRADE) - defer to rules but allow trade
-        if "NO_TRADE" in votes and any(v in {"CALL", "PUT"} for v in votes):
-            trade_votes = [d for d in voting_decisions if d["decision"] in {"CALL", "PUT"}]
-            if trade_votes:
-                best_trade = max(trade_votes, key=lambda x: x["confidence"])
-                logger.info(f"[ENSEMBLE] Mixed votes - deferring to trade signal: {best_trade['decision']}")
-                
-                return {
-                    "decision": best_trade["decision"],
-                    "confidence": round(best_trade["confidence"], 3),
-                    "reason": f"Mixed ensemble votes - trade signal wins: {best_trade['reason']}"
-                }
-        
-        # Case 4: Clear majority winner (all CALL or all PUT)
-        if len(set(votes)) == 1:
-            winning_decision = votes[0]
-            winning_votes = [d for d in voting_decisions if d["decision"] == winning_decision]
-            avg_confidence = sum(d["confidence"] for d in winning_votes) / len(winning_votes)
-            
-            reasons = [d["reason"] for d in winning_votes]
-            combined_reason = f"Majority vote: {winning_decision} ({len(winning_votes)}/{len(voting_decisions)} models). " + \
-                            f"Reasons: {'; '.join(reasons)}"
-            
-            logger.info(f"[ENSEMBLE] Majority winner: {winning_decision} (conf: {avg_confidence:.3f})")
-            
-            return {
-                "decision": winning_decision,
-                "confidence": round(avg_confidence, 3),
-                "reason": combined_reason
-            }
-        
-        # Case 2: Tie - break by highest confidence
-        logger.info(f"[ENSEMBLE] Tie between: {winners}, breaking by highest confidence")
-        
-        # Find the highest confidence among tied decisions
-        tied_decisions = [d for d in voting_decisions if d["decision"] in winners]
-        best_decision = max(tied_decisions, key=lambda x: x["confidence"])
-        
-        # Get all votes for the winning decision
-        winning_votes = [d for d in voting_decisions if d["decision"] == best_decision["decision"]]
-        avg_confidence = sum(d["confidence"] for d in winning_votes) / len(winning_votes)
-        
-        reasons = [d["reason"] for d in winning_votes]
-        combined_reason = f"Tie-break winner: {best_decision['decision']} " + \
-                         f"(highest conf: {best_decision['confidence']:.3f}). " + \
-                         f"Reasons: {'; '.join(reasons)}"
-        
-        logger.info(f"[ENSEMBLE] Tie-break winner: {best_decision['decision']} " + \
-                   f"(conf: {avg_confidence:.3f}, tie-break conf: {best_decision['confidence']:.3f})")
-        
-        if failed_models:
-            combined_reason += f" (Failed models: {', '.join(failed_models)})"
+        # Unanimous agreement with confidence threshold met
+        winner = winners[0]
+        conf = sum(d["confidence"] for d in valid_votes if d["decision"] == winner) / len(valid_votes)
+        model_count = len(valid_votes)
         
         return {
-            "decision": best_decision["decision"],
-            "confidence": round(avg_confidence, 3),
-            "reason": combined_reason
+            "decision": winner, 
+            "confidence": conf, 
+            "reason": f"Unanimous agreement: {winner} ({model_count}/{len(decisions)} models above threshold)"
         }
 
 

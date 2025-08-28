@@ -71,15 +71,60 @@
       },
       "timestamp": "2025-08-21T10:02:16.934829-04:00",
       "last_updated": "2025-08-21T15:28:27.150035-04:00"
+    },
+    {
+      "date": "2025-08-22",
+      "pnl_amount": 100262.75,
+      "pnl_percent": 0.0,
+      "breakdown": {
+        "alpaca:paper": {
+          "start_balance": 0.0,
+          "current_balance": 100262.75,
+          "pnl": 100262.75,
+          "pnl_percent": 0.0
+        }
+      },
+      "timestamp": "2025-08-22T11:01:35.548976-04:00",
+      "last_updated": "2025-08-22T15:28:39.596712-04:00"
+    },
+    {
+      "date": "2025-08-25",
+      "pnl_amount": 100262.75,
+      "pnl_percent": 0.0,
+      "breakdown": {
+        "alpaca:paper": {
+          "start_balance": 0.0,
+          "current_balance": 100262.75,
+          "pnl": 100262.75,
+          "pnl_percent": 0.0
+        }
+      },
+      "timestamp": "2025-08-25T09:30:37.722154-04:00",
+      "last_updated": "2025-08-25T14:31:22.771480-04:00"
+    },
+    {
+      "date": "2025-08-27",
+      "pnl_amount": 100262.75,
+      "pnl_percent": 0.0,
+      "breakdown": {
+        "alpaca:paper": {
+          "start_balance": 0.0,
+          "current_balance": 100262.75,
+          "pnl": 100262.75,
+          "pnl_percent": 0.0
+        }
+      },
+      "timestamp": "2025-08-27T09:30:57.621736-04:00",
+      "last_updated": "2025-08-27T15:29:21.381993-04:00"
     }
   ],
-  "last_updated": "2025-08-21T15:28:27.150035-04:00",
+  "last_updated": "2025-08-27T15:29:21.381993-04:00",
   "weekly_summary": {
-    "current_week_pnl": 100562.75,
+    "current_week_pnl": 401201.0,
     "current_week_percent": 0.0,
     "worst_week_pnl": 0.0,
     "worst_week_percent": 0.0,
-    "best_week_pnl": 100562.75,
+    "best_week_pnl": 401201.0,
     "best_week_percent": 0.0
   }
 }

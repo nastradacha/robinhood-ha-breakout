@@ -197,7 +197,8 @@ class LLMClient:
 
         # Initialize OpenAI client if using OpenAI
         if model.startswith("gpt"):
-            openai.api_key = self.openai_key
+            # Modern OpenAI client initialization handled in _call_openai method
+            pass
 
     def _get_function_schemas(self) -> list:
         """Get function calling schemas for trade decisions."""

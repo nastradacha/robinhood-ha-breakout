@@ -3,13 +3,13 @@
 Robinhood HA Breakout - Main Trading Script
 
 A sophisticated automated trading system for SPY options using Heikin-Ashi breakout patterns.
-Designed for conservative intraday trading with manual confirmation and risk management.
+Designed for conservative intraday trading with fully automated execution and risk management.
 
 Key Features:
 - Automated market analysis using Heikin-Ashi candles
 - LLM-powered trade decision making (GPT-4o-mini or DeepSeek)
 - Browser automation for Robinhood options trading
-- Manual confirmation required - NEVER auto-submits orders
+- Fully automated execution - LLM decisions execute automatically
 - Slack notifications for mobile alerts
 - Comprehensive position and bankroll tracking
 - Conservative risk management (15% profit target, 25% stop loss)
@@ -26,11 +26,11 @@ Usage:
     python main.py --monitor-positions --interval 2 --end-at 15:45
 
 Safety:
-- All trades require manual review and confirmation
-- System stops at Robinhood Review screen
-- User must manually click Submit or Cancel
-- Interactive prompts record actual fill prices
-- No automated order execution whatsoever
+- All trades execute automatically based on LLM decisions
+- Confidence threshold enforcement (0.6 minimum)
+- Ensemble model agreement required for execution
+- Slack notifications provide trade alerts and confirmations
+- Circuit breakers and kill switches for risk management
 
 Author: Robinhood HA Breakout System
 Version: 2.0.0
@@ -415,6 +415,14 @@ def execute_multi_symbol_trade(
     current_price = opportunity["current_price"]
     reason = opportunity["reason"]
 
+    # Enforce confidence threshold - no pre-approved overrides
+    if confidence < config["MIN_CONFIDENCE"]:
+        logger.warning(
+            f"[MULTI-SYMBOL-EXECUTE] Confidence {confidence:.2f} below threshold "
+            f"{config['MIN_CONFIDENCE']:.2f} - blocking pre-approved trade for {symbol}"
+        )
+        return {"status": "BLOCKED", "reason": f"Confidence below threshold ({config['MIN_CONFIDENCE']:.2f})"}
+
     logger.info(
         f"[MULTI-SYMBOL-EXECUTE] Executing pre-approved {symbol} {decision} (confidence: {confidence:.2f})"
     )
@@ -614,11 +622,17 @@ def execute_multi_symbol_trade(
                 "expiry": "Today",  # Add expiry field
             }
 
-            # Get user decision (this will prompt for S/C)
-            logger.info("[MULTI-SYMBOL-EXECUTE] Waiting for trade confirmation...")
-            decision_result, actual_fill_premium = confirmer.get_user_decision(
-                trade_details, method="prompt"
-            )
+            # Check if unattended mode - execute automatically, otherwise use manual confirmation
+            if args.unattended:
+                logger.info("[MULTI-SYMBOL-EXECUTE] Unattended mode: Executing trade automatically...")
+                decision_result = "submitted"
+                actual_fill_premium = estimated_premium  # Use estimated premium for automated execution
+            else:
+                # Manual confirmation mode
+                logger.info("[MULTI-SYMBOL-EXECUTE] Waiting for trade confirmation...")
+                decision_result, actual_fill_premium = confirmer.get_user_decision(
+                    trade_details, method="prompt"
+                )
 
             # Record the trade outcome
             confirmer.record_trade_outcome(
@@ -652,6 +666,14 @@ def execute_alpaca_multi_symbol_trade(
     current_price = opportunity["current_price"]
     reason = opportunity["reason"]
     
+    # Enforce confidence threshold - no pre-approved overrides
+    if confidence < config["MIN_CONFIDENCE"]:
+        logger.warning(
+            f"[MULTI-SYMBOL-ALPACA] Confidence {confidence:.2f} below threshold "
+            f"{config['MIN_CONFIDENCE']:.2f} - blocking pre-approved trade for {symbol}"
+        )
+        return {"status": "BLOCKED", "reason": f"Confidence below threshold ({config['MIN_CONFIDENCE']:.2f})"}
+    
     try:
         # Sync with Alpaca account before trading
         alpaca_env = config.get("ALPACA_ENV", "paper")
@@ -666,7 +688,11 @@ def execute_alpaca_multi_symbol_trade(
             return {"status": "BLOCKED", "reason": reason_msg}
         
         # Get expiry policy and find ATM contract
-        policy, expiry_date = trader.get_expiry_policy()
+        policy, expiry_date = trader.get_expiry_policy(symbol)
+        if policy is None or expiry_date is None:
+            logger.error(f"[MULTI-SYMBOL-ALPACA] No valid expiry available for {symbol}")
+            return {"success": False, "error_type": "expiry_unavailable", "status": "ERROR", "reason": f"No valid expiry for {symbol}"}
+        
         side = "CALL" if decision == "CALL" else "PUT"
         
         logger.info(f"[MULTI-SYMBOL-ALPACA] Finding {side} contract for {symbol} (policy: {policy})")
@@ -674,16 +700,16 @@ def execute_alpaca_multi_symbol_trade(
         
         if not contract:
             logger.error(f"[MULTI-SYMBOL-ALPACA] No suitable {side} contract found for {symbol}")
-            return {"status": "ERROR", "reason": f"No {side} contract found"}
+            return {"success": False, "error_type": "contract_selection", "status": "ERROR", "reason": f"No {side} contract found"}
         
         # Get real-time quote for the contract
         quote = trader.get_latest_quote(contract.symbol)
         if not quote:
             logger.error(f"[MULTI-SYMBOL-ALPACA] Failed to get quote for {contract.symbol}")
-            return {"status": "ERROR", "reason": "Failed to get option quote"}
+            return {"success": False, "error_type": "quote_failure", "status": "ERROR", "reason": "Failed to get option quote"}
         
         # Calculate position size with real premium
-        premium = quote["ask"]  # Use ask price for buying
+        premium = quote.ask  # Use ask price for buying
         quantity = bankroll_manager.calculate_position_size(
             premium=premium,
             risk_fraction=config["RISK_FRACTION"],
@@ -730,13 +756,19 @@ def execute_alpaca_multi_symbol_trade(
             "contract_symbol": contract.symbol,
         }
         
-        # Get user confirmation
-        logger.info(f"[MULTI-SYMBOL-ALPACA] Requesting confirmation for {symbol} trade...")
-        decision_result, actual_fill_premium = confirmer.get_user_decision(
-            trade_details, method="prompt"
-        )
+        # Check if unattended mode - execute automatically, otherwise use manual confirmation
+        if args.unattended:
+            logger.info(f"[MULTI-SYMBOL-ALPACA] Unattended mode: Executing {symbol} trade automatically...")
+            decision_result = "submitted"
+            actual_fill_premium = estimated_premium  # Use estimated premium for automated execution
+        else:
+            # Manual confirmation mode
+            logger.info(f"[MULTI-SYMBOL-ALPACA] Requesting confirmation for {symbol} trade...")
+            decision_result, actual_fill_premium = confirmer.get_user_decision(
+                trade_details, method="prompt"
+            )
         
-        if decision_result == "SUBMITTED":
+        if decision_result == "submitted":
             # Submit order to Alpaca
             logger.info(f"[MULTI-SYMBOL-ALPACA] Submitting {symbol} order to Alpaca...")
             order_id = trader.place_market_order(
@@ -785,7 +817,7 @@ def run_once(
     4. Get LLM trade decision based on market conditions
     5. If trade signal detected, initiate browser automation
     6. Navigate to Robinhood and find ATM options
-    7. Stop at Review screen for manual confirmation
+    7. Execute trade automatically based on LLM decision
     8. Record trade outcome and update tracking
 
     Args:
@@ -809,10 +841,10 @@ def run_once(
             - status: Execution status (SUBMITTED, CANCELLED, NO_TRADE)
 
     Safety:
-        - Never auto-submits trades
-        - Always stops at Robinhood Review screen
-        - Requires manual user confirmation
-        - Records actual fill prices from user input
+        - Executes trades automatically based on LLM decisions
+        - Confidence threshold enforcement (0.6 minimum)
+        - Ensemble model agreement required
+        - Records estimated fill prices for automated execution
 
     Risk Management:
         - Validates bankroll before trading
@@ -1842,16 +1874,24 @@ def main_loop(
                                             "reason": decision.reason or "",
                                         }
 
-                                        # Get user decision (Submit/Cancel)
-                                        logger.info(
-                                            "[CONFIRMATION] Waiting for user decision..."
-                                        )
-                                        user_decision, actual_premium = (
-                                            confirmer.get_user_decision(
-                                                trade_details=trade_details,
-                                                method="prompt",  # Use interactive prompt
+                                        # Check if unattended mode - execute automatically, otherwise use manual confirmation
+                                        if args.unattended:
+                                            logger.info(
+                                                "[CONFIRMATION] Unattended mode: Executing trade automatically..."
                                             )
-                                        )
+                                            user_decision = "submitted"
+                                            actual_premium = estimated_premium  # Use estimated premium for automated execution
+                                        else:
+                                            # Manual confirmation mode
+                                            logger.info(
+                                                "[CONFIRMATION] Waiting for user decision..."
+                                            )
+                                            user_decision, actual_premium = (
+                                                confirmer.get_user_decision(
+                                                    trade_details=trade_details,
+                                                    method="prompt",  # Use interactive prompt
+                                                )
+                                            )
 
                                         # Record the trade outcome
                                         confirmer.record_trade_outcome(
@@ -2157,7 +2197,7 @@ def run_multi_symbol_loop(
                         )
 
                         if not args.dry_run:
-                            # Execute pre-approved multi-symbol decision directly
+                            # Execute pre-approved multi-symbol decision with backfill logic
                             # Don't re-analyze - trust the multi-symbol scanner decision
                             result = execute_multi_symbol_trade(
                                 opportunity=opp,
@@ -2173,6 +2213,44 @@ def run_multi_symbol_loop(
                             # Update bot instance for reuse
                             if result.get("bot"):
                                 bot = result["bot"]
+                            
+                            # Backfill logic: if primary opportunity failed due to contract issues,
+                            # try the next opportunity in the same scan cycle
+                            if (not result.get("success", False) and 
+                                result.get("error_type") == "contract_selection" and
+                                i + 1 < len(opportunities)):
+                                
+                                logger.info(f"[MULTI-SYMBOL-BACKFILL] {symbol} failed contract selection, trying next opportunity")
+                                
+                                # Try next opportunity as backfill
+                                next_opp = opportunities[i + 1]
+                                next_symbol = next_opp["symbol"]
+                                logger.info(f"[MULTI-SYMBOL-BACKFILL] Attempting backfill with {next_symbol}")
+                                
+                                backfill_result = execute_multi_symbol_trade(
+                                    opportunity=next_opp,
+                                    config=config,
+                                    args=args,
+                                    env_vars=env_vars,
+                                    bankroll_manager=bankroll_manager,
+                                    portfolio_manager=portfolio_manager,
+                                    slack_notifier=slack_notifier,
+                                    bot=bot,
+                                )
+                                
+                                if backfill_result.get("success", False):
+                                    logger.info(f"[MULTI-SYMBOL-BACKFILL] Backfill successful with {next_symbol}")
+                                    # Update bot instance
+                                    if backfill_result.get("bot"):
+                                        bot = backfill_result["bot"]
+                                    break  # Exit loop since we got a successful trade
+                                else:
+                                    logger.warning(f"[MULTI-SYMBOL-BACKFILL] Backfill also failed for {next_symbol}")
+                            
+                            # If primary opportunity succeeded, break out of loop
+                            elif result.get("success", False):
+                                logger.info(f"[MULTI-SYMBOL-LOOP] Trade executed successfully for {symbol}")
+                                break
                 else:
                     logger.info(
                         "[MULTI-SYMBOL-LOOP] No trading opportunities found across all symbols"

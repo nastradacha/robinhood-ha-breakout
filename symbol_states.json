@@ -1,40 +1,49 @@
 {
   "SPY": {
-    "state": "quarantined",
-    "reason": "Suspected corporate action: 5:1 forward split",
-    "quarantined_at": "2025-08-21T15:23:39.933992",
-    "current_price": 100.0,
-    "historical_price": 636.365,
+    "state": "normal",
+    "reason": "Suspected corporate action: 2:1 forward split",
+    "quarantined_at": "2025-08-22T10:36:49.029629",
+    "current_price": 322.59,
+    "historical_price": 643.8415,
     "stable_scans": 0,
-    "last_scan": "2025-08-21T15:23:39.933992",
+    "last_scan": "2025-08-22T10:36:49.029629",
     "suspected_split": {
-      "factor": 5.0,
-      "description": "5:1 forward split",
-      "detected_at": "2025-08-21T15:23:39.933992"
-    }
+      "factor": 2.0,
+      "description": "2:1 forward split",
+      "detected_at": "2025-08-22T10:36:49.029629"
+    },
+    "unquarantined_at": "2025-08-22T12:53:25.068616",
+    "unquarantine_reason": "manual_test",
+    "suspect_hits": 0
   },
   "QQQ": {
-    "state": "quarantined",
-    "reason": "Suspected corporate action: 5:1 forward split",
-    "quarantined_at": "2025-08-21T15:23:40.011589",
-    "current_price": 100.0,
-    "historical_price": 563.96,
+    "state": "normal",
+    "reason": "Suspected corporate action: 2:1 forward split",
+    "quarantined_at": "2025-08-22T10:24:29.762198",
+    "current_price": 285.545,
+    "historical_price": 572.05,
     "stable_scans": 0,
-    "last_scan": "2025-08-21T15:23:40.011589",
+    "last_scan": "2025-08-22T10:24:29.762198",
     "suspected_split": {
-      "factor": 5.0,
-      "description": "5:1 forward split",
-      "detected_at": "2025-08-21T15:23:40.011589"
-    }
+      "factor": 2.0,
+      "description": "2:1 forward split",
+      "detected_at": "2025-08-22T10:24:29.762198"
+    },
+    "unquarantined_at": "2025-08-22T12:55:17.928526",
+    "unquarantine_reason": "false_positive_fix",
+    "suspect_hits": 0
   },
   "IWM": {
-    "state": "quarantined",
+    "state": "normal",
     "reason": "Large price discrepancy: 55.8%",
     "quarantined_at": "2025-08-21T15:23:40.075465",
     "current_price": 100.0,
     "historical_price": 226.22,
     "stable_scans": 0,
-    "last_scan": "2025-08-21T15:23:40.075465"
+    "last_scan": "2025-08-21T15:23:40.075465",
+    "unquarantined_at": "2025-08-22T12:55:17.931284",
+    "unquarantine_reason": "false_positive_fix",
+    "suspect_hits": 0
   },
   "TSLA": {
     "state": "quarantined",
@@ -58,5 +67,56 @@
     "historical_price": 174.9601,
     "stable_scans": 0,
     "last_scan": "2025-08-21T15:23:40.211262"
+  },
+  "UVXY": {
+    "state": "normal",
+    "reason": "Suspected corporate action: 2:1 forward split",
+    "quarantined_at": "2025-08-22T09:30:12.575424",
+    "current_price": 6.735,
+    "historical_price": 13.53,
+    "stable_scans": 0,
+    "last_scan": "2025-08-22T09:30:12.575424",
+    "suspected_split": {
+      "factor": 2.0,
+      "description": "2:1 forward split",
+      "detected_at": "2025-08-22T09:30:12.575424"
+    },
+    "unquarantined_at": "2025-08-22T12:55:17.930696",
+    "unquarantine_reason": "false_positive_fix",
+    "suspect_hits": 0
+  },
+  "XLK": {
+    "state": "normal",
+    "reason": "Suspected corporate action: 2:1 forward split",
+    "quarantined_at": "2025-08-22T10:02:28.720813",
+    "current_price": 130.91,
+    "historical_price": 259.65,
+    "stable_scans": 0,
+    "last_scan": "2025-08-22T10:02:28.720813",
+    "suspected_split": {
+      "factor": 2.0,
+      "description": "2:1 forward split",
+      "detected_at": "2025-08-22T10:02:28.720813"
+    },
+    "unquarantined_at": "2025-08-22T12:55:17.929537",
+    "unquarantine_reason": "false_positive_fix",
+    "suspect_hits": 0
+  },
+  "DIA": {
+    "state": "normal",
+    "reason": "Suspected corporate action: 2:1 forward split",
+    "quarantined_at": "2025-08-22T11:14:06.535681",
+    "quarantined_timestamp": 1755875646.5356874,
+    "current_price": 228.18,
+    "historical_price": 456.94,
+    "stable_scans": 0,
+    "last_scan": "2025-08-22T11:14:06.535681",
+    "suspected_split": {
+      "factor": 2.0,
+      "description": "2:1 forward split",
+      "detected_at": "2025-08-22T11:14:06.535681"
+    },
+    "unquarantined_at": "2025-08-22T11:45:52.171176",
+    "unquarantine_reason": "ttl_expired"
   }
 }
