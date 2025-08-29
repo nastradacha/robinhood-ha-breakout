@@ -23,6 +23,8 @@ Usage:
 
 import os
 import logging
+import time
+import random
 from typing import Dict
 import pandas as pd
 from datetime import datetime
@@ -242,7 +244,7 @@ class EnhancedSlackIntegration:
             else:
                 enhanced_message = message
 
-            self.basic_notifier.send_heartbeat(enhanced_message)
+            self._send_with_retry(lambda: self.basic_notifier.send_heartbeat(enhanced_message), "enhanced_heartbeat")
             logger.debug("[ENHANCED-SLACK] Sent enhanced heartbeat")
 
         except Exception as e:
@@ -627,8 +629,29 @@ class EnhancedSlackIntegration:
         )
 
     def send_heartbeat(self, message: str):
-        """Delegate basic heartbeat to basic notifier."""
-        self.basic_notifier.send_heartbeat(message)
+        """Delegate basic heartbeat to basic notifier with retry logic."""
+        self._send_with_retry(lambda: self.basic_notifier.send_heartbeat(message), "heartbeat")
+    
+    def _send_with_retry(self, send_func, operation_name: str, max_retries: int = 3):
+        """Send Slack message with exponential backoff and jittered retry."""
+        for attempt in range(max_retries + 1):
+            try:
+                send_func()
+                if attempt > 0:
+                    logger.info(f"[SLACK-RETRY] {operation_name} succeeded on attempt {attempt + 1}")
+                return
+            except Exception as e:
+                if attempt == max_retries:
+                    logger.error(f"[SLACK-RETRY] {operation_name} failed after {max_retries + 1} attempts: {e}")
+                    return
+                
+                # Exponential backoff with jitter: 1s, 2s, 4s + random(0-1s)
+                base_delay = 2 ** attempt
+                jitter = random.uniform(0, 1)
+                delay = base_delay + jitter
+                
+                logger.warning(f"[SLACK-RETRY] {operation_name} failed (attempt {attempt + 1}/{max_retries + 1}), retrying in {delay:.1f}s: {e}")
+                time.sleep(delay)
 
     def send_info(self, message: str):
         """Send informational message (S1: Monitor breadcrumbs)."""
@@ -993,7 +1016,7 @@ class EnhancedSlackIntegration:
                 f"*Trading resumed with normal position sizes*"
             )
             
-            self.send_heartbeat(message)
+            self._send_with_retry(lambda: self.basic_notifier.send_heartbeat(message), "system_disable_alert")
             logger.info(f"[SLACK-VIX] VIX normalized alert sent: {vix_value:.1f}")
             
         except Exception as e:

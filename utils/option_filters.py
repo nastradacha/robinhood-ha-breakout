@@ -127,9 +127,13 @@ def validate_contract_liquidity(
     filters = get_option_filters(symbol, use_fallback)
     tier = get_symbol_tier(symbol)
     
-    # Calculate spread metrics
-    if bid <= 0 or ask <= 0:
-        return False, "Invalid bid/ask prices"
+    # Handle missing bid prices (common in 0DTE options)
+    if ask <= 0:
+        return False, "Invalid ask price"
+    
+    # If bid is missing but ask is valid, estimate bid as ask/2 for validation
+    if bid <= 0 and ask > 0:
+        bid = ask / 2
     
     spread_abs = ask - bid
     mid_price = (bid + ask) / 2

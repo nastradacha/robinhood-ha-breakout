@@ -51,6 +51,7 @@ class VIXMonitor:
         self.config = self._load_config(config_path)
         self.vix_threshold = self.config.get('VIX_SPIKE_THRESHOLD', 30.0)
         self.cache_minutes = self.config.get('VIX_CACHE_MINUTES', 5)
+        self.resilience_cache_minutes = self.config.get('VIX_RESILIENCE_CACHE_MINUTES', 2)  # Extended cache during outages
         self.enabled = self.config.get('VIX_ENABLED', True)
         
         self._cached_vix: Optional[VIXData] = None
@@ -109,7 +110,13 @@ class VIXMonitor:
             
             if vix_info.empty:
                 logger.error("[VIX-MONITOR] No VIX data returned from Yahoo Finance")
-                return self._cached_vix  # Return stale cache if available
+                # Use resilience cache (up to 2 minutes old) during outages
+                if (self._cached_vix and 
+                    self._cached_vix.age_minutes < self.resilience_cache_minutes):
+                    logger.warning(f"[VIX-RESILIENCE] Using stale VIX data: {self._cached_vix.value:.2f} "
+                                 f"(age: {self._cached_vix.age_minutes:.1f}min) during Yahoo Finance outage")
+                    return self._cached_vix
+                return None
             
             current_vix = float(vix_info['Close'].iloc[-1])
             
@@ -124,7 +131,13 @@ class VIXMonitor:
             
         except Exception as e:
             logger.error(f"[VIX-MONITOR] Failed to fetch VIX data: {e}")
-            return self._cached_vix  # Return stale cache if available
+            # Use resilience cache (up to 2 minutes old) during transient failures
+            if (self._cached_vix and 
+                self._cached_vix.age_minutes < self.resilience_cache_minutes):
+                logger.warning(f"[VIX-RESILIENCE] Using stale VIX data: {self._cached_vix.value:.2f} "
+                             f"(age: {self._cached_vix.age_minutes:.1f}min) during fetch failure")
+                return self._cached_vix
+            return None
     
     def is_vix_spike_active(self, send_alerts: bool = True) -> tuple[bool, Optional[float], str]:
         """

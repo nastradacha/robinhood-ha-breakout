@@ -1147,7 +1147,27 @@ class MultiSymbolScanner:
             
             # 6a. True range minimum check with enhanced hysteresis and momentum compensation
             hysteresis_factor = config.get('HYSTERESIS_FACTOR', 0.87)  # Reduced from 0.92 to 0.87 for better near-miss handling
-            hysteresis_threshold = hysteresis_factor * min_tr_range_pct
+            
+            # EOD gentler gates: ease thresholds in last 40-45 minutes (after 14:45 ET)
+            eod_tr_factor = 1.0
+            eod_hyst_factor = hysteresis_factor
+            try:
+                et_tz = pytz.timezone('US/Eastern')
+                current_et = datetime.now(et_tz)
+                current_time = current_et.time()
+                eod_start = datetime.strptime('14:45', '%H:%M').time()
+                
+                if current_time >= eod_start:
+                    eod_tr_factor = 0.85  # Require 15% less TR after 14:45
+                    eod_hyst_factor = 0.80  # Gentler hysteresis in EOD
+                    logger.debug(f"[EOD-GATES] {symbol}: EOD easing active (TR×{eod_tr_factor}, hyst×{eod_hyst_factor})")
+            except Exception as e:
+                logger.debug(f"[EOD-GATES] Time check failed: {e}")
+            
+            # Apply EOD adjustments
+            effective_min_tr = min_tr_range_pct * eod_tr_factor
+            effective_hysteresis_factor = eod_hyst_factor
+            hysteresis_threshold = effective_hysteresis_factor * effective_min_tr
             
             # Percentile-based contextual gate: allow if TR >= P80 of last 120 bars
             percentile_threshold = self._calculate_percentile_tr_threshold(symbol, market_data)
@@ -1158,8 +1178,8 @@ class MultiSymbolScanner:
             has_strong_range = today_tr_pct >= range_compensation_threshold
             
             # Use the lower of fixed threshold or contextual threshold for more adaptive gating
-            effective_threshold = min(min_tr_range_pct, contextual_threshold)
-            effective_hysteresis = hysteresis_factor * effective_threshold
+            effective_threshold = min(effective_min_tr, contextual_threshold)
+            effective_hysteresis = effective_hysteresis_factor * effective_threshold
             
             if today_tr_pct < effective_hysteresis:
                 # Near-miss detection for quality trades close to threshold (95-98% range)
@@ -2156,6 +2176,23 @@ class MultiSymbolScanner:
                 tr_low = uvxy_dynamic.get("tr_low", 0.40)
                 tr_medium = uvxy_dynamic.get("tr_medium", 0.50)
                 tr_high = uvxy_dynamic.get("tr_high", 0.80)
+                
+                # UVXY micro-vol override: reduce floor for low-VIX days with momentum
+                if 15 <= current_vix < 16:
+                    # Check for 15-min momentum (≥0.70% move)
+                    try:
+                        bars = market_data.get("bars", [])
+                        if len(bars) >= 3:  # Need at least 3 bars for 15-min calc
+                            current_price = bars[-1].get("close", bars[-1].get("c", 0))
+                            price_15min_ago = bars[-4].get("close", bars[-4].get("c", current_price)) if len(bars) >= 4 else current_price
+                            pct_change_15min = abs((current_price - price_15min_ago) / price_15min_ago * 100) if price_15min_ago > 0 else 0
+                            
+                            if pct_change_15min >= 0.70:
+                                reduced_floor = 0.50  # Reduced from normal 0.60%
+                                logger.info(f"[UVXY-MICRO-VOL] VIX={current_vix:.2f}, 15min move={pct_change_15min:.2f}% → reduced floor {reduced_floor:.2f}%")
+                                return reduced_floor
+                    except Exception as e:
+                        logger.debug(f"[UVXY-MICRO-VOL] Momentum check failed: {e}")
                 
                 # Determine bucket and threshold
                 if current_vix < vix_low:

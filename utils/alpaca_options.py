@@ -43,7 +43,10 @@ License: MIT
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, List, Dict, Any, Tuple
+import pytz
+import json
+import os
 from dataclasses import dataclass
 from decimal import Decimal
 from .llm import load_config
@@ -270,6 +273,46 @@ except ImportError as e:
 
 logger = logging.getLogger(__name__)
 
+# Fail-closed cooldown tracking
+COOLDOWN_FILE = ".cache/alpaca_api_cooldowns.json"
+COOLDOWN_DURATION_MINUTES = 30
+
+def _load_cooldowns():
+    """Load API cooldown state from cache file."""
+    if os.path.exists(COOLDOWN_FILE):
+        try:
+            with open(COOLDOWN_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+def _save_cooldowns(cooldowns):
+    """Save API cooldown state to cache file."""
+    os.makedirs(os.path.dirname(COOLDOWN_FILE), exist_ok=True)
+    try:
+        with open(COOLDOWN_FILE, 'w') as f:
+            json.dump(cooldowns, f)
+    except IOError:
+        pass
+
+def _is_symbol_in_cooldown(symbol):
+    """Check if symbol is in API error cooldown."""
+    cooldowns = _load_cooldowns()
+    if symbol not in cooldowns:
+        return False
+    
+    cooldown_until = datetime.fromisoformat(cooldowns[symbol])
+    return datetime.now() < cooldown_until
+
+def _add_symbol_to_cooldown(symbol):
+    """Add symbol to API error cooldown."""
+    cooldowns = _load_cooldowns()
+    cooldown_until = datetime.now() + timedelta(minutes=COOLDOWN_DURATION_MINUTES)
+    cooldowns[symbol] = cooldown_until.isoformat()
+    _save_cooldowns(cooldowns)
+    logger.warning(f"Added {symbol} to API cooldown until {cooldown_until.strftime('%H:%M:%S')}")
+
 
 @dataclass
 class ContractInfo:
@@ -334,6 +377,34 @@ class AlpacaOptionsTrader:
         )
         logger.info(f"Initialized AlpacaOptionsTrader (paper={paper})")
     
+    def _infer_strike_scale(self, underlying: float, strikes: list) -> float:
+        """
+        Returns a scale factor so that (strike * scale) is comparable to the underlying price.
+        Tries common adjustment ratios seen after splits/adjusted deliverables.
+        """
+        if not strikes or underlying <= 0:
+            return 1.0
+
+        # Candidate ratios to test (covers 1/4x, 1/2x, 1x, 2x, 4x)
+        candidates = [0.25, 0.5, 1.0, 2.0, 4.0]
+
+        # Use the strike closest to underlying * 1.0 after scaling
+        def score(scale: float) -> float:
+            nearest = min(strikes, key=lambda k: abs(k * scale - underlying))
+            # distance as % of underlying
+            return abs(nearest * scale - underlying) / underlying
+
+        best = min(candidates, key=score)
+        # Only apply if the best candidate is a meaningful improvement vs no scaling
+        if score(best) < max(0.015, score(1.0) * 0.6):  # 1.5% or 40% better than raw
+            return best
+        return 1.0
+
+    def _apply_strike_scale(self, strike, scale):
+        """Convert a raw strike into the "underlying space" for comparisons."""
+        # If strikes are half the underlying, inferred scale=2.0; strike*2.0 ≈ underlying
+        return strike * scale
+
     def _get_quote_bid(self, quote) -> float:
         """Robust bid price accessor with fallbacks."""
         try:
@@ -509,6 +580,10 @@ class AlpacaOptionsTrader:
             Tuple of (passed, reason)
         """
         try:
+            # CRITICAL: Check if symbol is in API error cooldown (fail-closed approach)
+            if _is_symbol_in_cooldown(symbol):
+                return False, f"Symbol {symbol} in API error cooldown - skipping to prevent repeated failures"
+            
             # Get current stock price
             from utils.alpaca_client import AlpacaClient
             alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
@@ -518,31 +593,157 @@ class AlpacaOptionsTrader:
                 return False, "Unable to get current stock price"
             
             # Get options contracts for the expiry
-            contracts = self.client.get_option_contracts(
-                underlying_symbols=[symbol],
+            request = GetOptionContractsRequest(
+                symbol=symbol,  # CRITICAL: Filter by underlying symbol (use symbol, not underlying_symbols)
+                status="active",
                 expiration_date=expiry_date,
-                limit=200
+                exercise_style=ExerciseStyle.AMERICAN
             )
+            logger.debug(f"Quote sanity check API request: symbol='{symbol}', expiry='{expiry_date}'")
+            contracts = self.client.get_option_contracts(request)
             
-            if not contracts:
+            # ENHANCED DEBUG: Log raw API response details
+            if contracts and hasattr(contracts, 'option_contracts') and contracts.option_contracts:
+                sample_contracts = contracts.option_contracts[:5]
+                logger.debug(f"Quote sanity check for {symbol}: Raw API returned {len(contracts.option_contracts)} contracts")
+                for i, contract in enumerate(sample_contracts):
+                    underlying = getattr(contract, 'underlying_symbol', 'MISSING')
+                    strike = getattr(contract, 'strike_price', 'MISSING')
+                    symbol_attr = getattr(contract, 'symbol', 'MISSING')
+                    logger.debug(f"  Contract {i+1}: underlying={underlying}, strike={strike}, symbol={symbol_attr}")
+                    
+                # Check if any contracts actually match the requested underlying
+                matching_contracts = [c for c in contracts.option_contracts 
+                                    if getattr(c, 'underlying_symbol', '').upper() == symbol.upper()]
+                logger.debug(f"Quote sanity check for {symbol}: {len(matching_contracts)}/{len(contracts.option_contracts)} contracts match underlying")
+                
+                if not matching_contracts:
+                    wrong_underlyings = {getattr(c, 'underlying_symbol', '?') for c in contracts.option_contracts[:10]}
+                    logger.error(f"Quote sanity check for {symbol}: API parameter 'symbol={symbol}' ignored! Got underlyings: {sorted(wrong_underlyings)}")
+                    # CRITICAL: Add to cooldown when API ignores our parameter (fail-closed)
+                    _add_symbol_to_cooldown(symbol)
+                    return False, f"API ignored symbol parameter for {symbol} - added to cooldown"
+            
+            if not contracts or not hasattr(contracts, 'option_contracts') or not contracts.option_contracts:
                 return False, f"No contracts available for {expiry_date}"
+            
+            # CRITICAL: Hard filter by underlying symbol (treat API filters as advisory)
+            original_count = len(contracts.option_contracts)
+            original_contracts = contracts.option_contracts[:]  # Keep original for error reporting
+            contracts.option_contracts = [c for c in contracts.option_contracts 
+                                        if getattr(c, "underlying_symbol", "").upper() == symbol.upper()]
+            
+            if not contracts.option_contracts:
+                wrong_underlyings = {getattr(c, "underlying_symbol", "?") for c in original_contracts}
+                logger.error(f"Quote sanity check for {symbol}: No contracts for underlying after hard filter; got: {sorted(wrong_underlyings)}")
+                # CRITICAL: Add to cooldown when API returns wrong underlying symbols (fail-closed)
+                _add_symbol_to_cooldown(symbol)
+                return False, f"No contracts for underlying {symbol} after hard filtering - added to cooldown"
+            
+            if original_count != len(contracts.option_contracts):
+                logger.warning(f"Quote sanity check for {symbol}: Hard filtered {original_count} → {len(contracts.option_contracts)} contracts")
             
             # Check near-ATM strikes (±4 strikes around current price)
             valid_quotes = 0
             checked_strikes = 0
             
-            for contract in contracts:
-                strike_diff = abs(contract.strike_price - current_price)
+            logger.debug(f"Quote sanity check for {symbol}: current_price={current_price}, total_contracts={len(contracts.option_contracts)}")
+            
+            # Debug: Check what underlying symbols we actually got
+            underlying_symbols = set()
+            sample_symbols = []
+            for contract in contracts.option_contracts[:10]:  # Check first 10 contracts
+                if hasattr(contract, 'underlying_symbol'):
+                    underlying_symbols.add(contract.underlying_symbol)
+                    sample_symbols.append(f"underlying_symbol={contract.underlying_symbol}")
+                elif hasattr(contract, 'symbol'):
+                    # Extract underlying from option symbol (e.g., "SPY250829C00640000" -> "SPY", "UVXY250829P00012000" -> "UVXY")
+                    option_symbol = contract.symbol
+                    sample_symbols.append(f"option_symbol={option_symbol}")
+                    if len(option_symbol) > 6:
+                        # Find where the date starts (first occurrence of '2' followed by digits)
+                        import re
+                        match = re.search(r'2\d{5}[CP]', option_symbol)
+                        if match:
+                            underlying = option_symbol[:match.start()]
+                        else:
+                            # Fallback: assume 3-char symbol if pattern not found
+                            underlying = option_symbol[:3]
+                        underlying_symbols.add(underlying)
+            
+            logger.debug(f"Quote sanity check for {symbol}: Sample contracts: {sample_symbols[:5]}")
+            logger.debug(f"Quote sanity check for {symbol}: Extracted underlying symbols: {underlying_symbols}")
+            
+            if underlying_symbols and symbol not in underlying_symbols:
+                logger.warning(f"Quote sanity check for {symbol}: API returned contracts for different underlying(s): {underlying_symbols}")
+                return False, f"API returned contracts for wrong underlying symbols: {underlying_symbols}"
+            
+            # Filter contracts to only include the requested underlying symbol
+            filtered_contracts = []
+            for contract in contracts.option_contracts:
+                contract_underlying = None
+                if hasattr(contract, 'underlying_symbol'):
+                    contract_underlying = contract.underlying_symbol
+                elif hasattr(contract, 'symbol'):
+                    # Extract underlying from option symbol (e.g., "SPY250829C00640000" -> "SPY", "UVXY250829P00012000" -> "UVXY")
+                    option_symbol = contract.symbol
+                    if len(option_symbol) > 6:
+                        # Find where the date starts (first occurrence of '2' followed by digits)
+                        import re
+                        match = re.search(r'2\d{5}[CP]', option_symbol)
+                        if match:
+                            contract_underlying = option_symbol[:match.start()]
+                        else:
+                            # Fallback: assume 3-char symbol if pattern not found
+                            contract_underlying = option_symbol[:3]
+                
+                if contract_underlying == symbol:
+                    filtered_contracts.append(contract)
+            
+            if not filtered_contracts:
+                logger.warning(f"Quote sanity check for {symbol}: No contracts found for correct underlying after filtering")
+                return False, f"No contracts found for underlying {symbol} after filtering"
+            
+            logger.debug(f"Quote sanity check for {symbol}: Filtered {len(contracts.option_contracts)} → {len(filtered_contracts)} contracts")
+            contracts.option_contracts = filtered_contracts
+            
+            # STRIKE SCALE DETECTION: Infer scale factor for strike comparisons
+            all_strikes = [c.strike_price for c in contracts.option_contracts]
+            scale = self._infer_strike_scale(current_price, all_strikes)
+            
+            if scale != 1.0:
+                logger.warning(
+                    f"[SCALE-DETECT] {symbol}: inferred strike scale {scale:.2f} "
+                    f"(median_strike≈{sorted(all_strikes)[len(all_strikes)//2]:.2f}, "
+                    f"underlying≈{current_price:.2f})"
+                )
+            
+            for contract in contracts.option_contracts:
+                # Apply scale factor for ATM distance calculation
+                effective_strike = self._apply_strike_scale(contract.strike_price, scale)
+                strike_diff = abs(effective_strike - current_price)
                 if strike_diff <= current_price * 0.05:  # Within 5% of ATM
                     checked_strikes += 1
+                    logger.debug(f"Near-ATM contract: {contract.symbol}, strike={contract.strike_price}, diff={strike_diff:.2f}")
                     
                     # Get quote for this contract
                     quote = self.get_latest_quote(contract.symbol)
-                    if quote and quote.bid is not None and quote.ask is not None:
-                        if quote.bid > 0 and quote.ask > quote.bid:
+                    if quote:
+                        # Use same flexible logic as main filtering - allow missing bid if ask is valid
+                        bid = quote.bid if quote.bid is not None else 0
+                        ask = quote.ask if quote.ask is not None else 0
+                        
+                        # Valid if we have a positive ask price (bid can be missing)
+                        if ask > 0 and (bid == 0 or ask > bid):
                             valid_quotes += 1
             
             if checked_strikes == 0:
+                # Enhanced debugging with scale information
+                example_strikes = sorted([c.strike_price for c in contracts.option_contracts[:10]])
+                logger.error(
+                    f"Quote sanity check failed for {symbol}: no near-ATM contracts (px={current_price:.2f}, scale={scale:.2f}). "
+                    f"Example raw strikes: {example_strikes}"
+                )
                 return False, "No near-ATM contracts found"
             
             if valid_quotes == 0:
@@ -552,7 +753,7 @@ class AlpacaOptionsTrader:
             if quote_ratio < 0.3:  # Less than 30% have valid quotes
                 return False, f"Poor quote coverage: {valid_quotes}/{checked_strikes} contracts have valid quotes"
             
-            self.logger.info(f"Quote sanity check passed: {valid_quotes}/{checked_strikes} near-ATM contracts have valid quotes")
+            logger.info(f"Quote sanity check passed: {valid_quotes}/{checked_strikes} near-ATM contracts have valid quotes")
             return True, f"Quote sanity passed ({valid_quotes}/{checked_strikes} valid)"
             
         except Exception as e:
@@ -569,6 +770,11 @@ class AlpacaOptionsTrader:
         from utils.option_filters import validate_contract_liquidity
         
         try:
+            # CRITICAL: Check if symbol is in API error cooldown (fail-closed approach)
+            if _is_symbol_in_cooldown(symbol):
+                logger.warning(f"Contract filtering for {symbol}: Symbol in API error cooldown - skipping to prevent repeated failures")
+                return None
+            
             # Get current stock price for ATM calculation
             from utils.alpaca_client import AlpacaClient
             alpaca_data = AlpacaClient(env="live" if not self.paper else "paper")
@@ -583,7 +789,7 @@ class AlpacaOptionsTrader:
             
             # Get option contracts
             request = GetOptionContractsRequest(
-                underlying_symbols=[symbol],
+                symbol=symbol,  # CRITICAL: Filter by underlying symbol
                 status="active",
                 expiration_date=expiry_date,
                 contract_type=contract_type,
@@ -591,6 +797,7 @@ class AlpacaOptionsTrader:
             )
             
             try:
+                logger.debug(f"Contract filtering API request: symbol='{symbol}', side='{side}', expiry='{expiry_date}'")
                 contracts = self.client.get_option_contracts(request)
             except APIError as e:
                 if "401" in str(e) or "40110000" in str(e):
@@ -602,6 +809,47 @@ class AlpacaOptionsTrader:
             if not contracts or not hasattr(contracts, 'option_contracts') or not contracts.option_contracts:
                 logger.warning(f"No {side} contracts found for {symbol} expiring {expiry_date}")
                 return None
+            
+            # Filter contracts to only include the requested underlying symbol (workaround for Alpaca API bug)
+            original_count = len(contracts.option_contracts)
+            filtered_contracts = []
+            wrong_underlyings = set()
+            
+            for contract in contracts.option_contracts:
+                contract_underlying = None
+                if hasattr(contract, 'underlying_symbol'):
+                    contract_underlying = contract.underlying_symbol
+                elif hasattr(contract, 'symbol'):
+                    # Extract underlying from option symbol (e.g., "SPY250829C00640000" -> "SPY", "UVXY250829P00012000" -> "UVXY")
+                    option_symbol = contract.symbol
+                    if len(option_symbol) > 6:
+                        # Find where the date starts (first occurrence of '2' followed by digits)
+                        import re
+                        match = re.search(r'2\d{5}[CP]', option_symbol)
+                        if match:
+                            contract_underlying = option_symbol[:match.start()]
+                        else:
+                            # Fallback: assume 3-char symbol if pattern not found
+                            contract_underlying = option_symbol[:3]
+                
+                if contract_underlying == symbol:
+                    filtered_contracts.append(contract)
+                elif contract_underlying:
+                    wrong_underlyings.add(contract_underlying)
+            
+            if wrong_underlyings:
+                logger.warning(f"Contract filtering for {symbol}: API returned contracts for wrong underlying(s): {wrong_underlyings}")
+                # CRITICAL: Add to cooldown when API returns wrong underlying symbols (fail-closed)
+                _add_symbol_to_cooldown(symbol)
+            
+            if not filtered_contracts:
+                logger.warning(f"No {side} contracts found for correct underlying {symbol} after filtering (had {original_count} wrong contracts)")
+                if wrong_underlyings:
+                    logger.error(f"Contract filtering for {symbol}: Added to cooldown due to wrong underlying symbols")
+                return None
+            
+            logger.debug(f"Contract filtering for {symbol}: Filtered {original_count} → {len(filtered_contracts)} contracts")
+            contracts.option_contracts = filtered_contracts
             
             # Find ATM strike (closest to current price)
             best_contract = None
@@ -624,14 +872,21 @@ class AlpacaOptionsTrader:
                 bid = quote.bid if quote.bid is not None else 0
                 ask = quote.ask if quote.ask is not None else 0
                 
-                if bid <= 0 or ask <= 0:
-                    self.logger.warning(f"Quote for {contract.symbol} missing bid/ask: bid={quote.bid}, ask={quote.ask}")
+                # For 0DTE options, allow contracts with valid ask but missing bid
+                # This is common for volatile assets like UVXY
+                if ask <= 0:
+                    logger.warning(f"Quote for {contract.symbol} missing ask price: bid={quote.bid}, ask={quote.ask}")
                     continue
+                
+                # If bid is missing but ask is valid, use ask/2 as estimated bid for calculations
+                if bid <= 0 and ask > 0:
+                    logger.debug(f"Using estimated bid for {contract.symbol}: ask={ask}, estimated_bid={ask/2}")
+                    bid = ask / 2
                 
                 # Minimum premium filter to skip penny quotes
                 mid_price = (bid + ask) / 2
                 if mid_price < 0.10:
-                    self.logger.debug(f"Skipping {contract.symbol}: premium ${mid_price:.3f} < $0.10 minimum")
+                    logger.debug(f"Skipping {contract.symbol}: premium ${mid_price:.3f} < $0.10 minimum")
                     continue
                 
                 # Get contract stats (open interest, volume) with type conversion
@@ -697,6 +952,17 @@ class AlpacaOptionsTrader:
             candidates = []
             successful_tier = None
             
+            # STRIKE SCALE DETECTION: Infer scale factor before processing contracts
+            all_strikes = [float(c.strike_price) for c in contract_list]
+            scale = self._infer_strike_scale(current_price, all_strikes)
+            
+            if scale != 1.0:
+                logger.warning(
+                    f"[SCALE-DETECT] {symbol}: inferred strike scale {scale:.2f} "
+                    f"(median_strike≈{sorted(all_strikes)[len(all_strikes)//2]:.2f}, "
+                    f"underlying≈{current_price:.2f})"
+                )
+            
             # First pass: collect all valid contracts with basic validation
             all_contracts = []
             for contract in contract_list:
@@ -746,7 +1012,9 @@ class AlpacaOptionsTrader:
                     oi = int(contract.open_interest or 0)
                     vol = int(getattr(contract, 'volume', 0))
                     strike = float(contract.strike_price)
-                    atm_distance = abs(strike - current_price)
+                    # Apply strike scale for ATM distance calculation
+                    effective_strike = self._apply_strike_scale(strike, scale)
+                    atm_distance = abs(effective_strike - current_price)
                     
                     # Delta sanity check (if available)
                     delta = None
@@ -956,7 +1224,7 @@ class AlpacaOptionsTrader:
                     contract_type = ContractType.CALL if side == 'CALL' else ContractType.PUT
                     
                     request = GetOptionContractsRequest(
-                        underlying_symbols=[symbol],
+                        symbol=symbol,  # CRITICAL: Filter by underlying symbol
                         status="active",
                         expiration_date=fallback_expiry,
                         contract_type=contract_type,
@@ -966,7 +1234,16 @@ class AlpacaOptionsTrader:
                     try:
                         contracts = self.client.get_option_contracts(request)
                         if contracts and hasattr(contracts, 'option_contracts') and contracts.option_contracts:
-                            logger.info(f"Found {len(contracts.option_contracts)} {side} contracts for {symbol} expiring {fallback_expiry}")
+                            # CRITICAL: Hard filter by underlying symbol (treat API filters as advisory)
+                            original_count = len(contracts.option_contracts)
+                            contracts.option_contracts = [c for c in contracts.option_contracts 
+                                                        if getattr(c, "underlying_symbol", "").upper() == symbol.upper()]
+                            
+                            if original_count != len(contracts.option_contracts):
+                                logger.warning(f"Fallback contracts for {symbol}: Hard filtered {original_count} → {len(contracts.option_contracts)} contracts")
+                            
+                            if contracts.option_contracts:
+                                logger.info(f"Found {len(contracts.option_contracts)} {side} contracts for {symbol} expiring {fallback_expiry}")
                             
                             # Use the same contract selection logic as the main method
                             return self._select_best_contract_from_list(
