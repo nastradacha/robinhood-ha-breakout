@@ -1,402 +1,402 @@
 [
   {
-    "timestamp": "2025-08-29T11:01:01.210558",
+    "timestamp": "2025-09-02T12:49:21.073634",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (0.40bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.06,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T11:03:22.652353",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (0.40bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.06,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T11:05:44.025883",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (2.20bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.06,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T11:08:07.989979",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (2.20bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.06,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T11:10:38.013908",
-    "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0830% < 0.0835% hysteresis threshold, 0.0960% minimum)",
     "price": 90.2,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:12:58.753399",
+    "timestamp": "2025-09-02T12:51:29.670120",
     "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0835% hysteresis threshold, 0.0960% minimum)",
     "price": 90.2,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:15:21.689795",
+    "timestamp": "2025-09-02T12:53:48.785756",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0835% hysteresis threshold, 0.0960% minimum)",
+    "price": 90.2,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T12:56:10.884871",
     "decision": "NO_TRADE",
     "confidence": null,
     "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.155,
+    "price": 90.255,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:17:44.853859",
+    "timestamp": "2025-09-02T12:58:51.391861",
     "decision": "NO_TRADE",
     "confidence": null,
     "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.155,
+    "price": 90.255,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:20:02.285040",
+    "timestamp": "2025-09-02T13:01:19.947403",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.20bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.135,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:03:44.410111",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.20bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.135,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:06:03.295396",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.70bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.21,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:08:24.190853",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.70bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.21,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:11:12.629016",
     "decision": "NO_TRADE",
     "confidence": null,
     "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.155,
+    "price": 90.28,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:27:04.727803",
+    "timestamp": "2025-09-02T13:13:36.029270",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0890% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.13,
+    "confidence": null,
+    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "price": 90.28,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:29:29.571204",
+    "timestamp": "2025-09-02T13:15:59.416586",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0890% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.13,
+    "confidence": null,
+    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "price": 90.285,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:31:51.388088",
+    "timestamp": "2025-09-02T13:18:22.466786",
     "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (0.70bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.185,
+    "confidence": null,
+    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "price": 90.285,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:34:12.804755",
+    "timestamp": "2025-09-02T13:20:56.350141",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (0.70bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.185,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0780% < 0.0835% hysteresis threshold, 0.0960% minimum)",
+    "price": 90.285,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:36:35.143622",
+    "timestamp": "2025-09-02T13:23:34.716945",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (2.00bp < 5.60bp minimum, scaled from 7.00bp)",
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0780% < 0.0835% hysteresis threshold, 0.0960% minimum)",
+    "price": 90.285,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:26:19.676165",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.34,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:28:36.673783",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.34,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:30:52.934599",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.345,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:33:09.123867",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.345,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:35:22.153890",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.30bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.38,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:37:47.404625",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.30bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.38,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:56:55.888872",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0830% < 0.0835% hysteresis threshold, 0.0960% minimum)",
+    "price": 90.5335,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T13:59:16.619195",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0830% < 0.0835% hysteresis threshold, 0.0960% minimum)",
+    "price": 90.5335,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:08:21.449859",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0826% hysteresis threshold, 0.0960% minimum)",
+    "price": 90.495,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:13:30.805230",
+    "decision": "NO_TRADE",
+    "confidence": null,
+    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "price": 90.415,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:15:36.110155",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.415,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:17:46.825666",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.415,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:19:54.795814",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.415,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:22:03.219675",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.38,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:24:45.042185",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.38,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:32:26.435377",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.285,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:34:46.252688",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.285,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:37:05.461322",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.26,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:39:16.544458",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.26,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:41:24.577854",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.2499,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:43:32.513563",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.2499,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:45:40.519616",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.195,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:48:00.441901",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.195,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:06:45.320100",
+    "decision": "NO_TRADE",
+    "confidence": null,
+    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "price": 90.175,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:09:12.630718",
+    "decision": "NO_TRADE",
+    "confidence": null,
+    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
+    "price": 90.175,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:11:26.266479",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (2.90bp < 5.60bp minimum, scaled from 7.00bp)",
     "price": 90.11,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T11:39:16.531160",
+    "timestamp": "2025-09-02T15:13:48.265880",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (2.00bp < 5.60bp minimum, scaled from 7.00bp)",
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (2.90bp < 5.60bp minimum, scaled from 7.00bp)",
     "price": 90.11,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T12:12:51.051981",
+    "timestamp": "2025-09-02T15:16:08.604503",
     "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.385,
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (0.30bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.12,
     "scanner_env": "paper"
   },
   {
-    "timestamp": "2025-08-29T13:17:05.028185",
+    "timestamp": "2025-09-02T15:18:16.293941",
     "decision": "NO_TRADE",
     "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (4.50bp < 5.60bp minimum, scaled from 7.00bp)",
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (0.30bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.12,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:20:25.108184",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.50bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.195,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:22:44.352237",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (3.50bp < 5.60bp minimum, scaled from 7.00bp)",
+    "price": 90.195,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:25:01.300903",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.2454,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:27:23.750815",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.2454,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:29:41.131503",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
+    "price": 90.2454,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T15:58:26.035011",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0770% < 0.0816% hysteresis threshold, 0.1020% minimum)",
     "price": 90.36,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:19:26.779020",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (4.50bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.36,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:21:47.428664",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.425,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:24:09.911678",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.425,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:26:30.211529",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.46,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:28:53.412673",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.46,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:31:15.778598",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.43,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:33:36.194198",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.43,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:36:00.774809",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0690% < 0.0748% hysteresis threshold, 0.0860% minimum)",
-    "price": 90.4128,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:38:09.906454",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0690% < 0.0748% hysteresis threshold, 0.0860% minimum)",
-    "price": 90.4128,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:39:19.745453",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0690% < 0.0748% hysteresis threshold, 0.0860% minimum)",
-    "price": 90.4128,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:41:28.008106",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (4.10bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.5,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:43:36.437013",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (4.10bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.5,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:45:52.937131",
-    "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.535,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:48:10.072670",
-    "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.535,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:57:20.647195",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.555,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T13:59:36.902788",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.555,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:01:53.475795",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (4.50bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.57,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:47:17.680789",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0780% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.365,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:49:27.033260",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0780% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.365,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:51:55.456976",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0860% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.39,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:54:27.051490",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0860% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.39,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:57:05.534438",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0500% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.37,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T14:59:18.209051",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0500% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.37,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:01:28.501943",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.4,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:03:38.407202",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.4,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:05:49.560121",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.36,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:08:01.411983",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0550% < 0.0940% hysteresis threshold, 0.1080% minimum)",
-    "price": 90.36,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:10:19.615373",
-    "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.29,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:12:55.289300",
-    "decision": "NO_TRADE",
-    "confidence": null,
-    "reason": "OTHER: No models meet 0.60 confidence threshold (0 actionable, 0 valid)",
-    "price": 90.29,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:15:26.106135",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.29,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:17:54.042287",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "insufficient_momentum: Pre-LLM gate: Insufficient momentum (1/2 indicators)",
-    "price": 90.29,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:20:18.425391",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (1.80bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.27,
-    "scanner_env": "paper"
-  },
-  {
-    "timestamp": "2025-08-29T15:22:55.020574",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "body_too_weak: Pre-LLM gate: Candle body too weak (1.80bp < 5.60bp minimum, scaled from 7.00bp)",
-    "price": 90.27,
     "scanner_env": "paper"
   }
 ]

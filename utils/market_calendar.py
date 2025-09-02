@@ -116,26 +116,82 @@ class MarketCalendar:
     def _get_hardcoded_holidays(self, year: int) -> Dict:
         """Get hardcoded US market holidays and early closes"""
         
-        # US Market Holidays (markets closed)
-        holidays = {
-            f"{year}-01-01": "New Year's Day",
-            f"{year}-01-15": "Martin Luther King Jr. Day",  # 3rd Monday in January
-            f"{year}-02-19": "Presidents' Day",  # 3rd Monday in February
-            f"{year}-04-07": "Good Friday",  # Varies each year
-            f"{year}-05-27": "Memorial Day",  # Last Monday in May
-            f"{year}-06-19": "Juneteenth",
-            f"{year}-07-04": "Independence Day",
-            f"{year}-09-02": "Labor Day",  # 1st Monday in September
-            f"{year}-11-28": "Thanksgiving",  # 4th Thursday in November
-            f"{year}-12-25": "Christmas Day"
-        }
+        # Calculate actual holiday dates for the year
+        holidays = {}
         
-        # Early close days (1:00 PM ET close)
-        early_closes = {
-            f"{year}-07-03": "Day before Independence Day",  # If July 4th is not Friday
-            f"{year}-11-29": "Day after Thanksgiving",  # Black Friday
-            f"{year}-12-24": "Christmas Eve"
+        # Fixed date holidays
+        holidays[f"{year}-01-01"] = "New Year's Day"
+        holidays[f"{year}-06-19"] = "Juneteenth"
+        holidays[f"{year}-07-04"] = "Independence Day"
+        holidays[f"{year}-12-25"] = "Christmas Day"
+        
+        # Calculate floating holidays
+        from datetime import date, timedelta
+        
+        # Martin Luther King Jr. Day - 3rd Monday in January
+        jan_1 = date(year, 1, 1)
+        days_to_monday = (7 - jan_1.weekday()) % 7
+        first_monday_jan = jan_1 + timedelta(days=days_to_monday)
+        mlk_day = first_monday_jan + timedelta(days=14)  # 3rd Monday
+        holidays[mlk_day.isoformat()] = "Martin Luther King Jr. Day"
+        
+        # Presidents' Day - 3rd Monday in February
+        feb_1 = date(year, 2, 1)
+        days_to_monday = (7 - feb_1.weekday()) % 7
+        first_monday_feb = feb_1 + timedelta(days=days_to_monday)
+        presidents_day = first_monday_feb + timedelta(days=14)  # 3rd Monday
+        holidays[presidents_day.isoformat()] = "Presidents' Day"
+        
+        # Memorial Day - Last Monday in May
+        may_31 = date(year, 5, 31)
+        days_back_to_monday = (may_31.weekday() + 1) % 7
+        memorial_day = may_31 - timedelta(days=days_back_to_monday)
+        holidays[memorial_day.isoformat()] = "Memorial Day"
+        
+        # Labor Day - 1st Monday in September
+        sep_1 = date(year, 9, 1)
+        days_to_monday = (7 - sep_1.weekday()) % 7
+        labor_day = sep_1 + timedelta(days=days_to_monday)
+        holidays[labor_day.isoformat()] = "Labor Day"
+        
+        # Thanksgiving - 4th Thursday in November
+        nov_1 = date(year, 11, 1)
+        days_to_thursday = (3 - nov_1.weekday()) % 7
+        first_thursday_nov = nov_1 + timedelta(days=days_to_thursday)
+        thanksgiving = first_thursday_nov + timedelta(days=21)  # 4th Thursday
+        holidays[thanksgiving.isoformat()] = "Thanksgiving"
+        
+        # Good Friday - Calculate based on Easter (simplified approximation)
+        # Using a basic Easter calculation for common years
+        easter_dates = {
+            2024: date(2024, 3, 31),
+            2025: date(2025, 4, 20),
+            2026: date(2026, 4, 5),
+            2027: date(2027, 3, 28),
+            2028: date(2028, 4, 16)
         }
+        if year in easter_dates:
+            good_friday = easter_dates[year] - timedelta(days=2)
+            holidays[good_friday.isoformat()] = "Good Friday"
+        
+        # Early close days (1:00 PM ET close) - calculate dynamically
+        early_closes = {}
+        
+        # Day before Independence Day (if July 4th falls on weekday)
+        july_4 = date(year, 7, 4)
+        if july_4.weekday() < 5:  # Monday-Friday
+            july_3 = date(year, 7, 3)
+            if july_3.weekday() < 5:  # July 3rd is also a weekday
+                early_closes[july_3.isoformat()] = "Day before Independence Day"
+        
+        # Day after Thanksgiving (Black Friday)
+        black_friday = thanksgiving + timedelta(days=1)
+        early_closes[black_friday.isoformat()] = "Day after Thanksgiving"
+        
+        # Christmas Eve (if it falls on a weekday)
+        christmas_eve = date(year, 12, 24)
+        if christmas_eve.weekday() < 5:  # Monday-Friday
+            early_closes[christmas_eve.isoformat()] = "Christmas Eve"
         
         return {
             "holidays": holidays,

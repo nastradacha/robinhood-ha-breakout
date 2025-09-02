@@ -540,10 +540,36 @@ class AlpacaOptionsTrader:
         try:
             logger.info(f"Finding {side} contract for {symbol}: {get_filter_summary(symbol)}")
             
+            # Check 0DTE availability before attempting contract filtering
+            from utils.expiry_calendar import is_0dte_available
+            from datetime import datetime
+            
+            try:
+                expiry_datetime = datetime.strptime(expiry_date, "%Y-%m-%d")
+                if policy == "0DTE" and not is_0dte_available(symbol, expiry_datetime):
+                    logger.info(f"0DTE not available for {symbol} on {expiry_datetime.strftime('%A')} - attempting weekly fallback")
+                    # Try weekly contracts instead
+                    weekly_contract = self._try_expiry_fallback(symbol, side, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
+                    if weekly_contract:
+                        logger.info(f"Found weekly fallback contract for {symbol}: {weekly_contract.symbol}")
+                        return weekly_contract
+                    else:
+                        logger.warning(f"No weekly fallback contracts available for {symbol}")
+                        return None
+            except Exception as e:
+                logger.warning(f"Error checking 0DTE availability for {symbol}: {e}")
+            
             # Quote sanity check before filtering
             sanity_passed, sanity_reason = self._check_quote_sanity(symbol, expiry_date)
             if not sanity_passed:
                 logger.error(f"Quote sanity check failed for {symbol}: {sanity_reason}")
+                # If quote sanity check fails but indicates 0DTE unavailability, try weekly fallback
+                if "0DTE not available" in sanity_reason:
+                    logger.info(f"Quote sanity check suggests 0DTE unavailability - attempting weekly fallback")
+                    weekly_contract = self._try_expiry_fallback(symbol, side, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
+                    if weekly_contract:
+                        logger.info(f"Found weekly fallback contract for {symbol}: {weekly_contract.symbol}")
+                        return weekly_contract
                 return None
             
             # Try primary filters first
@@ -562,7 +588,14 @@ class AlpacaOptionsTrader:
                     logger.warning(f"Found {side} contract with fallback filters: {contract.symbol}")
                     return contract
             
-            logger.error(f"No suitable {side} contract found for {symbol} - all filters failed")
+            # If all filters failed, try weekly expiry fallback as last resort
+            logger.warning(f"All filters failed for {symbol} - attempting weekly expiry fallback")
+            weekly_contract = self._try_expiry_fallback(symbol, side, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
+            if weekly_contract:
+                logger.info(f"Found weekly fallback contract for {symbol}: {weekly_contract.symbol}")
+                return weekly_contract
+            
+            logger.error(f"No suitable {side} contract found for {symbol} - all filters and fallbacks failed")
             return None
             
         except Exception as e:
@@ -593,8 +626,9 @@ class AlpacaOptionsTrader:
                 return False, "Unable to get current stock price"
             
             # Get options contracts for the expiry
+            # NOTE: Some symbols like DIA may have API inconsistencies - add retry with different parameters
             request = GetOptionContractsRequest(
-                symbol=symbol,  # CRITICAL: Filter by underlying symbol (use symbol, not underlying_symbols)
+                underlying_symbols=[symbol],  # Try underlying_symbols parameter instead of symbol
                 status="active",
                 expiration_date=expiry_date,
                 exercise_style=ExerciseStyle.AMERICAN
@@ -625,6 +659,18 @@ class AlpacaOptionsTrader:
                     return False, f"API ignored symbol parameter for {symbol} - added to cooldown"
             
             if not contracts or not hasattr(contracts, 'option_contracts') or not contracts.option_contracts:
+                # Check if this is expected 0DTE unavailability before failing
+                from utils.expiry_calendar import is_0dte_available
+                from datetime import datetime
+                
+                try:
+                    expiry_datetime = datetime.strptime(expiry_date, "%Y-%m-%d")
+                    if not is_0dte_available(symbol, expiry_datetime):
+                        logger.info(f"Quote sanity check for {symbol}: 0DTE not available on {expiry_datetime.strftime('%A')} - allowing fallback to weekly contracts")
+                        return True, f"0DTE not available for {symbol} on {expiry_datetime.strftime('%A')} - proceeding to weekly fallback"
+                except Exception as e:
+                    logger.warning(f"Quote sanity check for {symbol}: Error checking 0DTE availability: {e}")
+                
                 return False, f"No contracts available for {expiry_date}"
             
             # CRITICAL: Hard filter by underlying symbol (treat API filters as advisory)
@@ -789,7 +835,7 @@ class AlpacaOptionsTrader:
             
             # Get option contracts
             request = GetOptionContractsRequest(
-                symbol=symbol,  # CRITICAL: Filter by underlying symbol
+                underlying_symbols=[symbol],  # CRITICAL: Filter by underlying symbol using underlying_symbols parameter
                 status="active",
                 expiration_date=expiry_date,
                 contract_type=contract_type,
@@ -998,8 +1044,13 @@ class AlpacaOptionsTrader:
                     bid = self._get_quote_bid(quote)
                     ask = self._get_quote_ask(quote)
                     
-                    if bid <= 0 or ask <= 0:
+                    # Enhanced validation: Allow missing bid if ask is valid (0DTE options often have missing bids)
+                    if ask is None or ask <= 0:
+                        logger.debug(f"Quote for {contract.symbol} missing ask price: bid={bid}, ask={ask}")
                         continue
+                    if bid is None or bid <= 0:
+                        logger.debug(f"Quote for {contract.symbol} missing bid (using ask/2 estimate): bid={bid}, ask={ask}")
+                        bid = ask / 2.0
                     
                     # Skip stale or crossed quotes
                     if bid >= ask:
@@ -1224,7 +1275,7 @@ class AlpacaOptionsTrader:
                     contract_type = ContractType.CALL if side == 'CALL' else ContractType.PUT
                     
                     request = GetOptionContractsRequest(
-                        symbol=symbol,  # CRITICAL: Filter by underlying symbol
+                        underlying_symbols=[symbol],  # CRITICAL: Filter by underlying symbol using underlying_symbols parameter
                         status="active",
                         expiration_date=fallback_expiry,
                         contract_type=contract_type,
@@ -1301,11 +1352,20 @@ class AlpacaOptionsTrader:
                     
                     quote = quote_response[contract.symbol]
                     
-                    # Calculate metrics
+                    # Calculate metrics with enhanced bid/ask handling
                     bid = float(quote.bid_price) if hasattr(quote, 'bid_price') and quote.bid_price else 0.0
                     ask = float(quote.ask_price) if hasattr(quote, 'ask_price') and quote.ask_price else 0.0
-                    mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0.0
-                    spread = ask - bid if bid > 0 and ask > 0 else float('inf')
+                    
+                    # Enhanced validation: Allow missing bid if ask is valid (0DTE options often have missing bids)
+                    if ask <= 0:
+                        logger.debug(f"Quote for {contract.symbol} missing ask price: bid={bid}, ask={ask}")
+                        continue
+                    if bid <= 0:
+                        logger.debug(f"Quote for {contract.symbol} missing bid (using ask/2 estimate): bid={bid}, ask={ask}")
+                        bid = ask / 2.0
+                    
+                    mid = (bid + ask) / 2
+                    spread = ask - bid
                     spread_pct = (spread / mid * 100) if mid > 0 else float('inf')
                     
                     # Apply filters
@@ -1637,9 +1697,14 @@ class AlpacaOptionsTrader:
                     ask_size = getattr(quote_data, 'ask_size', 0)
                     timestamp = getattr(quote_data, 'timestamp', None)
                     
-                    if bid is None or ask is None:
-                        logger.warning(f"Quote for {symbol} missing bid/ask: bid={bid}, ask={ask}")
+                    # For 0DTE options, allow missing bid if ask is valid (common for deep OTM)
+                    if ask is None:
+                        logger.warning(f"Quote for {symbol} missing ask price: bid={bid}, ask={ask}")
                         return None
+                    
+                    if bid is None:
+                        logger.debug(f"Quote for {symbol} missing bid (using ask/2 estimate): bid={bid}, ask={ask}")
+                        bid = ask / 2.0  # Estimate bid as half of ask for spread calculation
                         
                     return Quote(
                         bid=float(bid),

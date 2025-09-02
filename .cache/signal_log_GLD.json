@@ -1,13 +1,5 @@
 [
   {
-    "timestamp": "2025-08-18T14:49:57.901998",
-    "decision": "NO_TRADE",
-    "confidence": 0.0,
-    "reason": "PRE_LLM_GATE: Pre-LLM gate: True range too low (0.0% < 0.1% minimum)",
-    "price": 306.8272,
-    "scanner_env": "paper"
-  },
-  {
     "timestamp": "2025-08-18T14:52:05.517791",
     "decision": "NO_TRADE",
     "confidence": 0.0,
@@ -397,6 +389,14 @@
     "confidence": 0.0,
     "reason": "PRE_LLM_GATE: Pre-LLM gate: Circuit breaker: Circuit breaker active (manual reset required): Daily loss -6.50% exceeds 5.0% threshold ($-650.00)",
     "price": 305.385,
+    "scanner_env": "paper"
+  },
+  {
+    "timestamp": "2025-09-02T14:08:21.561370",
+    "decision": "NO_TRADE",
+    "confidence": 0.0,
+    "reason": "pre_llm_gate: Pre-LLM gate: True range too low (0.0630% < 0.0688% hysteresis threshold, 0.0800% minimum)",
+    "price": 324.74,
     "scanner_env": "paper"
   }
 ]
