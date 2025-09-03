@@ -148,7 +148,7 @@ class TradingVisualizer:
             fontweight="bold",
             y=0.98,
         )
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)  # Use subplots_adjust instead of tight_layout
 
         if save_path is None:
             save_path = (
@@ -211,7 +211,7 @@ class TradingVisualizer:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
 
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)  # Use subplots_adjust instead of tight_layout
 
         if save_path is None:
             save_path = (
@@ -281,7 +281,7 @@ class TradingVisualizer:
             )
         ax2.set_title("🎯 Win/Loss Breakdown", fontweight="bold")
 
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)  # Use subplots_adjust instead of tight_layout
 
         if save_path is None:
             save_path = (

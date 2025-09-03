@@ -1609,14 +1609,60 @@ class MultiSymbolScanner:
                 reverse=True,
             )
 
-        # Apply max concurrent trades limit
-        if len(sorted_opps) > self.max_concurrent_trades:
-            logger.info(
-                f"[MULTI-SYMBOL] Limiting to top {self.max_concurrent_trades} opportunities"
-            )
-            sorted_opps = sorted_opps[: self.max_concurrent_trades]
+        # Pre-validate contracts before limiting opportunities
+        validated_opps = []
+        for opp in sorted_opps:
+            if opp.get("option_side"):  # Only validate options contracts
+                try:
+                    # Quick contract availability check
+                    from utils.alpaca_options import AlpacaOptionsTrader
+                    trader = AlpacaOptionsTrader(paper=True)
+                    
+                    # Check if contract is available without full selection
+                    best_expiry = trader._find_best_available_expiry(
+                        symbol=opp["symbol"], 
+                        side=opp["option_side"], 
+                        target_dte=0, 
+                        max_dte=7
+                    )
+                    
+                    opp["contract_available"] = best_expiry is not None
+                    opp["validated_expiry"] = best_expiry
+                    
+                    if best_expiry:
+                        logger.debug(f"[PRE-VALIDATE] {opp['symbol']} {opp['option_side']}: Contract available (expiry: {best_expiry})")
+                    else:
+                        logger.warning(f"[PRE-VALIDATE] {opp['symbol']} {opp['option_side']}: No contracts available")
+                        
+                except Exception as e:
+                    logger.warning(f"[PRE-VALIDATE] Error validating {opp['symbol']}: {e}")
+                    opp["contract_available"] = False
+                    opp["validated_expiry"] = None
+            else:
+                # Non-options trades are always "available"
+                opp["contract_available"] = True
+                opp["validated_expiry"] = None
+                
+            validated_opps.append(opp)
 
-        return sorted_opps
+        # Separate validated opportunities: contract_ok first, then others as backup
+        contract_ok = [opp for opp in validated_opps if opp.get("contract_available", False)]
+        contract_uncertain = [opp for opp in validated_opps if not opp.get("contract_available", False)]
+        
+        # Keep top N with contracts + top N uncertain as backup
+        final_queue = contract_ok[:self.max_concurrent_trades] + contract_uncertain[:self.max_concurrent_trades]
+        
+        if len(contract_ok) > 0:
+            logger.info(f"[MULTI-SYMBOL] Pre-validated: {len(contract_ok)} with contracts, {len(contract_uncertain)} uncertain")
+        
+        # Apply max concurrent trades limit to final queue
+        if len(final_queue) > self.max_concurrent_trades:
+            logger.info(
+                f"[MULTI-SYMBOL] Limiting to top {self.max_concurrent_trades} opportunities (pre-validated)"
+            )
+            final_queue = final_queue[:self.max_concurrent_trades]
+
+        return final_queue
 
     def _send_multi_symbol_alert(self, opportunities: List[Dict]):
         """

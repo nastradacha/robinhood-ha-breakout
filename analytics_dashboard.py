@@ -532,7 +532,7 @@ class TradingAnalytics:
         ax.grid(True, alpha=0.3)
 
         chart_path = os.path.join(output_dir, "cumulative_pnl.png")
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)  # Use subplots_adjust instead of tight_layout
         plt.savefig(chart_path, dpi=300, bbox_inches="tight")
         plt.close()
         chart_files.append(chart_path)

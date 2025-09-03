@@ -465,10 +465,17 @@ def execute_multi_symbol_trade(
                 logger.error(f"[MULTI-SYMBOL-EXECUTE] Failed to create Alpaca trader for {symbol}")
                 return {"status": "ERROR", "reason": "Missing Alpaca credentials"}
             
-            # Execute Alpaca trade
+            # Execute Alpaca trade with enhanced error handling
             result = execute_alpaca_multi_symbol_trade(
                 trader, opportunity, config, bankroll_manager, portfolio_manager, slack_notifier, trade_action, args
             )
+            
+            # Enhanced spillover: mark contract selection failures for spillover
+            if result.get("status") == "ERROR" and "contract" in result.get("reason", "").lower():
+                result["error_type"] = "contract_selection"
+                result["spillover_eligible"] = True
+                logger.info(f"[MULTI-SYMBOL-EXECUTE] Contract selection failed for {symbol} - eligible for spillover")
+            
             return result
         else:
             logger.info(f"[MULTI-SYMBOL-EXECUTE] Using Robinhood browser for {symbol} {decision}")
@@ -765,11 +772,19 @@ def execute_alpaca_multi_symbol_trade(
             "contract_symbol": contract.symbol,
         }
         
+        # Feasibility pre-check: Verify contract is executable before generating alerts
+        feasibility_check = trader.check_contract_feasibility(contract.symbol, quantity)
+        if not feasibility_check["feasible"]:
+            logger.warning(f"[MULTI-SYMBOL-ALPACA] Contract not feasible for {symbol}: {feasibility_check['reason']}")
+            return {"success": False, "error_type": "contract_not_feasible", "status": "ERROR", "reason": feasibility_check["reason"]}
+        
+        logger.info(f"[MULTI-SYMBOL-ALPACA] Contract feasibility confirmed for {symbol}")
+
         # Check if unattended mode - execute automatically, otherwise use manual confirmation
         if args.unattended:
             logger.info(f"[MULTI-SYMBOL-ALPACA] Unattended mode: Executing {symbol} trade automatically...")
             decision_result = "submitted"
-            actual_fill_premium = estimated_premium  # Use estimated premium for automated execution
+            actual_fill_premium = premium  # Use actual premium for automated execution
         else:
             # Manual confirmation mode
             logger.info(f"[MULTI-SYMBOL-ALPACA] Requesting confirmation for {symbol} trade...")
@@ -2214,22 +2229,18 @@ def run_multi_symbol_loop(
                 opportunities = scanner.scan_all_symbols()
 
                 if opportunities:
-                    # Process opportunities
-                    for i, opp in enumerate(
-                        opportunities[
-                            : config.get("multi_symbol", {}).get(
-                                "max_concurrent_trades", 1
-                            )
-                        ]
-                    ):
+                    # Process opportunities with spillover logic
+                    max_trades = config.get("multi_symbol", {}).get("max_concurrent_trades", 1)
+                    executed_successfully = False
+                    
+                    for i, opp in enumerate(opportunities):
                         symbol = opp["symbol"]
                         logger.info(
-                            f"[MULTI-SYMBOL-LOOP] Processing opportunity {i+1}: {symbol}"
+                            f"[MULTI-SYMBOL-SPILLOVER] Processing opportunity {i+1}/{len(opportunities)}: {symbol}"
                         )
 
                         if not args.dry_run:
-                            # Execute pre-approved multi-symbol decision with backfill logic
-                            # Don't re-analyze - trust the multi-symbol scanner decision
+                            # Execute pre-approved multi-symbol decision
                             result = execute_multi_symbol_trade(
                                 opportunity=opp,
                                 config=config,
@@ -2245,43 +2256,37 @@ def run_multi_symbol_loop(
                             if result.get("bot"):
                                 bot = result["bot"]
                             
-                            # Backfill logic: if primary opportunity failed due to contract issues,
-                            # try the next opportunity in the same scan cycle
-                            if (not result.get("success", False) and 
-                                result.get("error_type") == "contract_selection" and
-                                i + 1 < len(opportunities)):
+                            # Check if trade was successful
+                            if result.get("success", False):
+                                logger.info(f"[MULTI-SYMBOL-SPILLOVER] Trade executed successfully for {symbol}")
+                                executed_successfully = True
+                                break  # Exit loop since we got a successful trade
+                            else:
+                                # Log failure reason and continue to next opportunity
+                                error_type = result.get("error_type", "unknown")
+                                reason = result.get("reason", "Unknown error")
+                                logger.warning(f"[MULTI-SYMBOL-SPILLOVER] {symbol} failed ({error_type}): {reason}")
                                 
-                                logger.info(f"[MULTI-SYMBOL-BACKFILL] {symbol} failed contract selection, trying next opportunity")
-                                
-                                # Try next opportunity as backfill
-                                next_opp = opportunities[i + 1]
-                                next_symbol = next_opp["symbol"]
-                                logger.info(f"[MULTI-SYMBOL-BACKFILL] Attempting backfill with {next_symbol}")
-                                
-                                backfill_result = execute_multi_symbol_trade(
-                                    opportunity=next_opp,
-                                    config=config,
-                                    args=args,
-                                    env_vars=env_vars,
-                                    bankroll_manager=bankroll_manager,
-                                    portfolio_manager=portfolio_manager,
-                                    slack_notifier=slack_notifier,
-                                    bot=bot,
-                                )
-                                
-                                if backfill_result.get("success", False):
-                                    logger.info(f"[MULTI-SYMBOL-BACKFILL] Backfill successful with {next_symbol}")
-                                    # Update bot instance
-                                    if backfill_result.get("bot"):
-                                        bot = backfill_result["bot"]
-                                    break  # Exit loop since we got a successful trade
+                                # Different cooldown durations based on failure type
+                                if error_type == "contract_selection":
+                                    # Shorter cooldown for contract selection failures (expiry issues)
+                                    cooldown_minutes = 60
+                                    logger.info(f"[MULTI-SYMBOL-SPILLOVER] Contract selection failed for {symbol} - trying next opportunity")
                                 else:
-                                    logger.warning(f"[MULTI-SYMBOL-BACKFILL] Backfill also failed for {next_symbol}")
-                            
-                            # If primary opportunity succeeded, break out of loop
-                            elif result.get("success", False):
-                                logger.info(f"[MULTI-SYMBOL-LOOP] Trade executed successfully for {symbol}")
-                                break
+                                    # Standard cooldown for execution failures
+                                    cooldown_minutes = 30
+                                
+                                # Add cooldown for failed symbol to prevent immediate retry
+                                if hasattr(bankroll_manager, 'add_symbol_cooldown'):
+                                    bankroll_manager.add_symbol_cooldown(symbol, minutes=cooldown_minutes)
+                                    logger.info(f"[MULTI-SYMBOL-SPILLOVER] Added {cooldown_minutes}min cooldown for {symbol}")
+                                
+                                # Continue to next opportunity (spillover logic)
+                                continue
+                    
+                    # Log final result
+                    if not executed_successfully and not args.dry_run:
+                        logger.warning("[MULTI-SYMBOL-SPILLOVER] All opportunities failed - no trades executed this scan")
                 else:
                     logger.info(
                         "[MULTI-SYMBOL-LOOP] No trading opportunities found across all symbols"

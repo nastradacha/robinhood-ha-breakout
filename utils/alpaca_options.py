@@ -357,29 +357,59 @@ class FillResult:
 class AlpacaOptionsTrader:
     """Handles Alpaca options contract selection and trading."""
 
-    def __init__(self, api_key: str, secret_key: str, paper: bool = True):
+    def __init__(self, paper: bool = True):
         """Initialize Alpaca options trader.
         
         Args:
-            api_key: Alpaca API key
-            secret_key: Alpaca secret key  
-            paper: Use paper trading environment
+            paper: Whether to use paper trading (default: True)
         """
+        from alpaca.trading.client import TradingClient
+        from alpaca.data.historical import OptionHistoricalDataClient
+        from alpaca.data.live import StockDataStream
+        from alpaca.trading.enums import OrderSide, OrderType, TimeInForce
+        import os
+        from datetime import datetime, timedelta
+        
         self.paper = paper
-        self.client = TradingClient(
-            api_key=api_key,
-            secret_key=secret_key,
-            paper=paper
-        )
-        self.data_client = OptionHistoricalDataClient(
-            api_key=api_key,
-            secret_key=secret_key
-        )
+        self.expiry_cooldowns = {}  # Track symbols with expiry failures
+        
+        # Get API credentials from environment
+        api_key = os.getenv("ALPACA_API_KEY")
+        secret_key = os.getenv("ALPACA_SECRET_KEY")
+        
+        if not api_key or not secret_key:
+            raise ValueError("Alpaca API credentials not found in environment variables")
+        
+        # Initialize clients
+        self.client = TradingClient(api_key, secret_key, paper=paper)
+        self.data_client = OptionHistoricalDataClient(api_key, secret_key)
+        
         logger.info(f"Initialized AlpacaOptionsTrader (paper={paper})")
+    
+    def _add_expiry_cooldown(self, symbol: str, minutes: int = 60):
+        """Add symbol to expiry cooldown to prevent repeated failures."""
+        from datetime import datetime, timedelta
+        cooldown_until = datetime.now() + timedelta(minutes=minutes)
+        self.expiry_cooldowns[symbol] = cooldown_until
+        logger.info(f"Added {minutes}min expiry cooldown for {symbol} until {cooldown_until.strftime('%H:%M:%S')}")
+    
+    def _is_expiry_cooldown_active(self, symbol: str) -> bool:
+        """Check if symbol is in expiry cooldown."""
+        from datetime import datetime
+        if symbol not in self.expiry_cooldowns:
+            return False
+        
+        if datetime.now() >= self.expiry_cooldowns[symbol]:
+            # Cooldown expired, remove it
+            del self.expiry_cooldowns[symbol]
+            return False
+        
+        return True
     
     def _infer_strike_scale(self, underlying: float, strikes: list) -> float:
         """
         Returns a scale factor so that (strike * scale) is comparable to the underlying price.
+{{ ... }}
         Tries common adjustment ratios seen after splits/adjusted deliverables.
         """
         if not strikes or underlying <= 0:
@@ -538,26 +568,25 @@ class AlpacaOptionsTrader:
         from utils.option_filters import get_filter_summary, validate_contract_liquidity, should_attempt_fallback
         
         try:
+            # Check if symbol is in expiry cooldown
+            if self._is_expiry_cooldown_active(symbol):
+                logger.info(f"Skipping {symbol} - expiry cooldown active until {self.expiry_cooldowns[symbol].strftime('%H:%M:%S')}")
+                return None
+                
             logger.info(f"Finding {side} contract for {symbol}: {get_filter_summary(symbol)}")
             
-            # Check 0DTE availability before attempting contract filtering
-            from utils.expiry_calendar import is_0dte_available
-            from datetime import datetime
+            # Reality-based expiry selection: check actual available expiries instead of weekday rules
+            from datetime import datetime, date, timedelta
             
-            try:
-                expiry_datetime = datetime.strptime(expiry_date, "%Y-%m-%d")
-                if policy == "0DTE" and not is_0dte_available(symbol, expiry_datetime):
-                    logger.info(f"0DTE not available for {symbol} on {expiry_datetime.strftime('%A')} - attempting weekly fallback")
-                    # Try weekly contracts instead
-                    weekly_contract = self._try_expiry_fallback(symbol, side, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
-                    if weekly_contract:
-                        logger.info(f"Found weekly fallback contract for {symbol}: {weekly_contract.symbol}")
-                        return weekly_contract
-                    else:
-                        logger.warning(f"No weekly fallback contracts available for {symbol}")
-                        return None
-            except Exception as e:
-                logger.warning(f"Error checking 0DTE availability for {symbol}: {e}")
+            # For 0DTE policy, try to find the best available expiry with expanded search range
+            if policy == "0DTE":
+                best_expiry = self._find_best_available_expiry(symbol, side, target_dte=0, max_dte=7)
+                if best_expiry and best_expiry != expiry_date:
+                    logger.info(f"0DTE not available for {symbol}, using nearest available expiry: {best_expiry}")
+                    expiry_date = best_expiry
+                elif not best_expiry:
+                    logger.warning(f"No suitable expiry found for {symbol} within 7 DTE")
+                    return None
             
             # Quote sanity check before filtering
             sanity_passed, sanity_reason = self._check_quote_sanity(symbol, expiry_date)
@@ -566,7 +595,7 @@ class AlpacaOptionsTrader:
                 # If quote sanity check fails but indicates 0DTE unavailability, try weekly fallback
                 if "0DTE not available" in sanity_reason:
                     logger.info(f"Quote sanity check suggests 0DTE unavailability - attempting weekly fallback")
-                    weekly_contract = self._try_expiry_fallback(symbol, side, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
+                    weekly_contract = self._try_expiry_fallback(symbol, side, policy, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
                     if weekly_contract:
                         logger.info(f"Found weekly fallback contract for {symbol}: {weekly_contract.symbol}")
                         return weekly_contract
@@ -590,7 +619,7 @@ class AlpacaOptionsTrader:
             
             # If all filters failed, try weekly expiry fallback as last resort
             logger.warning(f"All filters failed for {symbol} - attempting weekly expiry fallback")
-            weekly_contract = self._try_expiry_fallback(symbol, side, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
+            weekly_contract = self._try_expiry_fallback(symbol, side, policy, expiry_date, min_oi or 0, min_vol or 0, max_spread_pct or 100.0)
             if weekly_contract:
                 logger.info(f"Found weekly fallback contract for {symbol}: {weekly_contract.symbol}")
                 return weekly_contract
@@ -950,9 +979,10 @@ class AlpacaOptionsTrader:
                 except (ValueError, TypeError):
                     volume = 0
                 
-                # Validate liquidity using tiered filters
-                passes_filter, reason = validate_contract_liquidity(
-                    symbol, bid, ask, oi, volume, use_fallback
+                # Validate liquidity using progressive filters for near-dated options
+                from utils.option_filters import validate_contract_liquidity_progressive
+                passes_filter, reason = validate_contract_liquidity_progressive(
+                    symbol, bid, ask, oi, volume, expiry_date, use_fallback
                 )
                 
                 if passes_filter:
@@ -1220,6 +1250,130 @@ class AlpacaOptionsTrader:
         
         return contract_info
     
+    def check_contract_feasibility(self, contract_symbol: str, quantity: int) -> Dict[str, Any]:
+        """Check if a contract is feasible for trading before generating alerts.
+        
+        Args:
+            contract_symbol: Option contract symbol
+            quantity: Number of contracts to trade
+            
+        Returns:
+            Dict with 'feasible' bool and 'reason' string
+        """
+        try:
+            # Get latest quote for the contract
+            quote_request = OptionLatestQuoteRequest(symbol_or_symbols=contract_symbol)
+            quote_response = self.data_client.get_option_latest_quote(quote_request)
+            
+            if not quote_response or contract_symbol not in quote_response:
+                return {"feasible": False, "reason": "No quote available for contract"}
+            
+            quote = quote_response[contract_symbol]
+            bid = self._get_quote_bid(quote)
+            ask = self._get_quote_ask(quote)
+            
+            # Check if quote is valid
+            if ask <= 0:
+                return {"feasible": False, "reason": "Invalid ask price"}
+            
+            # Allow missing bid with ask/2 estimation (consistent with filtering logic)
+            if bid <= 0:
+                bid = ask / 2.0
+                logger.debug(f"Using estimated bid ${bid:.2f} for {contract_symbol}")
+            
+            # Check spread reasonableness (max 100% spread)
+            spread_pct = ((ask - bid) / bid) * 100 if bid > 0 else 100
+            if spread_pct > 100:
+                return {"feasible": False, "reason": f"Spread too wide: {spread_pct:.1f}%"}
+            
+            # Check minimum liquidity (basic sanity check)
+            if ask < 0.05:  # Minimum 5 cents
+                return {"feasible": False, "reason": f"Ask price too low: ${ask:.2f}"}
+            
+            # Check if we can afford the position
+            total_cost = ask * quantity * 100  # Options multiplier
+            if total_cost > 50000:  # Sanity check for very expensive positions
+                return {"feasible": False, "reason": f"Position too expensive: ${total_cost:.0f}"}
+            
+            logger.debug(f"Contract {contract_symbol} feasibility check passed: bid=${bid:.2f}, ask=${ask:.2f}, spread={spread_pct:.1f}%")
+            return {"feasible": True, "reason": "Contract is tradeable"}
+            
+        except Exception as e:
+            logger.error(f"Error checking contract feasibility for {contract_symbol}: {e}")
+            return {"feasible": False, "reason": f"Feasibility check failed: {e}"}
+    
+    def _find_best_available_expiry(
+        self,
+        symbol: str,
+        side: str,
+        target_dte: int = 0,
+        max_dte: int = 7
+    ) -> Optional[str]:
+        """Find the best available expiry within DTE range based on actual contract availability.
+        
+        Args:
+            symbol: Underlying symbol
+            side: Option type ('CALL' or 'PUT')
+            target_dte: Target days to expiry (0 for same-day)
+            max_dte: Maximum days to expiry to search
+            
+        Returns:
+            Best available expiry date as YYYY-MM-DD string, None if none found
+        """
+        from datetime import date, timedelta
+        from alpaca.trading.enums import ContractType
+        from alpaca.trading.requests import GetOptionContractsRequest
+        
+        try:
+            today = date.today()
+            contract_type = ContractType.CALL if side == 'CALL' else ContractType.PUT
+            
+            # Check expiries from target_dte to max_dte
+            for dte in range(target_dte, max_dte + 1):
+                check_date = today + timedelta(days=dte)
+                # Skip weekends
+                if check_date.weekday() >= 5:
+                    continue
+                    
+                expiry_str = check_date.strftime("%Y-%m-%d")
+                
+                # Quick check: try to get contracts for this expiry
+                request = GetOptionContractsRequest(
+                    symbol=symbol,
+                    status="active",
+                    expiration_date=expiry_str,
+                    contract_type=contract_type,
+                    exercise_style=ExerciseStyle.AMERICAN
+                )
+                
+                try:
+                    contracts = self.client.get_option_contracts(request)
+                    if contracts and hasattr(contracts, 'option_contracts') and contracts.option_contracts:
+                        # Filter by underlying symbol
+                        valid_contracts = [c for c in contracts.option_contracts 
+                                         if getattr(c, "underlying_symbol", "").upper() == symbol.upper()]
+                        
+                        if valid_contracts:
+                            logger.info(f"Found {len(valid_contracts)} contracts for {symbol} expiring {expiry_str} (DTE={dte})")
+                            return expiry_str
+                        else:
+                            logger.debug(f"No valid contracts for {symbol} expiring {expiry_str} (wrong underlying)")
+                    else:
+                        logger.debug(f"No contracts available for {symbol} expiring {expiry_str}")
+                        
+                except Exception as e:
+                    logger.debug(f"Error checking expiry {expiry_str} for {symbol}: {e}")
+                    continue
+            
+            logger.warning(f"No available expiries found for {symbol} within {max_dte} DTE")
+            # Add short cooldown for structural failures (no expiries available)
+            self._add_expiry_cooldown(symbol, minutes=5)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in expiry selection for {symbol}: {e}")
+            return None
+    
     def _try_expiry_fallback(
         self,
         symbol: str,
@@ -1275,7 +1429,7 @@ class AlpacaOptionsTrader:
                     contract_type = ContractType.CALL if side == 'CALL' else ContractType.PUT
                     
                     request = GetOptionContractsRequest(
-                        underlying_symbols=[symbol],  # CRITICAL: Filter by underlying symbol using underlying_symbols parameter
+                        symbol=symbol,  # FIXED: Use 'symbol' parameter instead of 'underlying_symbols'
                         status="active",
                         expiration_date=fallback_expiry,
                         contract_type=contract_type,
@@ -1753,7 +1907,7 @@ def create_alpaca_trader(paper: bool = True) -> Optional[AlpacaOptionsTrader]:
         return None
     
     try:
-        return AlpacaOptionsTrader(api_key, secret_key, paper=paper)
+        return AlpacaOptionsTrader(paper=paper)
     except Exception as e:
         logger.error(f"Error creating Alpaca trader: {e}")
         return None

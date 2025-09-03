@@ -51,7 +51,7 @@ ALPACA_SYNC_INTERVAL_MINUTES: 15            # Auto-sync interval for monitoring 
 # Multi-Symbol Configuration
 multi_symbol:
   enabled: true                   # Enable multi-symbol scanning
-  max_concurrent_trades: 1        # Maximum trades across all symbols
+  max_concurrent_trades: 2        # Maximum trades across all symbols
   symbol_allocation: "equal"      # Options: "equal", "weighted", "priority"
   scan_interval_seconds: 60       # Reduced from 120s to 60s for rapid breakout detection
   # Scan priority (top gets first fill attempts when budget is tight)

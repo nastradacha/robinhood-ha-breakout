@@ -119,7 +119,7 @@ class SlackChartGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         chart_path = os.path.join(self.chart_dir, f"{symbol}_breakout_{timestamp}.png")
 
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)  # Use subplots_adjust instead of tight_layout
         plt.savefig(
             chart_path,
             dpi=self.chart_config["dpi"],
@@ -169,7 +169,7 @@ class SlackChartGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         chart_path = os.path.join(self.chart_dir, f"{symbol}_position_{timestamp}.png")
 
-        plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.95, top=0.9, bottom=0.15)  # Use subplots_adjust instead of tight_layout
         plt.savefig(
             chart_path,
             dpi=self.chart_config["dpi"],

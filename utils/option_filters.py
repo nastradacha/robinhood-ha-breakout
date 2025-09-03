@@ -36,7 +36,7 @@ OPTION_FILTER_TIERS = {
         "max_spread_abs": 0.15,
         "max_spread_pct": 12.0,
         "fallback_enabled": True,
-        "fallback_min_oi": 1000,
+        "fallback_min_oi": 800,  # Relaxed from 1000 for ETF 0-2 DTE
         "fallback_max_spread_abs": 0.20,
         "fallback_max_spread_pct": 18.0
     },
@@ -163,6 +163,96 @@ def should_attempt_fallback(symbol: str) -> bool:
     tier = get_symbol_tier(symbol)
     tier_config = OPTION_FILTER_TIERS.get(tier, OPTION_FILTER_TIERS["unknown"])
     return tier_config.get("fallback_enabled", False)
+
+def validate_contract_liquidity_progressive(
+    symbol: str,
+    bid: float,
+    ask: float,
+    open_interest: int,
+    volume: int,
+    expiry_date: str,
+    use_fallback: bool = False
+) -> Tuple[bool, str]:
+    """
+    Progressive contract liquidity validation with relaxed criteria for near-dated ETFs.
+    
+    For DTE <= 1, applies progressive relaxation:
+    1. Try standard filters first
+    2. If no contracts pass, relax OI requirements for ETFs with decent volume
+    3. Final fallback: accept contracts with good spreads regardless of OI if volume is present
+    
+    Args:
+        symbol: Trading symbol
+        bid: Bid price
+        ask: Ask price
+        open_interest: Open interest
+        volume: Daily volume
+        expiry_date: Contract expiry date (YYYY-MM-DD)
+        use_fallback: Whether to use fallback (relaxed) criteria
+    
+    Returns:
+        Tuple of (passes_filter, reason)
+    """
+    from datetime import datetime, date
+    
+    # First try standard validation
+    passes_standard, reason = validate_contract_liquidity(symbol, bid, ask, open_interest, volume, use_fallback)
+    if passes_standard:
+        return True, reason
+    
+    # Calculate DTE (days to expiry)
+    try:
+        expiry_dt = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+        today = date.today()
+        dte = (expiry_dt - today).days
+    except:
+        dte = 999  # If can't parse, assume far-dated
+    
+    # Only apply progressive relaxation for near-dated options (DTE <= 1)
+    if dte > 1:
+        return False, f"{reason} (DTE={dte}, no progressive relaxation)"
+    
+    tier = get_symbol_tier(symbol)
+    
+    # Progressive relaxation for near-dated ETFs
+    if dte <= 1 and tier in ["volatility", "sector", "index"]:  # ETF categories
+        
+        # Step 1: Relaxed OI with volume requirement
+        if volume >= 50:  # Decent volume present
+            spread_abs = ask - bid
+            mid_price = (bid + ask) / 2
+            spread_pct = (spread_abs / mid_price) * 100 if mid_price > 0 else 1000
+            
+            # Relaxed OI thresholds for near-dated ETFs
+            relaxed_oi_min = {
+                "volatility": 250,  # UVXY: 1500 → 250
+                "sector": 250,      # XLE: 1000 → 250  
+                "index": 500        # SPY/QQQ: 2000 → 500
+            }.get(tier, 100)
+            
+            # Tighter spread requirements to compensate
+            max_spread_abs = 0.30
+            max_spread_pct = 20.0
+            
+            if (open_interest >= relaxed_oi_min and 
+                spread_abs <= max_spread_abs and 
+                spread_pct <= max_spread_pct):
+                return True, f"Progressive Step 1: DTE={dte}, relaxed OI {open_interest}>={relaxed_oi_min}, vol={volume}, spread=${spread_abs:.3f}/{spread_pct:.1f}%"
+        
+        # Step 2: Volume-only validation (ignore OI entirely)
+        if volume >= 25:  # Minimal volume requirement
+            spread_abs = ask - bid
+            mid_price = (bid + ask) / 2
+            spread_pct = (spread_abs / mid_price) * 100 if mid_price > 0 else 1000
+            
+            # Very tight spread requirements when ignoring OI
+            max_spread_abs = 0.25
+            max_spread_pct = 15.0
+            
+            if spread_abs <= max_spread_abs and spread_pct <= max_spread_pct:
+                return True, f"Progressive Step 2: DTE={dte}, volume-only validation vol={volume}, spread=${spread_abs:.3f}/{spread_pct:.1f}%"
+    
+    return False, f"{reason} (DTE={dte}, progressive relaxation failed)"
 
 def get_filter_summary(symbol: str) -> str:
     """Get human-readable summary of filters for a symbol."""

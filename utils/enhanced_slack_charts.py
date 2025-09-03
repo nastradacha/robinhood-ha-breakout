@@ -715,9 +715,10 @@ class EnhancedSlackChartSender:
                 spine.set_linewidth(self.chart_config["spine_width"])
                 spine.set_alpha(0.8)
         
-        # Professional layout optimization
+        # Professional layout optimization with constrained_layout for better memory usage
         fig.suptitle("", fontsize=1)  # Remove default title
-        plt.tight_layout(pad=1.0, rect=[0, 0.03, 1, 0.95])
+        # Use constrained_layout instead of tight_layout to reduce memory pressure
+        fig.set_constrained_layout(True)
         
         # Add professional branding watermark (removed emoji to avoid glyph warnings)
         fig.text(0.99, 0.01, "RobinhoodBot Pro • Enhanced Analysis", 
