@@ -433,7 +433,7 @@ Reply ONLY with strict JSON matching the schema. No additional text."""
   "action": "SELL|HOLD|WAIT|ABSTAIN",
   "confidence": 0.0-1.0,
   "reason": "string explanation",
-  "defer_minutes": 2-30,
+  "defer_minutes": 1-30,
   "expected_exit_price": null|number,
   "time_horizon_min": null|number
 }"""
@@ -485,6 +485,28 @@ Reply ONLY with strict JSON matching the schema. No additional text."""
         try:
             messages = self._build_exit_messages(ctx)
             raw_response = self.client.strict_json(messages, escalate_if_low=True)
+            
+            # Normalize schema edge cases before validation
+            try:
+                if isinstance(raw_response, dict) and "defer_minutes" in raw_response:
+                    dm = raw_response.get("defer_minutes")
+                    if dm is None:
+                        # leave as None to allow default in model
+                        pass
+                    else:
+                        # Cast to int and clamp to [1, 30]
+                        dm_int = int(dm)
+                        if dm_int < 1:
+                            self.log.debug(f"[LLM-NORMALIZE] defer_minutes {dm} -> 1")
+                            dm_int = 1
+                        elif dm_int > 30:
+                            self.log.debug(f"[LLM-NORMALIZE] defer_minutes {dm} -> 30")
+                            dm_int = 30
+                        raw_response["defer_minutes"] = dm_int
+            except Exception as _norm_e:
+                # On any normalization error, fall back to safe default (2)
+                self.log.debug(f"[LLM-NORMALIZE] Error normalizing defer_minutes: {_norm_e}")
+                raw_response["defer_minutes"] = 2
             
             # Increment scan API counter
             self.scan_api_count += 1

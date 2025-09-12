@@ -36,13 +36,24 @@ from pathlib import Path
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOrdersRequest
-from alpaca.trading.enums import OrderSide, OrderStatus
+from alpaca.trading.enums import OrderSide, OrderStatus, AssetClass
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
-from .scoped_files import get_scoped_paths
-from .llm import load_config
+# Support both package execution (python -m utils.alpaca_sync)
+# and direct script execution (python utils/alpaca_sync.py)
+try:
+    from .scoped_files import get_scoped_paths
+    from .llm import load_config
+    from .slack import SlackNotifier
+except ImportError:
+    import sys as _sys
+    import os as _os
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from utils.scoped_files import get_scoped_paths  # type: ignore
+    from utils.llm import load_config  # type: ignore
+    from utils.slack import SlackNotifier  # type: ignore
 
 # Load environment variables
 load_dotenv()
@@ -262,10 +273,15 @@ class AlpacaSync:
             positions = self._get_positions_with_retry()
             
             # Filter for options positions
-            options_positions = [
-                pos for pos in positions 
-                if hasattr(pos, 'asset_class') and 'OPTION' in str(pos.asset_class)
-            ]
+            # Robust detection of option positions across SDK variations
+            def _is_option_position(pos) -> bool:
+                try:
+                    ac = getattr(pos, 'asset_class', None)
+                    return (ac == AssetClass.US_OPTION) or ('OPTION' in str(ac).upper())
+                except Exception:
+                    return False
+
+            options_positions = [pos for pos in positions if _is_option_position(pos)]
             
             logger.info(f"[ALPACA-SYNC] Found {len(options_positions)} options positions in Alpaca account")
             
@@ -279,8 +295,14 @@ class AlpacaSync:
             for alpaca_pos in options_positions:
                 symbol = alpaca_pos.symbol
                 quantity = float(alpaca_pos.qty)
-                market_value = float(alpaca_pos.market_value) if alpaca_pos.market_value else 0.0
-                unrealized_pnl = float(alpaca_pos.unrealized_pnl) if alpaca_pos.unrealized_pnl else 0.0
+                market_value = float(alpaca_pos.market_value) if getattr(alpaca_pos, 'market_value', None) else 0.0
+                # Alpaca SDK uses 'unrealized_pl' (not 'unrealized_pnl'); handle both and intraday variant
+                _upl = (
+                    getattr(alpaca_pos, 'unrealized_pl', None)
+                    or getattr(alpaca_pos, 'unrealized_pnl', None)
+                    or getattr(alpaca_pos, 'unrealized_intraday_pl', None)
+                )
+                unrealized_pnl = float(_upl) if _upl is not None else 0.0
                 
                 # Check if position exists locally
                 local_pos = next((p for p in local_positions if p.get("symbol") == symbol), None)
@@ -312,13 +334,13 @@ class AlpacaSync:
                     local_pos["last_sync"] = datetime.now().isoformat()
                     local_pos["sync_adjusted"] = True
             
-            # Check for positions that exist locally but not in Alpaca (closed manually)
+            # Check for positions that exist locally but not in Alpaca (closed outside local ledger)
             alpaca_symbols = {pos.symbol for pos in options_positions}
             for local_pos in local_positions:
                 if local_pos.get("symbol") not in alpaca_symbols:
-                    logger.warning(f"[ALPACA-SYNC] Position closed manually: {local_pos.get('symbol')}")
+                    logger.warning(f"[ALPACA-SYNC] Position closed (detected via Alpaca): {local_pos.get('symbol')}")
                     sync_needed = True
-                    local_pos["status"] = "closed_manually"
+                    local_pos["status"] = "closed_sync"
                     local_pos["close_time"] = datetime.now().isoformat()
             
             if sync_needed:
@@ -377,13 +399,13 @@ class AlpacaSync:
                     logger.warning(f"[ALPACA-SYNC] Detected untracked order: {order.id} ({order.symbol})")
                     
                     trade_record = {
-                        "timestamp": order.filled_at.isoformat() if order.filled_at else order.created_at.isoformat(),
-                        "symbol": order.symbol,
-                        "action": order.side.value.upper(),
-                        "quantity": float(order.qty),
-                        "price": float(order.filled_avg_price) if order.filled_avg_price else 0.0,
-                        "total_cost": float(order.filled_qty) * float(order.filled_avg_price) if order.filled_avg_price else 0.0,
-                        "alpaca_order_id": order.id,
+                        "timestamp": order.filled_at.isoformat() if getattr(order, 'filled_at', None) else getattr(order, 'created_at', datetime.now()).isoformat(),
+                        "symbol": getattr(order, 'symbol', ''),
+                        "action": (order.side.value.upper() if hasattr(getattr(order, 'side', ''), 'value') else str(getattr(order, 'side', '')).upper()),
+                        "quantity": float(getattr(order, 'qty', 0) or 0),
+                        "price": float(getattr(order, 'filled_avg_price', 0.0) or 0.0),
+                        "total_cost": float(getattr(order, 'filled_qty', 0) or 0) * float(getattr(order, 'filled_avg_price', 0.0) or 0.0),
+                        "alpaca_order_id": getattr(order, 'id', ''),
                         "source": "sync_detected",
                         "broker": "alpaca",
                         "environment": self.env,
@@ -410,57 +432,13 @@ class AlpacaSync:
             logger.error(f"[ALPACA-SYNC] Positions sync failed: {e}")
             return False
     
-    def sync_transactions(self) -> bool:
+    def sync_transactions_v2(self) -> bool:
         """
-        Synchronize transaction history with Alpaca orders.
-        
-        Returns:
-            True if sync successful, False otherwise
+        Legacy transaction sync method (not used). Kept for reference but disabled
+        by renaming to avoid overriding primary sync_transactions.
         """
-        try:
-            # Get recent orders from Alpaca with retry logic
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=30)  # Last 30 days
-            
-            request = GetOrdersRequest(
-                status="closed",  # Use string instead of OrderStatus enum
-                limit=500,
-                nested=True
-            )
-            
-            orders = self._get_orders_with_retry(request)
-            logger.info(f"[ALPACA-SYNC] Retrieved {len(orders)} filled orders from Alpaca")
-            
-            # Load existing trade history
-            trade_history = self._load_trade_history()
-            existing_order_ids = set(trade.get('alpaca_order_id') for trade in trade_history if trade.get('alpaca_order_id'))
-            
-            # Process new orders
-            new_trades = []
-            for order in orders:
-                if order.id not in existing_order_ids:
-                    # Convert Alpaca order to trade record
-                    trade = self._convert_order_to_trade(order)
-                    if trade:
-                        new_trades.append(trade)
-                        logger.info(f"[ALPACA-SYNC] New trade detected: {trade['symbol']} {trade['action']} {trade['quantity']} @ ${trade['price']}")
-            
-            if new_trades:
-                # Append new trades to history
-                self._save_new_trades(new_trades)
-                logger.info(f"[ALPACA-SYNC] Imported {len(new_trades)} new trades")
-                
-                # Log sync events
-                for trade in new_trades:
-                    self._log_sync_event("transaction_imported", trade)
-            else:
-                logger.info("[ALPACA-SYNC] Transaction sync not needed - all orders tracked")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"[ALPACA-SYNC] Transaction sync failed: {e}")
-            return False
+        logger.debug("[ALPACA-SYNC] sync_transactions_v2 is disabled (legacy)")
+        return True
     
     @retry_with_backoff(max_retries=3, base_delay=1.0)
     def _get_account_with_retry(self):
@@ -505,7 +483,77 @@ class AlpacaSync:
             positions_dir = os.path.dirname(self.positions_file) if os.path.dirname(self.positions_file) else "."
             os.makedirs(positions_dir, exist_ok=True)
             df = pd.DataFrame(positions)
-            df.to_csv(self.positions_file, index=False)
+            # Enforce canonical column order for compatibility with monitor/loader
+            CANONICAL_COLUMNS = [
+                'symbol','strike','option_type','expiry','quantity','contracts','entry_price',
+                'current_price','pnl_pct','pnl_amount','timestamp','status','close_time',
+                'market_value','unrealized_pnl','entry_time','source','sync_detected'
+            ]
+            
+            # Fix rows that were written with a legacy/timestamp-first mapping
+            # Example bad row under canonical header:
+            #   symbol=<ISO timestamp>, strike=UNDERLYING, option_type=EXPIRY, expiry=STRIKE, quantity=CALL/PUT, contracts=QTY, entry_price=ENTRY
+            def _is_iso_like(val: str) -> bool:
+                try:
+                    datetime.fromisoformat(str(val))
+                    return True
+                except Exception:
+                    return False
+            
+            if not df.empty and 'symbol' in df.columns:
+                # Ensure target columns can hold strings
+                for col in ['symbol', 'option_type', 'expiry', 'status', 'close_time']:
+                    if col in df.columns:
+                        try:
+                            df[col] = df[col].astype('object')
+                        except Exception:
+                            pass
+                mask = df['symbol'].apply(_is_iso_like)
+                if mask.any():
+                    # Prepare safe accessors
+                    def _safe_num(x):
+                        try:
+                            return float(x)
+                        except Exception:
+                            return None
+                    def _safe_int(x):
+                        try:
+                            return int(float(x))
+                        except Exception:
+                            return None
+                    # Perform remap for affected rows using original values
+                    idx = df[mask].index
+                    old_underlying = df.loc[idx, 'strike'] if 'strike' in df.columns else None
+                    old_expiry = df.loc[idx, 'option_type'] if 'option_type' in df.columns else None
+                    old_strike = df.loc[idx, 'expiry'] if 'expiry' in df.columns else None
+                    old_opt_from_qty = df.loc[idx, 'quantity'] if 'quantity' in df.columns else None
+                    old_contracts = df.loc[idx, 'contracts'] if 'contracts' in df.columns else None
+                    
+                    # underlying (symbol)
+                    if old_underlying is not None:
+                        df.loc[idx, 'symbol'] = old_underlying
+                    # expiry
+                    if old_expiry is not None:
+                        df.loc[idx, 'expiry'] = old_expiry
+                    # strike
+                    if old_strike is not None:
+                        df.loc[idx, 'strike'] = old_strike.apply(_safe_num)
+                    # option_type (from quantity column, which holds CALL/PUT)
+                    if old_opt_from_qty is not None:
+                        df.loc[idx, 'option_type'] = old_opt_from_qty.astype(str).str.upper().str[:1].map({'C':'CALL','P':'PUT'}).fillna(old_opt_from_qty)
+                    # quantity (from contracts)
+                    if old_contracts is not None:
+                        df.loc[idx, 'quantity'] = old_contracts.apply(_safe_int).fillna(1)
+                    # mark normalized status
+                    df.loc[idx, 'status'] = df.loc[idx, 'status'].where(~df.loc[idx, 'status'].isna(), other='normalized')
+                    # Optional: clear close_time if it's not meaningful
+                    # df.loc[idx, 'close_time'] = None
+            # Ensure all canonical columns exist
+            for col in CANONICAL_COLUMNS:
+                if col not in df.columns:
+                    df[col] = None
+            df = df[CANONICAL_COLUMNS]
+            df.to_csv(self.positions_file, index=False, columns=CANONICAL_COLUMNS)
         except Exception as e:
             logger.error(f"[ALPACA-SYNC] Failed to save local positions: {e}")
     
@@ -609,10 +657,18 @@ class AlpacaSync:
             
             # Quick position check
             alpaca_positions = self.trading_client.get_all_positions()
-            options_positions = [pos for pos in alpaca_positions if pos.asset_class == AssetClass.US_OPTION]
+            def _is_option_position_quick(pos):
+                ac = getattr(pos, 'asset_class', None)
+                return (ac == AssetClass.US_OPTION) or ('OPTION' in str(ac).upper())
+            options_positions = [pos for pos in alpaca_positions if _is_option_position_quick(pos)]
             local_positions = self._load_local_positions()
             
-            positions_need_sync = len(options_positions) != len([p for p in local_positions if p.get("status") != "closed_manually"])
+            # Treat any status starting with 'closed' as closed
+            open_local_positions = [
+                p for p in local_positions
+                if not str(p.get("status", "")).lower().startswith("closed")
+            ]
+            positions_need_sync = len(options_positions) != len(open_local_positions)
             
             return {
                 "bankroll": bankroll_needs_sync,

@@ -119,6 +119,39 @@ class EnhancedPositionMonitor:
         logger.info(f"[MONITOR] Slack enabled: {self.slack.enabled}")
         logger.info(f"[MONITOR] Positions file: {self.positions_file}")
 
+    def _parse_occ_option_symbol(self, occ: str) -> Optional[Dict]:
+        """Parse OCC option symbol like 'XLF250912C00053000' into components.
+
+        Returns dict with keys: underlying, expiry (YYYY-MM-DD), option_type (CALL/PUT), strike (float)
+        """
+        try:
+            if not occ or len(occ) < 10:
+                return None
+            # Underlying is letters until first digit
+            i = 0
+            while i < len(occ) and not occ[i].isdigit():
+                i += 1
+            underlying = occ[:i]
+            rest = occ[i:]
+            # Expect YYMMDD
+            y = int('20' + rest[0:2])
+            m = int(rest[2:4])
+            d = int(rest[4:6])
+            expiry = f"{y:04d}-{m:02d}-{d:02d}"
+            cp = rest[6].upper()
+            option_type = 'CALL' if cp == 'C' else 'PUT'
+            strike_pennies = rest[7:]
+            # Strike encoded to 1/1000 dollars
+            strike = float(int(strike_pennies) / 1000.0)
+            return {
+                'underlying': underlying,
+                'expiry': expiry,
+                'option_type': option_type,
+                'strike': strike,
+            }
+        except Exception:
+            return None
+
     def get_current_price(self, symbol: str) -> Optional[float]:
         """
         Get current stock price with Alpaca primary, Yahoo fallback.
@@ -199,8 +232,8 @@ class EnhancedPositionMonitor:
         return estimate
 
     def load_positions(self) -> List[Dict]:
-        """Load current positions from the scoped CSV file."""
-        positions = []
+        """Load current positions from the scoped CSV file with robust schema handling."""
+        positions: List[Dict] = []
 
         try:
             with open(self.positions_file, "r", newline="") as file:
@@ -209,22 +242,146 @@ class EnhancedPositionMonitor:
                     # Skip empty rows
                     if not any(row.values()):
                         continue
-                        
-                    # Convert numeric fields and map CSV columns to expected fields
+
+                    # Skip rows explicitly marked as closed or with a close_time
                     try:
-                        row["quantity"] = int(row.get("contracts", 1))  # Map contracts -> quantity with default
-                        row["entry_price"] = float(row.get("entry_premium", 0))  # Map entry_premium -> entry_price
-                        row["strike"] = float(row.get("strike", 0))
-                        row["option_type"] = row.get("side", "CALL")  # Map side -> option_type
-                        
-                        # Ensure required fields exist
-                        if not row.get("symbol") or not row.get("expiry"):
+                        status_str = str(row.get("status", "")).strip().lower()
+                        close_time_val = str(row.get("close_time", "")).strip()
+                        if status_str and status_str.startswith("closed"):
+                            logger.debug(f"[MONITOR] Skipping closed position row: {row}")
+                            continue
+                        if close_time_val:
+                            logger.debug(f"[MONITOR] Skipping row with close_time set: {row}")
+                            continue
+                    except Exception:
+                        # Be permissive if schema missing
+                        pass
+
+                    try:
+                        original_symbol = str(row.get("symbol", "")).strip()
+
+                        # Determine contracts/quantity
+                        qty_raw = row.get("contracts") or row.get("quantity") or "1"
+                        try:
+                            qty_f = float(str(qty_raw).strip())
+                        except Exception:
+                            qty_f = 1.0
+                        quantity = max(1, int(round(qty_f)))
+
+                        # Determine mapping for fields that may be missing
+                        strike_val = row.get("strike")
+                        option_type = row.get("option_type") or row.get("side")
+                        expiry = row.get("expiry")
+                        entry_price_raw = row.get("entry_price") or row.get("entry_premium")
+
+                        # Detect alternate 'timestamp-first' schema and remap
+                        # Example row (under header symbol,strike,option_type,expiry,quantity,contracts,entry_price,...):
+                        #   2025-09-11T09:44:44.197176,XLF,2025-09-12,53.5,CALL,1,0.22
+                        # Mapping should be: underlying=XLF, expiry=2025-09-12, strike=53.5, option_type=CALL, quantity=1, entry_price=0.22
+                        is_timestamp_symbol = False
+                        try:
+                            # datetime.fromisoformat handles microseconds too
+                            datetime.fromisoformat(original_symbol)
+                            is_timestamp_symbol = True
+                        except Exception:
+                            is_timestamp_symbol = False
+                        if is_timestamp_symbol:
+                            # Remap fields from shifted columns
+                            underlying = row.get("strike")  # actually underlying in this schema
+                            remapped_expiry = row.get("option_type")
+                            remapped_strike = row.get("expiry")
+                            remapped_option_type = row.get("quantity")
+                            remapped_qty = row.get("contracts") or "1"
+                            # Apply remapped values
+                            strike_val = remapped_strike
+                            option_type = remapped_option_type
+                            expiry = remapped_expiry
+                            try:
+                                qty_f = float(str(remapped_qty).strip())
+                            except Exception:
+                                qty_f = 1.0
+                            quantity = max(1, int(round(qty_f)))
+                        else:
+                            underlying = None
+
+                        # Parse OCC symbol if needed
+                        parsed = None
+                        if original_symbol and (not strike_val or not expiry or not option_type or len(original_symbol) > 8):
+                            # Likely an OCC option symbol (e.g., XLF250912C00053000)
+                            parsed = self._parse_occ_option_symbol(original_symbol)
+                            if parsed:
+                                underlying = parsed["underlying"]
+                                if not strike_val:
+                                    strike_val = parsed["strike"]
+                                if not expiry:
+                                    expiry = parsed["expiry"]
+                                if not option_type:
+                                    option_type = parsed["option_type"]
+
+                        # Convert numeric strike
+                        try:
+                            strike = float(strike_val) if strike_val not in (None, "") else None
+                        except Exception:
+                            strike = None
+
+                        # Compute entry_price if missing and we have market_value + unrealized_pnl
+                        entry_price = None
+                        if entry_price_raw not in (None, ""):
+                            try:
+                                entry_price = float(entry_price_raw)
+                            except Exception:
+                                entry_price = None
+                        if entry_price is None:
+                            mv_raw = row.get("market_value")
+                            upl_raw = row.get("unrealized_pnl") or row.get("unrealized_pl") or row.get("unrealized_intraday_pl")
+                            try:
+                                mv = float(mv_raw) if mv_raw not in (None, "") else None
+                                upl = float(upl_raw) if upl_raw not in (None, "") else 0.0
+                                if mv is not None and quantity > 0:
+                                    entry_value = mv - upl
+                                    entry_price = max(0.01, entry_value / (quantity * 100.0))
+                            except Exception:
+                                entry_price = None
+
+                        # Finalize underlying symbol for monitor price lookups
+                        if underlying is None:
+                            # If row had separate underlying column use it, else fall back to parsed or original
+                            underlying = row.get("underlying") or row.get("base_symbol")
+                            if not underlying:
+                                # If original was OCC and parsed failed, try best-effort
+                                parsed2 = self._parse_occ_option_symbol(original_symbol)
+                                if parsed2:
+                                    underlying = parsed2["underlying"]
+                            if not underlying and original_symbol:
+                                # Assume it is already the underlying (e.g., older schema)
+                                underlying = original_symbol
+
+                        # Normalize option_type
+                        if option_type:
+                            option_type = str(option_type).upper()
+                            option_type = "CALL" if option_type.startswith("C") else ("PUT" if option_type.startswith("P") else option_type)
+
+                        # Validate required fields
+                        if not underlying or not expiry or option_type not in ("CALL", "PUT") or strike is None:
                             logger.warning(f"[MONITOR] Skipping incomplete position: {row}")
                             continue
-                            
-                        positions.append(row)
-                        logger.debug(f"[MONITOR] Loaded position: {row['symbol']} ${row['strike']} {row['option_type']}")
-                        
+
+                        # Only set occ_symbol when original symbol parses as OCC; otherwise leave blank
+                        occ_symbol = original_symbol if parsed else ""
+
+                        normalized = {
+                            "symbol": underlying,
+                            "occ_symbol": occ_symbol,
+                            "strike": strike,
+                            "option_type": option_type,
+                            "expiry": expiry,
+                            "quantity": quantity,
+                            "entry_price": entry_price if entry_price is not None else 0.01,
+                        }
+
+                        positions.append(normalized)
+                        logger.debug(f"[MONITOR] Loaded position: {normalized['symbol']} ${normalized['strike']} {normalized['option_type']} x{normalized['quantity']}")
+
                     except (ValueError, TypeError) as e:
                         logger.warning(f"[MONITOR] Skipping invalid position row: {row} - Error: {e}")
                         continue
@@ -439,11 +596,41 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
             # Launch interactive exit confirmation workflow
             self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
+        # If LLM exit just executed and status is closed, skip advisory output
+        if str(position.get("status", "")).lower().startswith("closed"):
+            logger.debug(f"[MONITOR] Skipping advisory for {symbol} ${strike} {option_type} - position closed this cycle")
+            return
+
         # Log and print the alert
         logger.info(
             f"[EXIT-STRATEGY] {exit_decision.reason.value.upper()} for {symbol} ${strike} {option_type}"
         )
         print(message)
+
+    def check_legacy_alerts(
+        self,
+        position: Dict,
+        current_price: float,
+        estimated_option_price: float,
+        pnl: float,
+        pnl_pct: float,
+        position_key: str,
+        current_time: datetime,
+    ) -> None:
+        """Legacy fallback alert handler (no-op by default).
+
+        This preserves backward compatibility with prior simple threshold alerts
+        without interrupting the monitoring loop. Advanced exit strategies should
+        handle all actionable alerts; this method exists to avoid AttributeError
+        and can be expanded if needed.
+        """
+        try:
+            logger.debug(
+                f"[MONITOR-LEGACY] No advanced exit triggered for {position_key} (P&L {pnl_pct:+.1f}%) — legacy fallback is a no-op"
+            )
+        except Exception:
+            # Do not allow legacy path to break monitoring
+            pass
 
     def _launch_interactive_exit(
         self,
@@ -455,11 +642,24 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
         """Launch interactive exit confirmation workflow or LLM decision if unattended."""
         # Check if unattended mode is enabled
         try:
-            from utils.llm import load_config
-            config = load_config("config.yaml")
+            config = getattr(self, "config", None)
+            if config is None:
+                from utils.llm import load_config
+                config = load_config("config.yaml")
             unattended = config.get("UNATTENDED", False)
             llm_decisions = config.get("LLM_DECISIONS", [])
-            
+
+            # Auto-sell on objective exit triggers when unattended (default OFF)
+            auto_sell = (
+                config.get("AUTO_SELL_ON_EXIT_TRIGGERS", False)
+                or config.get("AUTO_SELL_ON_PROFIT_TARGET", False)
+            )
+            objective_reasons = {ExitReason.PROFIT_TARGET, ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP, ExitReason.TIME_BASED}
+            if unattended and auto_sell and exit_decision.reason in objective_reasons:
+                logger.info("[EXIT] Auto-sell enabled and objective trigger fired - executing sell without LLM")
+                self._execute_sell_order(position, current_stock_price, current_option_price, reason=str(exit_decision.reason.value))
+                return
+
             if unattended and "exit" in llm_decisions:
                 self._handle_llm_exit_decision(position, exit_decision, current_stock_price, current_option_price)
                 return
@@ -539,16 +739,27 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
             from datetime import datetime
             from zoneinfo import ZoneInfo
             
-            config = load_config("config.yaml")
+            cfg = getattr(self, "config", None)
+            if cfg is None:
+                cfg = load_config("config.yaml")
             
             # Initialize LLM components
-            ensemble_llm = EnsembleLLM(config)
+            ensemble_llm = EnsembleLLM()
             json_client = LLMJsonClient(ensemble_llm, logger)
-            llm_decider = LLMDecider(json_client, config, logger, slack_notifier=self.slack)
+            llm_decider = LLMDecider(json_client, cfg, logger, slack_notifier=self.slack)
             
             # Build context for LLM decision
             symbol = position.get("symbol", "UNKNOWN")
-            pnl_pct = float(position.get("pnl_pct", 0))
+            # Compute P&L % using current option price vs entry price
+            try:
+                entry_price = float(position.get("entry_price", 0) or 0)
+                qty = int(position.get("quantity", 1) or 1)
+                if entry_price > 0:
+                    pnl_pct = ((current_option_price - entry_price) / entry_price) * 100.0
+                else:
+                    pnl_pct = 0.0
+            except Exception:
+                pnl_pct = 0.0
             
             # Get market time info
             et_tz = ZoneInfo("America/New_York")
@@ -618,14 +829,36 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 
                 # Execute the sell order automatically
                 try:
-                    from utils.alpaca_options import AlpacaOptionsTrader
-                    trader = AlpacaOptionsTrader(config)
+                    from utils.alpaca_options import create_alpaca_trader
+                    # Determine paper/live from config/environment
+                    broker_cfg = cfg.get("BROKER", os.getenv("BROKER", "robinhood"))
+                    env_cfg = cfg.get("ALPACA_ENV", os.getenv("ALPACA_ENV", "paper" if broker_cfg == "alpaca" else "live"))
+                    paper_mode = broker_cfg == "alpaca" and env_cfg == "paper"
+                    trader = create_alpaca_trader(paper=paper_mode)
+                    if trader is None:
+                        logger.error(f"[AUTO-EXIT] Could not initialize Alpaca trader (paper={paper_mode})")
+                        self.slack.send_message(f"❌ **Auto-Exit Error: {symbol}**\n**Error:** Alpaca trader initialization failed\n**Manual intervention required**")
+                        return
                     
-                    # Get contract symbol from position
-                    contract_symbol = position.get("symbol", symbol)
-                    quantity = int(position.get("qty", 1))
+                    # Build/Get OCC contract symbol
+                    contract_symbol = position.get("occ_symbol")
+                    if not contract_symbol:
+                        try:
+                            from datetime import datetime as _dt
+                            expiry_dt = _dt.strptime(position.get("expiry", ""), "%Y-%m-%d")
+                            expiry_str = expiry_dt.strftime("%y%m%d")
+                            strike_str = f"{int(float(position.get('strike', 0)) * 1000):08d}"
+                            cp = (position.get("option_type", "C") or "C")[0].upper()
+                            underlying = position.get("symbol", symbol)
+                            contract_symbol = f"{underlying}{expiry_str}{cp}{strike_str}"
+                        except Exception:
+                            # Fallback to original symbol field if build fails
+                            contract_symbol = position.get("symbol", symbol)
                     
-                    logger.info(f"[LLM-EXIT] Placing SELL order: {contract_symbol} x{quantity}")
+                    # Quantity
+                    quantity = int(position.get("quantity") or position.get("qty") or 1)
+                    
+                    logger.info(f"[LLM-EXIT] Placing SELL order: {contract_symbol} x{quantity} (paper={paper_mode})")
                     
                     # Place market sell order
                     order_id = trader.place_market_order(contract_symbol, quantity, "SELL")
@@ -637,18 +870,33 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                         fill_result = trader.poll_fill(order_id=order_id, timeout_s=90)
                         
                         if fill_result.status == "FILLED":
-                            logger.info(f"[LLM-EXIT] Order filled: {fill_result.filled_qty} contracts at ${fill_result.avg_fill_price:.2f}")
+                            logger.info(f"[LLM-EXIT] Order filled: {fill_result.filled_qty} contracts at ${fill_result.avg_price:.2f}")
                             
                             # Send success notification
                             success_msg = f"""✅ **Automated Exit Executed: {symbol}**
 **Order ID:** {order_id}
 **Quantity:** {fill_result.filled_qty} contracts
-**Fill Price:** ${fill_result.avg_fill_price:.2f}
-**P&L:** {pnl_pct:.1f}%
+**Fill Price:** ${fill_result.avg_price:.2f}
+**P&L:** {((fill_result.avg_price - position.get('entry_price', 0)) / max(position.get('entry_price', 1), 1)) * 100:+.1f}%
 **LLM Reason:** {decision.reason}
 **Confidence:** {decision.confidence:.2f}"""
                             
                             self.slack.send_message(success_msg)
+                            
+                            # Mark closed in-memory to avoid duplicate advisories this cycle
+                            try:
+                                position["status"] = "closed_llm"
+                                position["close_time"] = datetime.now().isoformat()
+                            except Exception:
+                                pass
+                            
+                            # Refresh local positions from Alpaca after exit
+                            try:
+                                from utils.alpaca_sync import AlpacaSync
+                                sync = AlpacaSync(env=env_cfg if broker_cfg == "alpaca" else "live")
+                                sync.sync_positions()
+                            except Exception as _sync_e:
+                                logger.warning(f"[LLM-EXIT] Post-exit sync failed: {_sync_e}")
                             
                         else:
                             logger.warning(f"[LLM-EXIT] Order not filled: {fill_result.status}")
@@ -669,7 +917,6 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
 **Manual intervention required**"""
                         
                         self.slack.send_message(error_msg)
-                        
                 except Exception as order_error:
                     logger.error(f"[LLM-EXIT] Error executing sell order: {order_error}")
                     
@@ -680,20 +927,6 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                     
                     self.slack.send_message(error_msg)
                 
-                # Record the automated exit decision
-                try:
-                    from utils.trade_confirmation import TradeConfirmationManager
-                    confirmation_manager = TradeConfirmationManager()
-                    confirmation_manager.record_trade_outcome(
-                        symbol=symbol,
-                        action="SELL",
-                        fill_price=current_option_price,
-                        pnl_pct=pnl_pct,
-                        reason=f"LLM Auto-Exit: {decision.reason}",
-                        confidence=decision.confidence
-                    )
-                except Exception as e:
-                    logger.warning(f"[EXIT-LLM] Could not record trade outcome: {e}")
                 
             elif decision.action in ["HOLD", "WAIT"]:
                 defer_min = decision.defer_minutes or 2
@@ -720,6 +953,81 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 )
             except Exception as fallback_error:
                 logger.error(f"[EXIT-LLM] Fallback also failed: {fallback_error}")
+
+    def _execute_sell_order(self, position: Dict, current_stock_price: float, current_option_price: float, reason: str = "Objective Exit", confidence: float = 1.0) -> None:
+        """Directly execute a market SELL order via Alpaca (unattended objective exit)."""
+        symbol = position.get("symbol", "UNKNOWN")
+        try:
+            from utils.alpaca_options import create_alpaca_trader
+            cfg = getattr(self, "config", None)
+            if cfg is None:
+                from utils.llm import load_config
+                cfg = load_config("config.yaml")
+
+            broker_cfg = cfg.get("BROKER", os.getenv("BROKER", "alpaca"))
+            env_cfg = cfg.get("ALPACA_ENV", os.getenv("ALPACA_ENV", "paper" if broker_cfg == "alpaca" else "live"))
+            paper_mode = broker_cfg == "alpaca" and env_cfg == "paper"
+            trader = create_alpaca_trader(paper=paper_mode)
+
+            # Determine OCC symbol
+            contract_symbol = position.get("occ_symbol")
+            if not contract_symbol:
+                try:
+                    from datetime import datetime as _dt
+                    expiry_dt = _dt.strptime(position.get("expiry", ""), "%Y-%m-%d")
+                    expiry_str = expiry_dt.strftime("%y%m%d")
+                    strike_str = f"{int(float(position.get('strike', 0)) * 1000):08d}"
+                    cp = (position.get("option_type", "C") or "C")[0].upper()
+                    underlying = position.get("symbol", symbol)
+                    contract_symbol = f"{underlying}{expiry_str}{cp}{strike_str}"
+                except Exception:
+                    contract_symbol = position.get("symbol", symbol)
+
+            quantity = int(position.get("quantity") or position.get("qty") or 1)
+
+            logger.info(f"[AUTO-EXIT] Placing SELL order: {contract_symbol} x{quantity} (paper={paper_mode})")
+            order_id = trader.place_market_order(contract_symbol, quantity, "SELL")
+
+            if order_id:
+                fill_result = trader.poll_fill(order_id=order_id, timeout_s=90)
+                if fill_result.status == "FILLED":
+                    logger.info(f"[AUTO-EXIT] Order filled: {fill_result.filled_qty} @ ${fill_result.avg_price:.2f}")
+                    success_msg = f"""✅ **Automated Exit Executed: {symbol}**
+**Order ID:** {order_id}
+**Quantity:** {fill_result.filled_qty} contracts
+**Fill Price:** ${fill_result.avg_price:.2f}
+**P&L:** {((fill_result.avg_price - position.get('entry_price', 0)) / max(position.get('entry_price', 1), 1)) * 100:+.1f}%
+**Reason:** {reason}
+**Confidence:** {confidence:.2f}"""
+                    self.slack.send_message(success_msg)
+                    # Mark closed in-memory to avoid duplicate advisories this cycle
+                    try:
+                        position["status"] = "closed_auto"
+                        position["close_time"] = datetime.now().isoformat()
+                    except Exception:
+                        pass
+                    # Refresh local positions after confirmed fill
+                    try:
+                        from utils.alpaca_sync import AlpacaSync
+                        sync = AlpacaSync(env=env_cfg if broker_cfg == "alpaca" else "live")
+                        sync.sync_positions()
+                    except Exception as _sync_e:
+                        logger.warning(f"[AUTO-EXIT] Post-exit sync failed: {_sync_e}")
+                else:
+                    warning_msg = f"""⚠️ **Exit Order Not Filled: {symbol}**
+**Order ID:** {order_id}
+**Status:** {fill_result.status}
+**Manual intervention may be required**"""
+                    logger.warning(f"[AUTO-EXIT] Order not filled: {fill_result.status}")
+                    self.slack.send_message(warning_msg)
+            else:
+                logger.error(f"[AUTO-EXIT] Failed to place sell order for {symbol}")
+                self.slack.send_message(f"❌ **Exit Order Failed: {symbol}**\n**Error:** Order placement failed\n**Manual intervention required**")
+
+            # Recording of exit outcome is handled by Alpaca sync; no local ledger writes here
+        except Exception as e:
+            logger.error(f"[AUTO-EXIT] Error executing auto-sell for {symbol}: {e}")
+            self.slack.send_message(f"❌ **Auto-Exit Error: {symbol}**\n**Error:** {str(e)}\n**Manual intervention required**")
 
     def _legacy_alert_system(
         self,
