@@ -2,16 +2,14 @@
 """
 Enhanced Position Monitoring with Alpaca Real-Time Data
 
-This addresses the critical data accuracy issue where Yahoo Finance's
-delayed data caused missed profit opportunities. Now uses Alpaca's
-real-time market data for accurate profit/loss alerts.
+Uses Alpaca's real-time market data for accurate profit/loss alerts.
+All Yahoo Finance fallbacks have been removed to eliminate delayed data.
 
 Key Improvements:
-- Real-time stock prices from Alpaca (vs 15-20min delayed Yahoo)
+- Real-time stock prices from Alpaca
 - Better option price estimation using current volatility
 - More accurate profit/loss calculations
 - Timely alerts when actual profit targets are hit
-- Fallback to Yahoo Finance if Alpaca unavailable
 
 Usage:
     python monitor_alpaca.py
@@ -21,6 +19,8 @@ import os
 import logging
 import time
 import csv
+import json
+import copy
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import sys
@@ -38,7 +38,6 @@ from utils.exit_strategies import (
 )
 from utils.exit_confirmation import ExitConfirmationWorkflow
 from utils.circuit_breaker_reset import check_and_process_file_reset
-import yfinance as yf
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -58,15 +57,22 @@ class EnhancedPositionMonitor:
     using professional-grade market data feeds.
     """
 
-    def __init__(self):
-        """Initialize monitor with Alpaca and fallback data sources."""
+    def __init__(self, config_path: Optional[str] = None):
+        """Initialize monitor with Alpaca and fallback data sources.
+        
+        Args:
+            config_path: Optional path to configuration YAML. If not provided,
+                         will use ENV CONFIG_PATH or default to 'config.yaml'.
+        """
         self.slack = EnhancedSlackIntegration()
 
         # Load config and resolve broker/env-scoped positions file
         try:
             from utils.llm import load_config  # lazy import to avoid cycles
-            config = load_config("config.yaml")
+            cfg_path = config_path or os.getenv("CONFIG_PATH", "config.yaml")
+            config = load_config(cfg_path)
             self.config = config  # Store config for later use
+            self.config_path = cfg_path
 
             broker = config.get("BROKER", "robinhood")
             env = config.get("ALPACA_ENV", "paper") if broker == "alpaca" else "live"
@@ -91,20 +97,65 @@ class EnhancedPositionMonitor:
 
         # Initialize advanced exit strategies
         try:
-            exit_config = load_exit_config_from_file("config.yaml")
+            exit_config = load_exit_config_from_file(getattr(self, "config_path", "config.yaml"))
             self.exit_manager = ExitStrategyManager(exit_config)
             logger.info("[MONITOR] Advanced exit strategies enabled")
         except Exception as e:
             logger.warning(f"[MONITOR] Could not load exit strategies: {e}")
             self.exit_manager = ExitStrategyManager()  # Use defaults
 
+        # Initialize persistent LLM decider for session-level metrics (lazy)
+        self.llm_decider = None
+        try:
+            from utils.llm import load_config as _load_cfg
+            from utils.llm_decider import LLMDecider as _LLMDecider
+            from utils.llm_json_client import LLMJsonClient as _LLMJsonClient
+            from utils.ensemble_llm import EnsembleLLM as _Ensemble
+            cfg = getattr(self, "config", None) or _load_cfg(getattr(self, "config_path", "config.yaml"))
+            ensemble_llm = _Ensemble()
+            json_client = _LLMJsonClient(ensemble_llm, logger)
+            self.llm_decider = _LLMDecider(json_client, cfg, logger, slack_notifier=self.slack)
+            logger.info("[MONITOR] LLMDecider initialized for exit decisions")
+        except Exception as _e:
+            logger.warning(f"[MONITOR] Could not initialize LLMDecider yet: {_e}")
+
         # Alert tracking to prevent spam
         self.last_alerts = {}
         self.alert_cooldown = 300  # 5 minutes between same alerts
         
+        # Track repeated trailing stop hits per position (for LLM context)
+        self.trailing_hits_count = {}
+        
         # Heartbeat tracking
         self.heartbeat_counter = 0
         self.heartbeat_interval = 5  # Send heartbeat every 5 monitoring cycles
+        
+        # End-of-day summary tracking
+        self.eod_summary_sent_date = None
+
+        # Periodic auto-sync of positions from Alpaca so manual closes reflect automatically
+        try:
+            cfg = getattr(self, "config", None) or {}
+            self.auto_sync_enabled = bool(cfg.get("ALPACA_AUTO_SYNC_MONITOR", True))
+            # Default every 60s; can be overridden in config.yaml
+            self.auto_sync_interval_seconds = int(cfg.get("ALPACA_MONITOR_SYNC_INTERVAL_SECONDS", 60))
+        except Exception:
+            self.auto_sync_enabled = True
+            self.auto_sync_interval_seconds = 60
+        self._last_positions_sync = 0.0
+
+        # Lazy option quote client for real-time option mid price lookups
+        self._option_quote_client = None
+
+        # Stop-loss stability guard: grace period and consecutive confirmation
+        try:
+            cfg2 = getattr(self, "config", None) or {}
+            self.stop_loss_grace_seconds = int(cfg2.get("STOP_LOSS_GRACE_SECONDS", 120))
+            self.stop_loss_consecutive_cycles = int(cfg2.get("STOP_LOSS_CONSECUTIVE_CYCLES", 2))
+        except Exception:
+            self.stop_loss_grace_seconds = 120
+            self.stop_loss_consecutive_cycles = 2
+        self._stop_loss_breach_counts = {}
 
         # Legacy profit alert levels (kept for compatibility)
         self.profit_levels = [5, 10, 15, 20, 25, 30, 50, 75, 100, 150, 200]  # Percentages
@@ -154,7 +205,7 @@ class EnhancedPositionMonitor:
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         """
-        Get current stock price with Alpaca primary, Yahoo fallback.
+        Get current stock price via Alpaca only.
 
         Args:
             symbol: Stock symbol (e.g., 'SPY')
@@ -162,7 +213,7 @@ class EnhancedPositionMonitor:
         Returns:
             Current price or None if unavailable
         """
-        # Try Alpaca first (real-time)
+        # Try Alpaca (real-time)
         if self.alpaca.enabled:
             price = self.alpaca.get_current_price(symbol)
             if price:
@@ -170,19 +221,8 @@ class EnhancedPositionMonitor:
                 return price
             else:
                 logger.warning(
-                    f"[ALPACA] Failed to get {symbol} price, trying Yahoo..."
+                    f"[ALPACA] Failed to get {symbol} price"
                 )
-
-        # Fallback to Yahoo Finance (delayed)
-        try:
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period="1d")
-            if not data.empty:
-                price = data["Close"].iloc[-1]
-                logger.debug(f"[YAHOO] {symbol}: ${price:.2f} (delayed)")
-                return float(price)
-        except Exception as e:
-            logger.error(f"[YAHOO] Failed to get {symbol} price: {e}")
 
         return None
 
@@ -367,7 +407,8 @@ class EnhancedPositionMonitor:
                             continue
 
                         # Only set occ_symbol when original symbol parses as OCC; otherwise leave blank
-                        occ_symbol = original_symbol if parsed else ""
+                        # Prefer existing occ_symbol column if present; else infer from original symbol parse
+                        occ_symbol = (row.get("occ_symbol") or (original_symbol if parsed else ""))
 
                         normalized = {
                             "symbol": underlying,
@@ -377,6 +418,8 @@ class EnhancedPositionMonitor:
                             "expiry": expiry,
                             "quantity": quantity,
                             "entry_price": entry_price if entry_price is not None else 0.01,
+                            # Carry entry_time/timestamp forward for stability gating and tracking
+                            "entry_time": (row.get("entry_time") or row.get("timestamp") or datetime.now().isoformat()),
                         }
 
                         positions.append(normalized)
@@ -421,8 +464,28 @@ class EnhancedPositionMonitor:
         pnl = current_value - entry_value
         pnl_pct = (pnl / entry_value) * 100
 
-        position_key = f"{symbol}_{strike}_{option_type}"
+        position_key = f"{symbol}_{strike}_{option_type}_{position.get('expiry')}"
         current_time = datetime.now()
+        logger.debug(
+            f"[MONITOR] PnL debug for {position_key}: entry_price={entry_price:.4f}, qty={quantity}, "
+            f"entry_value={entry_value:.2f}, option_price={estimated_option_price:.4f}, current_value={current_value:.2f}"
+        )
+
+        # Stability guard: suppress early stop-loss within grace window
+        try:
+            stop_loss_pct_cfg = float(getattr(self.exit_manager.config, "stop_loss_pct", 25.0))
+        except Exception:
+            stop_loss_pct_cfg = 25.0
+        below_stop = pnl_pct <= -stop_loss_pct_cfg
+        seconds_since_entry = self._seconds_since_entry(position)
+        if below_stop and seconds_since_entry < float(getattr(self, "stop_loss_grace_seconds", 120)):
+            # Count the breach but do not trigger exit yet
+            self._stop_loss_breach_counts[position_key] = self._stop_loss_breach_counts.get(position_key, 0) + 1
+            logger.info(
+                f"[MONITOR] STOP_LOSS breach {pnl_pct:.1f}% but within grace window ({int(seconds_since_entry)}s<{self.stop_loss_grace_seconds}s) – waiting"
+            )
+            # Do not proceed to evaluate exits this cycle
+            return
 
         # Check if we should send alerts (cooldown logic)
         last_alert_time = self.last_alerts.get(position_key, {}).get(
@@ -441,6 +504,18 @@ class EnhancedPositionMonitor:
 
         # Handle exit decision based on strategy type
         if exit_decision.should_exit or exit_decision.reason != ExitReason.NO_EXIT:
+            # Require consecutive confirmations for STOP_LOSS to avoid flicker
+            if exit_decision.reason == ExitReason.STOP_LOSS:
+                cnt = self._stop_loss_breach_counts.get(position_key, 0) + 1
+                self._stop_loss_breach_counts[position_key] = cnt
+                required = int(getattr(self, "stop_loss_consecutive_cycles", 2))
+                if cnt < required:
+                    logger.info(f"[MONITOR] STOP_LOSS confirmation {cnt}/{required} – awaiting next cycle before action")
+                    return
+                else:
+                    # Reset after confirmed
+                    self._stop_loss_breach_counts[position_key] = 0
+
             self.handle_exit_decision(
                 position,
                 current_price,
@@ -498,7 +573,7 @@ P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)
 
 {exit_decision.message}
 
-Data Source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}
+Data Source: Alpaca (Real-time)
 Time: {datetime.now().strftime('%H:%M:%S ET')}
 
 ⚡ RECOMMEND IMMEDIATE EXIT ⚡
@@ -509,6 +584,33 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                     symbol, strike, option_type, abs(pnl_pct)
                 )
             
+            # Increment trailing stop hit counter for this position
+            try:
+                pos_key = self.exit_manager._get_position_key(position)
+                self.trailing_hits_count[pos_key] = self.trailing_hits_count.get(pos_key, 0) + 1
+            except Exception:
+                pass
+
+            # Post objective annotation with drawdown telemetry
+            try:
+                pos_key = self.exit_manager._get_position_key(position)
+                status = self.exit_manager.get_position_status(pos_key)
+                peak = (status.get("peak_data") or {}).get("peak_pnl_pct")
+                trail_level = status.get("trailing_stop")
+                trail_pct = getattr(self.exit_manager.config, "trailing_stop_distance_pct", None)
+                dd = (peak - pnl_pct) if (peak is not None) else None
+                drawdown_line = (
+                    f"Peak {peak:+.1f}% → Current {pnl_pct:+.1f}% (drawdown {dd:.1f}%, trail {float(trail_pct):.1f}%)"
+                    if (peak is not None and dd is not None and trail_pct is not None)
+                    else None
+                )
+                if self.slack.enabled:
+                    ann = f"🧭 Objective Active: TRAILING_STOP" + (f"\n{drawdown_line}" if drawdown_line else "")
+                    self.slack.send_message(ann)
+                logger.info(f"[EXIT-ANN] Objective=TRAILING_STOP {(' | ' + drawdown_line) if drawdown_line else ''}")
+            except Exception:
+                pass
+
             # Launch interactive exit confirmation workflow for trailing stop
             self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
@@ -525,7 +627,7 @@ P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)
 
 {exit_decision.message}
 
-Data Source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}
+Data Source: Alpaca (Real-time)
 Time: {datetime.now().strftime('%H:%M:%S ET')}
 
 🚨 CLOSE BEFORE MARKET CLOSE 🚨
@@ -536,6 +638,14 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                     position, current_price, pnl_pct, "time_based_exit", exit_decision
                 )
             
+            # Post objective annotation
+            try:
+                if self.slack.enabled:
+                    self.slack.send_message("🧭 Objective Active: TIME_BASED")
+                logger.info("[EXIT-ANN] Objective=TIME_BASED")
+            except Exception:
+                pass
+
             # Launch interactive exit confirmation workflow for time-based exit
             self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
@@ -552,7 +662,7 @@ P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)
 
 {exit_decision.message}
 
-Data Source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}
+Data Source: Alpaca (Real-time)
 Time: {datetime.now().strftime('%H:%M:%S ET')}
 
 ⚠️ CONSIDER CLOSING POSITION ⚠️
@@ -563,6 +673,14 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                     symbol, strike, option_type, abs(pnl_pct)
                 )
             
+            # Post objective annotation
+            try:
+                if self.slack.enabled:
+                    self.slack.send_message("🧭 Objective Active: STOP_LOSS")
+                logger.info("[EXIT-ANN] Objective=STOP_LOSS")
+            except Exception:
+                pass
+
             # Launch interactive exit confirmation workflow for stop loss
             self._launch_interactive_exit(position, exit_decision, current_price, option_price)
 
@@ -582,7 +700,7 @@ P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)
 
 {exit_decision.message}
 
-Data Source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}
+Data Source: Alpaca (Real-time)
 Time: {datetime.now().strftime('%H:%M:%S ET')}
 
 ✨ Consider taking profits! ✨
@@ -732,21 +850,26 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
     ) -> None:
         """Handle exit decision using LLM in unattended mode."""
         try:
-            from utils.llm import load_config
-            from utils.llm_decider import LLMDecider
-            from utils.llm_json_client import LLMJsonClient
-            from utils.ensemble_llm import EnsembleLLM
             from datetime import datetime
             from zoneinfo import ZoneInfo
             
+            # Ensure LLMDecider is available/persistent
             cfg = getattr(self, "config", None)
-            if cfg is None:
-                cfg = load_config("config.yaml")
-            
-            # Initialize LLM components
-            ensemble_llm = EnsembleLLM()
-            json_client = LLMJsonClient(ensemble_llm, logger)
-            llm_decider = LLMDecider(json_client, cfg, logger, slack_notifier=self.slack)
+            llm_decider = getattr(self, "llm_decider", None)
+            if llm_decider is None:
+                try:
+                    from utils.llm import load_config as _load_cfg
+                    from utils.llm_decider import LLMDecider as _LLMDecider
+                    from utils.llm_json_client import LLMJsonClient as _LLMJsonClient
+                    from utils.ensemble_llm import EnsembleLLM as _Ensemble
+                    cfg = cfg or _load_cfg("config.yaml")
+                    ensemble_llm = _Ensemble()
+                    json_client = _LLMJsonClient(ensemble_llm, logger)
+                    llm_decider = _LLMDecider(json_client, cfg, logger, slack_notifier=self.slack)
+                    self.llm_decider = llm_decider
+                except Exception as _init_e:
+                    logger.error(f"[EXIT-LLM] Failed to initialize LLMDecider: {_init_e}")
+                    raise
             
             # Build context for LLM decision
             symbol = position.get("symbol", "UNKNOWN")
@@ -799,6 +922,51 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 },
                 "memory": []  # Could be enhanced with trade history
             }
+
+            # Include trailing stop configuration for rails-first logic
+            try:
+                ctx["trail_pct"] = float(self.exit_manager.config.trailing_stop_distance_pct)
+                ctx["trail_activation_pct"] = float(self.exit_manager.config.trailing_stop_activation_pct)
+            except Exception:
+                pass
+
+            # ===== Augment LLM context with telemetry (Task 1) =====
+            try:
+                # Use exit manager tracking to fetch peak/trailing info
+                pos_key = self.exit_manager._get_position_key(position)
+                status = self.exit_manager.get_position_status(pos_key)
+                peak_data = status.get("peak_data", {}) or {}
+                trailing_level = status.get("trailing_stop")
+
+                peak_pnl_pct = float(peak_data.get("peak_pnl_pct")) if peak_data.get("peak_pnl_pct") is not None else pnl_pct
+                drawdown_from_peak_pct = max(0.0, peak_pnl_pct - pnl_pct)
+
+                # Minutes since peak (peak_time stored as naive datetime)
+                peak_time = peak_data.get("peak_time")
+                try:
+                    minutes_since_peak = int(((datetime.now() - peak_time).total_seconds()) // 60) if peak_time else None
+                except Exception:
+                    minutes_since_peak = None
+
+                profit_erosion_pct = drawdown_from_peak_pct
+                trailing_stop_triggered = False
+                if trailing_level is not None:
+                    try:
+                        trailing_stop_triggered = pnl_pct <= float(trailing_level)
+                    except Exception:
+                        trailing_stop_triggered = False
+
+                repeat_trailing_hits = int(self.trailing_hits_count.get(pos_key, 0))
+
+                # Attach to context at top-level keys per acceptance criteria
+                ctx["peak_pnl_pct"] = peak_pnl_pct
+                ctx["drawdown_from_peak_pct"] = drawdown_from_peak_pct
+                ctx["trailing_stop_triggered"] = trailing_stop_triggered
+                ctx["repeat_trailing_hits"] = repeat_trailing_hits
+                ctx["minutes_since_peak"] = minutes_since_peak
+                ctx["profit_erosion_pct"] = profit_erosion_pct
+            except Exception as _ctx_e:
+                logger.debug(f"[EXIT-LLM] Telemetry augmentation failed: {_ctx_e}")
             
             # Get LLM decision
             decision = llm_decider.decide_exit(symbol, ctx)
@@ -811,14 +979,120 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
             logger.info(audit_msg)
             
             # Send Slack notification
+            # Objective flags & drawdown telemetry
+            try:
+                objective_flags = []
+                if ctx.get("trailing_stop_triggered"):
+                    objective_flags.append("TRAILING_STOP")
+                warn_min = getattr(self.exit_manager.config, "warning_minutes_before_close", 15)
+                if minutes_to_close <= int(warn_min):
+                    objective_flags.append("TIME_BASED")
+                try:
+                    sl_pct = float(getattr(self.exit_manager.config, "stop_loss_pct", 25.0))
+                except Exception:
+                    sl_pct = 25.0
+                if pnl_pct <= -sl_pct:
+                    objective_flags.append("STOP_LOSS")
+                objective_str = "/".join(objective_flags) if objective_flags else "NONE"
+            except Exception:
+                objective_str = "UNKNOWN"
+
+            try:
+                peak = ctx.get("peak_pnl_pct")
+                dd = ctx.get("drawdown_from_peak_pct")
+                trail = ctx.get("trail_pct")
+                drawdown_line = f"Peak {peak:+.1f}% → Current {pnl_pct:+.1f}% (drawdown {dd:.1f}%, trail {float(trail):.1f}%)" if peak is not None and dd is not None and trail is not None else None
+            except Exception:
+                drawdown_line = None
+
             slack_msg = f"""🤖 **LLM Exit Decision: {symbol}**
 **Action:** {decision.action}
 **Confidence:** {decision.confidence:.2f}
 **Reason:** {decision.reason}
 **Current P&L:** {pnl_pct:.1f}%
 **Stock Price:** ${current_stock_price:.2f}
-**Time to Close:** {minutes_to_close} minutes"""
+**Time to Close:** {minutes_to_close} minutes
+**Objective Active:** {objective_str}
+{(drawdown_line or '')}"""
             
+            # ===== A/B shadow decision logging (Task 6) =====
+            try:
+                ab_cfg = (self.config.get("llm", {}) if self.config else {})
+                ab_enabled = bool(ab_cfg.get("ab_test", False) or os.getenv("LLM_AB_TEST") == "1")
+                if ab_enabled:
+                    shadow_version = str(ab_cfg.get("ab_shadow_version", "v1")).lower()
+                    primary_version = getattr(self.llm_decider, "exit_prompt_version", "v2")
+
+                    # Only run shadow if different from primary to avoid duplicate
+                    if shadow_version != primary_version:
+                        try:
+                            from utils.llm_decider import LLMDecider as _LLMDecider
+                            cfg_shadow = copy.deepcopy(self.config) if self.config else {"llm": {}}
+                            cfg_shadow.setdefault("llm", {})
+                            cfg_shadow["llm"]["exit_prompt_version"] = shadow_version
+                            # Reuse same JSON client to minimize overhead
+                            json_client_shadow = getattr(self.llm_decider, "client", None)
+                            shadow_decider = _LLMDecider(json_client_shadow, cfg_shadow, logger, slack_notifier=None)
+                            shadow_decision = shadow_decider.decide_exit(symbol, ctx)
+                        except Exception as _ab_e:
+                            shadow_decision = None
+                            logger.warning(f"[AB] Shadow decision failed: {_ab_e}")
+
+                        # Build compact AB record
+                        try:
+                            pos_key = self.exit_manager._get_position_key(position)
+                        except Exception:
+                            pos_key = None
+
+                        ab_record = {
+                            "ts": datetime.now().isoformat(),
+                            "symbol": symbol,
+                            "position_key": pos_key,
+                            "broker": (self.config or {}).get("BROKER") if self.config else None,
+                            "env": (self.config or {}).get("ALPACA_ENV") if self.config else None,
+                            "prompt_versions": {"primary": primary_version, "shadow": shadow_version},
+                            "ctx": {
+                                "pnl_pct": pnl_pct,
+                                "time_to_close_min": minutes_to_close,
+                                "trailing_stop_triggered": bool(ctx.get("trailing_stop_triggered", False)),
+                                "drawdown_from_peak_pct": ctx.get("drawdown_from_peak_pct"),
+                                "peak_pnl_pct": ctx.get("peak_pnl_pct"),
+                                "trail_pct": ctx.get("trail_pct"),
+                                "repeat_trailing_hits": ctx.get("repeat_trailing_hits"),
+                                "minutes_since_peak": ctx.get("minutes_since_peak"),
+                            },
+                            "decisions": {
+                                "primary": {
+                                    "action": decision.action,
+                                    "confidence": decision.confidence,
+                                    "defer_minutes": decision.defer_minutes,
+                                    "reason": decision.reason,
+                                },
+                                "shadow": (
+                                    {
+                                        "action": shadow_decision.action,
+                                        "confidence": shadow_decision.confidence,
+                                        "defer_minutes": shadow_decision.defer_minutes,
+                                        "reason": shadow_decision.reason,
+                                    }
+                                    if shadow_decision is not None
+                                    else None
+                                ),
+                            },
+                            "rails": {"objective_active": objective_str},
+                            "executed_action": decision.action,
+                        }
+
+                        ab_log_file = ab_cfg.get("ab_log_file", "logs/llm_ab_shadow.jsonl")
+                        try:
+                            os.makedirs(os.path.dirname(ab_log_file), exist_ok=True)
+                            with open(ab_log_file, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(ab_record, ensure_ascii=False) + "\n")
+                        except Exception as _log_e:
+                            logger.warning(f"[AB] Failed to write AB log: {_log_e}")
+            except Exception as _ab_wrap_e:
+                logger.debug(f"[AB] Shadow logging skipped: {_ab_wrap_e}")
+
             self.slack.send_message(slack_msg)
             
             # Execute the decision
@@ -831,8 +1105,9 @@ Time: {datetime.now().strftime('%H:%M:%S ET')}
                 try:
                     from utils.alpaca_options import create_alpaca_trader
                     # Determine paper/live from config/environment
-                    broker_cfg = cfg.get("BROKER", os.getenv("BROKER", "robinhood"))
-                    env_cfg = cfg.get("ALPACA_ENV", os.getenv("ALPACA_ENV", "paper" if broker_cfg == "alpaca" else "live"))
+                    cfg2 = getattr(self, "config", {}) or {}
+                    broker_cfg = cfg2.get("BROKER", os.getenv("BROKER", "robinhood"))
+                    env_cfg = cfg2.get("ALPACA_ENV", os.getenv("ALPACA_ENV", "paper" if broker_cfg == "alpaca" else "live"))
                     paper_mode = broker_cfg == "alpaca" and env_cfg == "paper"
                     trader = create_alpaca_trader(paper=paper_mode)
                     if trader is None:
@@ -1102,7 +1377,7 @@ Stock Price: ${current_price:.2f}
 
 P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)
 
-Data Source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}
+Data Source: Alpaca (Real-time)
 Time: {datetime.now().strftime('%H:%M:%S ET')}
 
 Consider taking profits!
@@ -1147,7 +1422,7 @@ Stock Price: ${current_price:.2f}
 
 P&L: ${pnl:+.2f} ({pnl_pct:+.1f}%)
 
-Data Source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}
+Data Source: Alpaca (Real-time)
 Time: {datetime.now().strftime('%H:%M:%S ET')}
 
 CONSIDER CLOSING POSITION!
@@ -1191,6 +1466,175 @@ Avoid overnight risk!
                 logger.info("[ALERT] End-of-day warning sent")
                 print(message)
 
+    def _send_eod_summary_if_due(self) -> None:
+        """Send a single end-of-day LLM summary once per day after end_of_day_time."""
+        try:
+            now = datetime.now()
+            end_time = datetime.strptime(self.end_of_day_time, "%H:%M").replace(
+                year=now.year, month=now.month, day=now.day
+            )
+
+            # Only send once per calendar day and only after end time
+            if self.eod_summary_sent_date == now.date():
+                return
+            if now < end_time:
+                return
+
+            stats_line = ""
+            try:
+                if getattr(self, "llm_decider", None) is not None:
+                    stats = self.llm_decider.get_session_statistics()
+                    total = stats.get("exit_decisions_total")
+                    avg_conf = stats.get("avg_exit_confidence")
+                    avg_defer = stats.get("avg_exit_defer_minutes")
+                    avg_trail_hits = stats.get("avg_trailing_hits_before_sell")
+                    stats_line = (
+                        f"Total decisions: {total} | Avg confidence: {avg_conf:.2f} | "
+                        f"Avg defer: {avg_defer:.1f} min | Avg trail-hits before SELL: {avg_trail_hits:.2f}"
+                        if (total is not None and avg_conf is not None and avg_defer is not None and avg_trail_hits is not None)
+                        else f"Total decisions: {total} | Avg confidence: {avg_conf} | Avg defer: {avg_defer} | Avg trail-hits: {avg_trail_hits}"
+                    )
+                else:
+                    stats_line = "LLM statistics unavailable (LLMDecider not initialized)"
+            except Exception as _e:
+                stats_line = f"LLM statistics unavailable ({_e})"
+
+            msg = f"📊 **EOD LLM Exit Summary**\n{stats_line}"
+            if self.slack.enabled:
+                self.slack.send_message(msg)
+            logger.info(f"[EOD] {stats_line}")
+
+            self.eod_summary_sent_date = now.date()
+        except Exception as _eod_e:
+            logger.warning(f"[EOD] Failed to send EOD summary: {_eod_e}")
+
+    def _maybe_auto_sync_positions(self, force: bool = False) -> None:
+        """Periodically sync positions from Alpaca to keep CSV in lockstep with broker."""
+        try:
+            if not self.auto_sync_enabled and not force:
+                return
+            now = time.time()
+            last = getattr(self, "_last_positions_sync", 0.0) or 0.0
+            interval = float(getattr(self, "auto_sync_interval_seconds", 60))
+            if not force and (now - last) < interval:
+                return
+
+            cfg = getattr(self, "config", None) or {}
+            broker = cfg.get("BROKER", os.getenv("BROKER", "alpaca"))
+            env = cfg.get("ALPACA_ENV", os.getenv("ALPACA_ENV", "paper" if broker == "alpaca" else "live"))
+            if broker != "alpaca":
+                # Only auto-sync when broker is Alpaca
+                self._last_positions_sync = now
+                return
+
+            try:
+                sync = AlpacaSync(env=env)
+                ok = sync.sync_positions()
+                if ok:
+                    logger.debug(f"[MONITOR] Auto-synced positions from Alpaca ({env})")
+                else:
+                    logger.warning(f"[MONITOR] Auto-sync positions failed ({env})")
+            except Exception as _sync_e:
+                logger.warning(f"[MONITOR] Auto-sync positions encountered an error: {_sync_e}")
+            finally:
+                self._last_positions_sync = now
+        except Exception as e:
+            logger.debug(f"[MONITOR] Auto-sync guard failed: {e}")
+
+    def _build_occ_symbol(self, position: Dict) -> Optional[str]:
+        """Build OCC contract symbol (e.g., XLK250919C00272500) from a normalized position."""
+        try:
+            # Prefer already-parsed OCC symbol when available
+            occ = position.get("occ_symbol")
+            if occ:
+                return occ
+
+            from datetime import datetime as _dt
+            underlying = position.get("symbol")
+            expiry = position.get("expiry")
+            strike = float(position.get("strike"))
+            cp = (position.get("option_type", "C") or "C")[0].upper()
+
+            expiry_dt = _dt.strptime(expiry, "%Y-%m-%d")
+            expiry_str = expiry_dt.strftime("%y%m%d")
+            strike_str = f"{int(strike * 1000):08d}"
+            return f"{underlying}{expiry_str}{cp}{strike_str}"
+        except Exception as _e:
+            logger.debug(f"[MONITOR] Failed to build OCC symbol from position: {_e}")
+            return None
+
+    def _ensure_option_quote_client(self):
+        """Lazily initialize Alpaca OptionHistoricalDataClient for quote retrieval."""
+        if self._option_quote_client is not None:
+            return self._option_quote_client
+        try:
+            # Import lazily to avoid heavy deps at startup
+            from alpaca.data.historical import OptionHistoricalDataClient
+            api_key = os.getenv("ALPACA_KEY_ID") or os.getenv("ALPACA_API_KEY")
+            secret_key = os.getenv("ALPACA_SECRET_KEY")
+            if not api_key or not secret_key:
+                logger.warning("[MONITOR] Alpaca option quote client unavailable (missing credentials)")
+                return None
+            self._option_quote_client = OptionHistoricalDataClient(api_key, secret_key)
+            return self._option_quote_client
+        except Exception as _e:
+            logger.warning(f"[MONITOR] Failed to initialize option quote client: {_e}")
+            return None
+
+    def _get_option_mid_price(self, position: Dict) -> Optional[float]:
+        """Fetch real-time option mid price for the specific contract.
+
+        Uses Alpaca OptionLatestQuoteRequest. If bid is missing, falls back to a conservative
+        estimate using 95% of ask to avoid extreme underestimation that could falsely trigger exits.
+        """
+        try:
+            occ_symbol = self._build_occ_symbol(position)
+            if not occ_symbol:
+                return None
+
+            client = self._ensure_option_quote_client()
+            if client is None:
+                return None
+
+            from alpaca.data.requests import OptionLatestQuoteRequest
+            request = OptionLatestQuoteRequest(symbol_or_symbols=occ_symbol)
+            quotes = client.get_option_latest_quote(request)
+            if occ_symbol not in quotes:
+                return None
+
+            q = quotes[occ_symbol]
+            # Robust attribute access across SDK versions
+            bid = getattr(q, "bid_price", None) or getattr(q, "bid", None)
+            ask = getattr(q, "ask_price", None) or getattr(q, "ask", None)
+
+            if ask is not None and bid is not None and ask > 0 and bid > 0:
+                logger.debug(f"[MONITOR] Quote mid for {occ_symbol}: bid={bid}, ask={ask}")
+                return float((float(bid) + float(ask)) / 2.0)
+            if ask is not None and float(ask) > 0:
+                # Avoid underestimating with ask/2; use 95% of ask as a conservative mid proxy
+                logger.debug(f"[MONITOR] Quote ask-only for {occ_symbol}: ask={ask} → using 0.95×ask")
+                return float(ask) * 0.95
+            if bid is not None and float(bid) > 0:
+                logger.debug(f"[MONITOR] Quote bid-only for {occ_symbol}: bid={bid}")
+                return float(bid)
+            return None
+        except Exception as _e:
+            logger.debug(f"[MONITOR] Option mid price fetch failed: {_e}")
+            return None
+
+    def _seconds_since_entry(self, position: Dict) -> float:
+        """Compute seconds since entry_time for stability gating. Returns 0.0 on parse error."""
+        try:
+            ts = str(position.get("entry_time") or position.get("timestamp") or "").strip()
+            if not ts:
+                return 0.0
+            # Allow trailing 'Z'
+            dt = datetime.fromisoformat(ts.replace('Z', ''))
+            delta = datetime.now() - dt
+            return max(0.0, delta.total_seconds())
+        except Exception:
+            return 0.0
+
     def run_monitoring_cycle(self) -> None:
         """Run one complete monitoring cycle for all positions."""
         # Check for file-based circuit breaker reset at start of each cycle
@@ -1202,6 +1646,9 @@ Avoid overnight risk!
                     self.slack.basic_notifier.send_message(f"🔄 **MONITOR UPDATE**: {reset_message}")
         except Exception as e:
             logger.error(f"[MONITOR] Error checking circuit breaker reset: {e}")
+
+        # Periodically reconcile local CSV with Alpaca before reading positions
+        self._maybe_auto_sync_positions()
 
         positions = self.load_positions()
         
@@ -1237,29 +1684,33 @@ Avoid overnight risk!
                     logger.error(f"[MONITOR] Could not get price for {symbol}")
                     continue
 
-                # Estimate current option price
-                estimated_option_price = self.estimate_option_price(
-                    symbol, strike, option_type, expiry, current_price
-                )
+                # Get current option price from real-time quotes; fallback to estimator
+                price_source = "quote"
+                current_option_price = self._get_option_mid_price(position)
+                if current_option_price is None:
+                    current_option_price = self.estimate_option_price(
+                        symbol, strike, option_type, expiry, current_price
+                    )
+                    price_source = "estimator"
 
-                if not estimated_option_price:
+                if not current_option_price:
                     logger.error(
-                        f"[MONITOR] Could not estimate option price for {symbol}"
+                        f"[MONITOR] Could not determine option price for {symbol}"
                     )
                     continue
 
                 # Check for alerts
                 self.check_position_alerts(
-                    position, current_price, estimated_option_price
+                    position, current_price, current_option_price
                 )
 
                 # Log current status
                 entry_price = position["entry_price"]
-                pnl_pct = ((estimated_option_price - entry_price) / entry_price) * 100
+                pnl_pct = ((current_option_price - entry_price) / entry_price) * 100
 
                 logger.info(
                     f"[MONITOR] {symbol} ${strike} {option_type}: "
-                    f"${estimated_option_price:.2f} ({pnl_pct:+.1f}%)"
+                    f"${current_option_price:.2f} ({pnl_pct:+.1f}%) via {price_source}"
                 )
 
             except Exception as e:
@@ -1267,6 +1718,8 @@ Avoid overnight risk!
 
         # Check end-of-day warning
         self.check_end_of_day_warning()
+        # Send EOD summary if due
+        self._send_eod_summary_if_due()
 
     def run(self, interval_minutes: int = 1) -> None:
         """
@@ -1279,10 +1732,13 @@ Avoid overnight risk!
             f"[MONITOR] Starting enhanced monitoring (interval: {interval_minutes}min)"
         )
         logger.info(
-            f"[MONITOR] Data source: {'Alpaca (Real-time)' if self.alpaca.enabled else 'Yahoo (Delayed)'}"
+            f"[MONITOR] Data source: Alpaca (Real-time)"
         )
 
         try:
+            # Initial auto-sync at startup to reconcile state
+            self._maybe_auto_sync_positions(force=True)
+
             while True:
                 self.run_monitoring_cycle()
 
@@ -1312,13 +1768,20 @@ def main():
     parser.add_argument(
         "--slack-notify", action="store_true", help="Enable Slack notifications"
     )
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        help="Path to config YAML (default: config.yaml or ENV CONFIG_PATH)",
+    )
 
     args = parser.parse_args()
 
     print("=== ENHANCED POSITION MONITORING WITH ALPACA ===")
     print()
 
-    monitor = EnhancedPositionMonitor()
+    cfg_path = args.config or os.getenv("CONFIG_PATH")
+    monitor = EnhancedPositionMonitor(config_path=cfg_path)
 
     # Show data source status
     if monitor.alpaca.enabled:
@@ -1327,7 +1790,7 @@ def main():
         if account_info:
             print(f"[OK] Paper trading account: {account_info['account_number']}")
     else:
-        print("[INFO] Using Yahoo Finance (delayed data)")
+        print("[WARN] Alpaca not configured. Set ALPACA_API_KEY/ALPACA_SECRET_KEY to enable real-time data.")
 
     print(f"[OK] Slack alerts: {'Enabled' if monitor.slack.enabled else 'Disabled'}")
     print(f"[OK] Monitoring interval: {args.interval} seconds")

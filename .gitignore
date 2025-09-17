@@ -1,4 +1,7 @@
-# Environment variables and secrets
+# Caches and reports
+.cache/
+stress_test_data/
+# Environment variables and secretspositions.csv
 .env
 *.env
 .env.local
@@ -42,19 +45,28 @@ env/
 *~
 
 # Logs
+logs/
 logs/*.log
 logs/*.csv
+logs/*.jsonl
 *.log
 
 # Bankroll and trading data
 bankroll*.json
+trade_log.csv
 trade_log*.csv
+logs/trade_history_*.csv
 positions_*.csv
+positions_alpaca_*.csv
+positions_robinhood_*.csv
 
 # Screenshots
 *.png
 *.jpg
 *.jpeg
+
+# Environment files
+.env.*
 
 # Temporarily allow positions.csv access for fixes
 positions.csv

@@ -178,6 +178,98 @@ class AlpacaSync:
         logger.info(f"[ALPACA-SYNC] Full sync completed: {results}")
         return results
     
+    # --- Helper utilities for robust option matching ---
+    def _parse_occ_symbol(self, occ: str) -> Optional[Dict]:
+        """Parse an OCC option symbol (e.g., 'XLE250919C00089000') into components.
+        Returns dict with keys: underlying, expiry (YYYY-MM-DD), option_type (CALL/PUT), strike (float).
+        """
+        try:
+            if not occ or len(occ) < 10:
+                return None
+            # Underlying prefix until first digit
+            i = 0
+            while i < len(occ) and not occ[i].isdigit():
+                i += 1
+            underlying = occ[:i]
+            rest = occ[i:]
+            # YYMMDD
+            y = int('20' + rest[0:2])
+            m = int(rest[2:4])
+            d = int(rest[4:6])
+            expiry = f"{y:04d}-{m:02d}-{d:02d}"
+            cp = rest[6].upper()
+            option_type = 'CALL' if cp == 'C' else 'PUT'
+            strike_pennies = rest[7:]
+            strike = float(int(strike_pennies) / 1000.0)
+            return {
+                'underlying': underlying,
+                'expiry': expiry,
+                'option_type': option_type,
+                'strike': strike,
+            }
+        except Exception:
+            return None
+
+    def _safe_float(self, v: Optional[object]) -> Optional[float]:
+        try:
+            if v in (None, ""):
+                return None
+            return float(v)
+        except Exception:
+            return None
+
+    def _is_nonempty(self, v: Optional[object]) -> bool:
+        """Return True when v is meaningfully filled (not None/empty/NaN-like)."""
+        try:
+            if v is None:
+                return False
+            s = str(v).strip()
+            if s == "":
+                return False
+            if s.lower() in ("nan", "none", "null", "nat", "na", "n/a"):
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _local_matches_alpaca(self, local_pos: Dict, alpaca_symbol: str) -> bool:
+        """Determine if a local position row represents the given Alpaca OCC symbol."""
+        try:
+            parsed = self._parse_occ_symbol(alpaca_symbol)
+            sym = str(local_pos.get("symbol", "")).strip()
+            if sym == alpaca_symbol:
+                return True
+
+            if not parsed:
+                return False
+
+            # If local symbol is itself OCC, parse it; else treat as underlying
+            local_underlying = sym
+            local_strike = self._safe_float(local_pos.get("strike"))
+            local_expiry = str(local_pos.get("expiry", "")).strip()
+            local_type = str(local_pos.get("option_type", "")).upper().strip()
+
+            if len(sym) > 8 and any(c.isdigit() for c in sym):
+                parsed_local = self._parse_occ_symbol(sym)
+                if parsed_local:
+                    local_underlying = parsed_local['underlying']
+                    local_strike = parsed_local['strike']
+                    local_expiry = parsed_local['expiry']
+                    local_type = parsed_local['option_type']
+
+            # Compare components (allow matching when local fields are missing)
+            if local_underlying != parsed['underlying']:
+                return False
+            if local_strike is not None and abs(local_strike - parsed['strike']) > 1e-6:
+                return False
+            if local_expiry and local_expiry != parsed['expiry']:
+                return False
+            if local_type and local_type[0] != parsed['option_type'][0]:
+                return False
+            return True
+        except Exception:
+            return False
+
     def sync_bankroll(self) -> bool:
         """
         Synchronize bankroll with Alpaca account balance.
@@ -303,42 +395,79 @@ class AlpacaSync:
                     or getattr(alpaca_pos, 'unrealized_intraday_pl', None)
                 )
                 unrealized_pnl = float(_upl) if _upl is not None else 0.0
-                
-                # Check if position exists locally
-                local_pos = next((p for p in local_positions if p.get("symbol") == symbol), None)
-                
-                if not local_pos:
+
+                # Try to find a matching local row (prefer open rows; fall back to closed rows to reopen)
+                local_pos_open = None
+                local_pos_closed = None
+                for p in local_positions:
+                    if self._local_matches_alpaca(p, symbol):
+                        status_str = str(p.get("status", "")).strip().lower()
+                        close_time_val = p.get("close_time", "")
+                        is_closed = status_str.startswith("closed") or self._is_nonempty(close_time_val)
+                        if is_closed:
+                            if local_pos_closed is None:
+                                local_pos_closed = p
+                        else:
+                            local_pos_open = p
+                            break
+
+                if local_pos_open is None and local_pos_closed is None:
                     # New position detected (manual trade)
                     logger.warning(f"[ALPACA-SYNC] Detected manual position: {symbol} (qty: {quantity})")
                     sync_needed = True
-                    
-                    new_positions.append({
+
+                    # Derive components to help downstream monitoring
+                    parsed = self._parse_occ_symbol(symbol)
+                    new_rec = {
                         "symbol": symbol,
                         "quantity": quantity,
                         "market_value": market_value,
                         "unrealized_pnl": unrealized_pnl,
                         "entry_time": datetime.now().isoformat(),
                         "source": "manual_trade_detected",
-                        "sync_detected": True
-                    })
-                
-                elif abs(float(local_pos.get("quantity", 0)) - quantity) > 0.01:
-                    # Quantity mismatch
-                    logger.warning(f"[ALPACA-SYNC] Position quantity mismatch for {symbol}: Local={local_pos.get('quantity')}, Alpaca={quantity}")
-                    sync_needed = True
-                    
-                    # Update local position
-                    local_pos["quantity"] = quantity
-                    local_pos["market_value"] = market_value
-                    local_pos["unrealized_pnl"] = unrealized_pnl
-                    local_pos["last_sync"] = datetime.now().isoformat()
-                    local_pos["sync_adjusted"] = True
+                        "sync_detected": True,
+                    }
+                    if parsed:
+                        new_rec.update({
+                            "underlying": parsed["underlying"],
+                            "strike": parsed["strike"],
+                            "expiry": parsed["expiry"],
+                            "option_type": parsed["option_type"],
+                            "occ_symbol": symbol,
+                        })
+                    new_positions.append(new_rec)
+
+                else:
+                    # Update existing local position (re-open if it was previously marked closed)
+                    target = local_pos_open or local_pos_closed
+                    was_closed = (local_pos_open is None)
+                    if was_closed:
+                        logger.info(f"[ALPACA-SYNC] Reopening position from closed state: {symbol}")
+                        target["status"] = ""
+                        target["close_time"] = ""
+                        target["reopened_by_sync"] = True
+                    # Update core fields
+                    if abs(float(target.get("quantity", 0)) - quantity) > 0.01 or was_closed:
+                        logger.warning(f"[ALPACA-SYNC] Position update for {symbol}: LocalQty={target.get('quantity')}, AlpacaQty={quantity}")
+                        sync_needed = True
+                    target["quantity"] = quantity
+                    target["market_value"] = market_value
+                    target["unrealized_pnl"] = unrealized_pnl
+                    target["last_sync"] = datetime.now().isoformat()
+                    target["occ_symbol"] = symbol
+                    target["sync_adjusted"] = True
             
-            # Check for positions that exist locally but not in Alpaca (closed outside local ledger)
-            alpaca_symbols = {pos.symbol for pos in options_positions}
+            # Close local positions that are OPEN but have no matching Alpaca position
+            alpaca_symbols = [pos.symbol for pos in options_positions]
             for local_pos in local_positions:
-                if local_pos.get("symbol") not in alpaca_symbols:
-                    logger.warning(f"[ALPACA-SYNC] Position closed (detected via Alpaca): {local_pos.get('symbol')}")
+                status_str = str(local_pos.get("status", "")).strip().lower()
+                close_time_val = local_pos.get("close_time", "")
+                is_closed = status_str.startswith("closed") or self._is_nonempty(close_time_val)
+                if is_closed:
+                    continue  # already closed
+                # If this local row doesn't match any current Alpaca position, mark closed
+                if not any(self._local_matches_alpaca(local_pos, s) for s in alpaca_symbols):
+                    logger.warning(f"[ALPACA-SYNC] Position closed (detected via Alpaca): {local_pos.get('symbol')} {local_pos.get('strike')} {local_pos.get('option_type')} {local_pos.get('expiry')}")
                     sync_needed = True
                     local_pos["status"] = "closed_sync"
                     local_pos["close_time"] = datetime.now().isoformat()
@@ -485,7 +614,7 @@ class AlpacaSync:
             df = pd.DataFrame(positions)
             # Enforce canonical column order for compatibility with monitor/loader
             CANONICAL_COLUMNS = [
-                'symbol','strike','option_type','expiry','quantity','contracts','entry_price',
+                'symbol','occ_symbol','strike','option_type','expiry','quantity','contracts','entry_price',
                 'current_price','pnl_pct','pnl_amount','timestamp','status','close_time',
                 'market_value','unrealized_pnl','entry_time','source','sync_detected'
             ]
@@ -548,7 +677,7 @@ class AlpacaSync:
                     df.loc[idx, 'status'] = df.loc[idx, 'status'].where(~df.loc[idx, 'status'].isna(), other='normalized')
                     # Optional: clear close_time if it's not meaningful
                     # df.loc[idx, 'close_time'] = None
-            # Ensure all canonical columns exist
+            # Ensure all canonical columns exist (incl. new occ_symbol column)
             for col in CANONICAL_COLUMNS:
                 if col not in df.columns:
                     df[col] = None
