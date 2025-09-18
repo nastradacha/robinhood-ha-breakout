@@ -147,16 +147,33 @@ class PortfolioManager:
 
     def __init__(self, positions_file: str = "positions.csv"):
         self.positions_file = Path(positions_file)
-        self.fieldnames = [
-            "entry_time",
-            "symbol",
-            "expiry",
-            "strike",
-            "side",
-            "contracts",
-            "entry_premium",
-        ]
+        # Detect Alpaca-scoped positions files and switch to canonical schema
+        self.is_alpaca_scoped = "positions_alpaca" in self.positions_file.name
+        if self.is_alpaca_scoped:
+            # Canonical Alpaca schema used by monitor_alpaca and AlpacaSync (must include occ_symbol)
+            self.fieldnames = [
+                'symbol','occ_symbol','strike','option_type','expiry','quantity','contracts','entry_price',
+                'current_price','pnl_pct','pnl_amount','timestamp','status','close_time',
+                'market_value','unrealized_pnl','entry_time','source','sync_detected'
+            ]
+        else:
+            # Legacy portfolio schema
+            self.fieldnames = [
+                "entry_time",
+                "symbol",
+                "expiry",
+                "strike",
+                "side",
+                "contracts",
+                "entry_premium",
+            ]
         self._ensure_positions_file()
+        # Normalize existing Alpaca-scoped files to canonical schema to prevent column misalignment
+        if self.is_alpaca_scoped:
+            try:
+                self._normalize_alpaca_positions_file()
+            except Exception as e:
+                logger.debug(f"[PORTFOLIO] Schema normalization skipped: {e}")
 
     def _ensure_positions_file(self):
         """Create positions file with headers if it doesn't exist."""
@@ -165,6 +182,120 @@ class PortfolioManager:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
                 writer.writeheader()
             logger.info(f"Created new positions file: {self.positions_file}")
+
+    def _position_to_row(self, position: "Position") -> Dict:
+        """Map Position object to the correct row schema for the target file."""
+        if not self.is_alpaca_scoped:
+            return position.to_dict()
+        # Alpaca canonical schema mapping
+        return {
+            'symbol': position.symbol,
+            'occ_symbol': '',  # let sync/monitor infer OCC if needed
+            'strike': position.strike,
+            'option_type': position.side,  # CALL/PUT
+            'expiry': position.expiry,
+            'quantity': position.contracts,
+            'contracts': position.contracts,
+            'entry_price': position.entry_premium,
+            'current_price': None,
+            'pnl_pct': None,
+            'pnl_amount': None,
+            'timestamp': position.entry_time,
+            'status': 'open',
+            'close_time': None,
+            'market_value': None,
+            'unrealized_pnl': None,
+            'entry_time': position.entry_time,
+            'source': 'interactive_entry',
+            'sync_detected': False,
+        }
+
+    def _normalize_alpaca_positions_file(self) -> None:
+        """Normalize Alpaca-scoped positions CSV to canonical schema with occ_symbol and fix misaligned rows.
+
+        Rules:
+        - Ensure header includes occ_symbol and columns are ordered per self.fieldnames
+        - Detect rows where 'strike' mistakenly contains CALL/PUT (shifted right due to missing occ_symbol when written)
+          and correct by moving fields back to their proper columns
+        - If close_time contains a non-ISO token like 'closed_sync' and market_value looks like ISO timestamp,
+          swap them so status/close_time are consistent
+        """
+        path = self.positions_file
+        if not path.exists():
+            return
+        import re
+        def is_iso_like(s: str) -> bool:
+            try:
+                if not s:
+                    return False
+                from datetime import datetime as _dt
+                _ = _dt.fromisoformat(str(s).replace('Z',''))
+                return True
+            except Exception:
+                return False
+
+        # Read all rows with a flexible reader
+        with open(path, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            existing_header = reader.fieldnames or []
+
+        # If the file uses an older header (no occ_symbol), add it
+        header = list(existing_header)
+        if 'occ_symbol' not in header:
+            # Attempt to insert after 'symbol'
+            if 'symbol' in header:
+                idx = header.index('symbol') + 1
+                header.insert(idx, 'occ_symbol')
+            else:
+                header.insert(1, 'occ_symbol')
+            # Add empty occ_symbol to each row
+            for r in rows:
+                if 'occ_symbol' not in r:
+                    r['occ_symbol'] = ''
+
+        # Normalize each row to canonical keys
+        normalized = []
+        for r in rows:
+            # Start with blank canonical row, copy shared keys
+            nr = {k: r.get(k, '') for k in self.fieldnames}
+
+            # Detect classic one-column shift (strike holds CALL/PUT)
+            strike_val = str(r.get('strike', '')).strip().upper()
+            occ_val = str(r.get('occ_symbol', '')).strip()
+            opt_type = str(r.get('option_type', '')).strip().upper()
+            expiry_val = str(r.get('expiry', '')).strip()
+            if strike_val in ('CALL','PUT') and re.match(r'^\d{4}-\d{2}-\d{2}', str(r.get('option_type','')) or ''):
+                # Shift back: side <- strike, strike <- occ_symbol (if numeric), expiry <- option_type
+                nr['option_type'] = strike_val
+                try:
+                    nr['strike'] = float(occ_val) if occ_val not in ('', None) else nr.get('strike','')
+                except Exception:
+                    nr['strike'] = nr.get('strike','')
+                nr['expiry'] = r.get('option_type','')
+                # occ_symbol becomes unknown here; set blank so monitor/sync can infer
+                nr['occ_symbol'] = ''
+
+            # Fix close_time/status spillover where close_time has a non-ISO token
+            ct = str(nr.get('close_time','')).strip()
+            mv = str(nr.get('market_value','')).strip()
+            st = str(nr.get('status','')).strip()
+            if ct and not is_iso_like(ct) and is_iso_like(mv):
+                # Move ISO from market_value to close_time; leave status as-is if meaningful, otherwise set to ct
+                if not st or st.lower() in ('open',''):
+                    nr['status'] = ct  # e.g., closed_sync
+                nr['close_time'] = mv
+                nr['market_value'] = ''
+
+            normalized.append(nr)
+
+        # Rewrite file with canonical header and normalized rows
+        with open(path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=self.fieldnames)
+            writer.writeheader()
+            for nr in normalized:
+                writer.writerow(nr)
+        logger.info(f"[PORTFOLIO] Normalized positions file to canonical schema: {path}")
 
     def load_positions(self) -> List[Position]:
         """
@@ -179,14 +310,87 @@ class PortfolioManager:
             with open(self.positions_file, "r", newline="") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # Check if row has required columns and is not empty
-                    if row.get("entry_time") and any(row.values()):
-                        try:
-                            positions.append(Position.from_dict(row))
-                        except KeyError as ke:
-                            logger.warning(f"Skipping position row missing column {ke}: {row}")
-                        except Exception as pe:
-                            logger.warning(f"Skipping malformed position row: {pe}")
+                    # Skip empty rows entirely
+                    if not row or not any((v or "").strip() for v in row.values()):
+                        continue
+
+                    try:
+                        if self.is_alpaca_scoped:
+                            # Skip rows explicitly marked as closed or with a close_time set
+                            status_str = str(row.get("status", "")).strip().lower()
+                            if status_str.startswith("closed") or str(row.get("close_time", "")).strip():
+                                continue
+
+                            # Required fields with mapping
+                            symbol = (row.get("symbol") or "").strip()
+                            expiry = (row.get("expiry") or "").strip()
+                            strike_raw = (row.get("strike") or "").strip()
+                            side = (row.get("option_type") or row.get("side") or "").strip().upper()
+                            qty_raw = (row.get("quantity") or row.get("contracts") or "1").strip()
+                            entry_price_raw = (row.get("entry_price") or row.get("entry_premium") or "").strip()
+
+                            # Validate required string fields
+                            if not symbol or not expiry or side not in ("CALL", "PUT"):
+                                logger.warning(f"Skipping incomplete position row (missing symbol/expiry/side): {row}")
+                                continue
+
+                            # Coerce numerics safely
+                            try:
+                                strike = float(strike_raw)
+                            except Exception:
+                                logger.warning(f"Skipping position row with invalid strike: {row}")
+                                continue
+
+                            try:
+                                contracts = max(1, int(round(float(qty_raw or 1))))
+                            except Exception:
+                                contracts = 1
+
+                            try:
+                                entry_premium = float(entry_price_raw) if entry_price_raw not in ("", None) else 0.01
+                            except Exception:
+                                entry_premium = 0.01
+
+                            # entry_time fallback
+                            entry_time = (row.get("entry_time") or datetime.now().isoformat())
+
+                            positions.append(
+                                Position(
+                                    entry_time=entry_time,
+                                    symbol=symbol,
+                                    expiry=expiry,
+                                    strike=strike,
+                                    side=side,
+                                    contracts=contracts,
+                                    entry_premium=entry_premium,
+                                )
+                            )
+                        else:
+                            # Legacy schema path
+                            if row.get("entry_time") and any(row.values()):
+                                positions.append(Position.from_dict(row))
+                    except KeyError as ke:
+                        logger.warning(f"Skipping position row missing column {ke}: {row}")
+                        continue
+                    except Exception as pe:
+                        logger.warning(f"Skipping malformed position row: {pe}")
+                        continue
+
+            # Deduplicate identical open rows by (symbol, side, strike, expiry)
+            try:
+                unique_map = {}
+                duplicates = 0
+                for pos in positions:
+                    key = (pos.symbol, pos.side, pos.strike, pos.expiry)
+                    if key not in unique_map:
+                        unique_map[key] = pos
+                    else:
+                        duplicates += 1
+                if duplicates:
+                    logger.warning(f"Deduplicated {duplicates} duplicate open position rows")
+                positions = list(unique_map.values())
+            except Exception as e:
+                logger.debug(f"Deduplication skipped due to error: {e}")
 
             logger.info(f"Loaded {len(positions)} open positions")
             return positions
@@ -208,7 +412,7 @@ class PortfolioManager:
         try:
             with open(self.positions_file, "a", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
-                writer.writerow(position.to_dict())
+                writer.writerow(self._position_to_row(position))
 
             logger.info(
                 f"Added position: {position.symbol} {position.side} "
@@ -257,7 +461,7 @@ class PortfolioManager:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
                 writer.writeheader()
                 for pos in remaining_positions:
-                    writer.writerow(pos.to_dict())
+                    writer.writerow(self._position_to_row(pos))
 
             logger.info(
                 f"Position removed. {len(remaining_positions)} positions remaining"

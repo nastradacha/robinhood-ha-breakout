@@ -1,7 +1,7 @@
 # Caches and reports
 .cache/
 stress_test_data/
-# Environment variables and secretspositions.csv
+# Environment variables and secrets
 .env
 *.env
 .env.local
@@ -69,7 +69,7 @@ positions_robinhood_*.csv
 .env.*
 
 # Temporarily allow positions.csv access for fixes
-positions.csv
+# positions.csv
 
 # Test coverage
 htmlcov/
@@ -89,7 +89,7 @@ chrome_profile/
 test_browser*.py
 rob_login.py
 backtest_report_*.txt
-positions.csv
+# positions.csv
 
 # Chrome/Selenium
 chromedriver
