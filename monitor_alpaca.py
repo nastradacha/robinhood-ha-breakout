@@ -24,6 +24,7 @@ import copy
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import sys
+from pathlib import Path
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,6 +38,7 @@ from utils.exit_strategies import (
     ExitReason,
 )
 from utils.exit_confirmation import ExitConfirmationWorkflow
+from utils.monitor_state import MonitorState
 from utils.circuit_breaker_reset import check_and_process_file_reset
 from dotenv import load_dotenv
 
@@ -169,6 +171,28 @@ class EnhancedPositionMonitor:
         logger.info(f"[MONITOR] Alpaca enabled: {self.alpaca.enabled}")
         logger.info(f"[MONITOR] Slack enabled: {self.slack.enabled}")
         logger.info(f"[MONITOR] Positions file: {self.positions_file}")
+
+        # --- Persistent monitor state (last alerts, stop-loss counters, trailing hits) ---
+        try:
+            cfg = getattr(self, "config", {}) or {}
+            broker_val = cfg.get("BROKER", "alpaca")
+            env_val = cfg.get("ALPACA_ENV", "paper") if broker_val == "alpaca" else "live"
+        except Exception:
+            broker_val, env_val = "alpaca", "paper"
+
+        state_dir = os.path.join("state")
+        try:
+            os.makedirs(state_dir, exist_ok=True)
+        except Exception:
+            pass
+        state_path = os.path.join(state_dir, f"monitor_state_{broker_val}_{env_val}.json")
+        self._state_store = MonitorState(state_path)
+        _loaded = self._state_store.load() or {}
+        # Restore persisted dictionaries if available
+        self.last_alerts = _loaded.get("last_alerts", {}) or self.last_alerts
+        self.trailing_hits_count = _loaded.get("trailing_hits_count", {}) or self.trailing_hits_count
+        self._stop_loss_breach_counts = _loaded.get("stop_loss_breach_counts", {}) or self._stop_loss_breach_counts
+        self.eod_summary_sent_date = _loaded.get("eod_summary_sent_date", None) or self.eod_summary_sent_date
 
     def _parse_occ_option_symbol(self, occ: str) -> Optional[Dict]:
         """Parse OCC option symbol like 'XLF250912C00053000' into components.
@@ -1720,6 +1744,11 @@ Avoid overnight risk!
         self.check_end_of_day_warning()
         # Send EOD summary if due
         self._send_eod_summary_if_due()
+        # Persist state after each cycle (best-effort)
+        try:
+            self._save_state()
+        except Exception:
+            logger.debug("[MONITOR] Skipped state save (non-fatal)")
 
     def run(self, interval_minutes: int = 1) -> None:
         """
@@ -1751,6 +1780,18 @@ Avoid overnight risk!
             logger.error(f"[MONITOR] Monitoring error: {e}")
 
 
+    def _save_state(self) -> None:
+        """Persist select monitor state to disk."""
+        try:
+            payload = {
+                "last_alerts": self.last_alerts,
+                "trailing_hits_count": self.trailing_hits_count,
+                "stop_loss_breach_counts": self._stop_loss_breach_counts,
+                "eod_summary_sent_date": self.eod_summary_sent_date,
+            }
+            self._state_store.save(payload)
+        except Exception:
+            pass
 def main():
     """Main entry point with configurable monitoring interval."""
     import argparse

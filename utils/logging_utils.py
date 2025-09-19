@@ -7,6 +7,7 @@ import os
 import logging
 import sys
 import re
+import json
 from pathlib import Path
 from typing import Dict
 
@@ -55,6 +56,27 @@ class SecureMaskingFormatter(logging.Formatter):
         return mask_secrets(original_message)
 
 
+class JsonFormatter(logging.Formatter):
+    """JSON logging formatter with basic fields and secret masking on message."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        try:
+            payload = {
+                "time": self.formatTime(record, "%Y-%m-%d %H:%M:%S,%f")[:-3],
+                "level": record.levelname,
+                "logger": record.name,
+                "message": mask_secrets(record.getMessage()),
+            }
+            # Include extras if present
+            for key in ("position_id", "symbol", "strike", "option_type", "occ_symbol"):
+                if hasattr(record, key):
+                    payload[key] = getattr(record, key)
+            return json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            # Fallback to plain text if JSON fails
+            return mask_secrets(super().format(record))
+
+
 def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log") -> None:
     """
     Setup comprehensive logging configuration for the system with secret masking.
@@ -73,10 +95,15 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log") -> No
     # Ensure log directory exists
     Path(log_file).parent.mkdir(exist_ok=True)
 
-    # Create secure formatter that masks secrets
-    secure_formatter = SecureMaskingFormatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
+    # Determine formatter type (env override)
+    json_logs = str(os.getenv("LOG_JSON", "false")).lower() in ("1", "true", "yes", "y")
+    if json_logs:
+        formatter = JsonFormatter()
+    else:
+        # Create secure formatter that masks secrets
+        formatter = SecureMaskingFormatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
 
     # Configure root logger (no-op if already configured)
     root_logger = logging.getLogger()
@@ -87,12 +114,12 @@ def setup_logging(log_level: str = "INFO", log_file: str = "logs/app.log") -> No
     
     # Add file handler with secret masking
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(secure_formatter)
+    file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
     # Add console handler with secret masking
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(secure_formatter)
+    console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
     # Fix Windows console encoding issues

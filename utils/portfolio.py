@@ -85,6 +85,10 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
+from utils.ledger.constants import (
+    POSITIONS_SCHEMA_ALPACA_V1,
+    POSITIONS_SCHEMA_VERSION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,12 +154,8 @@ class PortfolioManager:
         # Detect Alpaca-scoped positions files and switch to canonical schema
         self.is_alpaca_scoped = "positions_alpaca" in self.positions_file.name
         if self.is_alpaca_scoped:
-            # Canonical Alpaca schema used by monitor_alpaca and AlpacaSync (must include occ_symbol)
-            self.fieldnames = [
-                'symbol','occ_symbol','strike','option_type','expiry','quantity','contracts','entry_price',
-                'current_price','pnl_pct','pnl_amount','timestamp','status','close_time',
-                'market_value','unrealized_pnl','entry_time','source','sync_detected'
-            ]
+            # Canonical Alpaca schema used by monitor_alpaca and AlpacaSync (imported from ledger.constants)
+            self.fieldnames = POSITIONS_SCHEMA_ALPACA_V1
         else:
             # Legacy portfolio schema
             self.fieldnames = [
@@ -172,6 +172,7 @@ class PortfolioManager:
         if self.is_alpaca_scoped:
             try:
                 self._normalize_alpaca_positions_file()
+                logger.info(f"[PORTFOLIO] Positions schema v{POSITIONS_SCHEMA_VERSION} normalized: {self.positions_file}")
             except Exception as e:
                 logger.debug(f"[PORTFOLIO] Schema normalization skipped: {e}")
 
@@ -233,6 +234,22 @@ class PortfolioManager:
                 return True
             except Exception:
                 return False
+        def to_occ(symbol: str, expiry: str, opt_type: str, strike_val: str) -> str:
+            try:
+                sym = (symbol or '').strip().upper()
+                exp = (expiry or '').strip()
+                side = (opt_type or '').strip().upper()[:1]
+                if not sym or not exp or side not in ('C','P'):
+                    return ''
+                # Expect YYYY-MM-DD
+                if len(exp) == 10 and exp[4] == '-' and exp[7] == '-':
+                    yymmdd = exp[2:4] + exp[5:7] + exp[8:10]
+                else:
+                    return ''
+                strike_num = int(round(float(strike_val) * 1000))
+                return f"{sym}{yymmdd}{side}{strike_num:08d}"
+            except Exception:
+                return ''
 
         # Read all rows with a flexible reader
         with open(path, 'r', newline='') as f:
@@ -280,22 +297,96 @@ class PortfolioManager:
             ct = str(nr.get('close_time','')).strip()
             mv = str(nr.get('market_value','')).strip()
             st = str(nr.get('status','')).strip()
-            if ct and not is_iso_like(ct) and is_iso_like(mv):
-                # Move ISO from market_value to close_time; leave status as-is if meaningful, otherwise set to ct
-                if not st or st.lower() in ('open',''):
-                    nr['status'] = ct  # e.g., closed_sync
-                nr['close_time'] = mv
-                nr['market_value'] = ''
+            closed_tokens = {'closed', 'closed_sync', 'closed_llm', 'closed_auto', 'closed_manual'}
+            if ct and not is_iso_like(ct) and (ct.lower() in closed_tokens or is_iso_like(mv)):
+                # If row says open but close_time holds a closed-token, treat it as spillover and keep it open
+                if st.lower() == 'open':
+                    nr['close_time'] = ''
+                else:
+                    # Move ISO from market_value to close_time if available; set status if empty
+                    if not st and ct:
+                        nr['status'] = ct
+                    if is_iso_like(mv):
+                        nr['close_time'] = mv
+                        nr['market_value'] = ''
+
+            # Contracts/entry_price misplacement fix: if contracts looks like a price and entry_price is empty
+            contracts_raw = str(r.get('contracts','')).strip()
+            quantity_raw = str(r.get('quantity','')).strip()
+            entry_price_raw = str(r.get('entry_price','')).strip()
+            try:
+                if entry_price_raw in ('', None) and contracts_raw not in ('', None):
+                    c_val = float(contracts_raw)
+                    # If contracts has a non-integer decimal and quantity is valid, assume it's the entry price
+                    if abs(c_val - round(c_val)) > 1e-9:
+                        nr['entry_price'] = c_val
+                        # Restore contracts from quantity (default 1)
+                        try:
+                            q_val = int(round(float(quantity_raw or 1)))
+                        except Exception:
+                            q_val = 1
+                        nr['contracts'] = q_val
+            except Exception:
+                pass
+
+            # Fill occ_symbol when possible
+            if not nr.get('occ_symbol') and nr.get('symbol') and nr.get('expiry') and nr.get('option_type') and nr.get('strike'):
+                occ_try = to_occ(nr.get('symbol'), nr.get('expiry'), nr.get('option_type'), nr.get('strike'))
+                if occ_try:
+                    nr['occ_symbol'] = occ_try
 
             normalized.append(nr)
 
         # Rewrite file with canonical header and normalized rows
+        # De-duplicate open rows per occ_symbol (or composite key) keeping the latest by entry_time/timestamp
+        def key_for(row: dict) -> str:
+            occ = (row.get('occ_symbol') or '').strip()
+            if occ:
+                return f"occ:{occ}"
+            return f"cmp:{row.get('symbol')}|{row.get('expiry')}|{row.get('option_type')}|{row.get('strike')}"
+
+        # Index rows by key
+        grouped = {}
+        for nr in normalized:
+            k = key_for(nr)
+            grouped.setdefault(k, []).append(nr)
+
+        deduped = []
+        now_iso = datetime.now().isoformat()
+        for k, rows_k in grouped.items():
+            # Partition by open/closed
+            open_rows = [r for r in rows_k if str(r.get('status','open')).strip().lower() == 'open' and not str(r.get('close_time','')).strip()]
+            closed_rows = [r for r in rows_k if r not in open_rows]
+
+            # If multiple open rows exist, keep the latest by entry_time/timestamp
+            if len(open_rows) > 1:
+                def latest_ts(r: dict) -> str:
+                    return str(r.get('entry_time') or r.get('timestamp') or '')
+                open_rows.sort(key=latest_ts)
+                keep = open_rows[-1]
+                deduped.append(keep)
+                # Mark older ones as closed_sync; use ISO from market_value if present
+                for r in open_rows[:-1]:
+                    ct_mv = str(r.get('market_value','')).strip()
+                    r['status'] = 'closed_sync'
+                    r['close_time'] = ct_mv if is_iso_like(ct_mv) else now_iso
+                    # Clear market_value if it held the ISO timestamp
+                    if is_iso_like(ct_mv):
+                        r['market_value'] = ''
+                    closed_rows.append(r)
+            elif len(open_rows) == 1:
+                deduped.append(open_rows[0])
+
+            # Append existing closed rows
+            deduped.extend(closed_rows)
+
+        # Write back
         with open(path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             writer.writeheader()
-            for nr in normalized:
+            for nr in deduped:
                 writer.writerow(nr)
-        logger.info(f"[PORTFOLIO] Normalized positions file to canonical schema: {path}")
+        logger.info(f"[PORTFOLIO] Normalized & de-duplicated positions file: {path}")
 
     def load_positions(self) -> List[Position]:
         """
